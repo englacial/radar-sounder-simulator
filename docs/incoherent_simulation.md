@@ -1,6 +1,6 @@
 # Incoherent surface clutter simulation
 
-`soundersim` can per perform incoherent (power-summing) clutter simulation. This mode uses the same geometric optics and setup as coherent simulation, but with a different kernel.
+`soundersim` can perform incoherent (power-summing) clutter simulation. This mode uses the same geometric optics and setup as coherent simulation, but with a different kernel.
 
 In this mode, the behavior of `soundersim` should roughly match the existing open-source `simc` simulator (Christoffersen & Holt, U. Arizona; algorithm per Choudhary et al., 2016) for single-layer (i.e. surface-only) cases.
 
@@ -12,9 +12,13 @@ Facets come directly from the projected DEM grid (Nouvel-style rectangular cells
 
 Scene building (CPU, float64): DEM window → facet centers `(N,3)`, unit normals `(N,3)`, areas `(N,)` in the local frame; nav → per-trace platform positions + track unit vectors in the same frame.
 
+**Projected area handling.** Facet *sizing* is defined in projected map units (the DEM posting, e.g. 50 m in EPSG:3413), but every vertex is carried through projected → geodetic → ECEF → local ENU before tessellation, so the stored areas and normals are *true ground* quantities — the projection's scale distortion never enters the physics. The consequence is that a "50 m" facet is 50 m on the map, not on the ground: at 75°N the EPSG:3413 point scale is k ≈ 0.98666, so a 50 m projected cell is ≈ 50.68 m of true ground and its area is (1/k)² ≈ 2.7% larger than 50 × 50 m².
+
+> **What this means for simc comparison:** simc steps its per-trace grid in true (ECEF) meters, so at nominally matched 50 m settings its facets are (1/k)² smaller in area than ours. Total incoherent power scales with per-facet area (power ∝ A², facet count ∝ 1/A over fixed ground), so soundersim/simc total power sits at a *constant* ratio of (1/k)² ≈ 1.028 at the test scenes' latitude. Both tools produce relative power, so the parity metric gates on the ratio's *constancy* across traces (coefficient of variation), and the median ratio is recorded and checked against this explanation rather than forced to 1.
+
 ### Kernel (JAX)
 
-For each trace: ranges and incidence cosines against all facets in the scene window, per-facet power `(A cosθ)²/r⁴`, two-way time, scatter-add into fast-time bins (`floor((twtt − t0)/dt)`, out-of-window facets **dropped, not wrapped**). `vmap` over traces; a facet cull by max range keeps the per-trace working set bounded. Left/right split kept (sign of facet offset against `u_ct`).
+For each trace: ranges and incidence cosines against all facets in the scene window, per-facet power `(A cosθ)²/r⁴`, two-way time, scatter-add into fast-time bins (`floor((twtt − t0)/dt)`, out-of-window facets **dropped, not wrapped** — the dropped power is accumulated per trace and reported as `dropped_power`). `vmap` over traces; facets are processed in fixed-size blocks (`lax.scan`) to bound memory (a max-range cull can be added later for large scenes). Optional left/right split (sign of facet offset against `u_ct`). Kernel runs in float32 on local-frame coordinates; a float64 NumPy reference implementation lives in the tests.
 
 Optional multiplicative hooks: per-facet reflectivity, antenna gain pattern, `R⁻²` vs `R⁻⁴` exponent experiments.
 
@@ -53,9 +57,9 @@ Per trace (platform position `p`, along-track unit vector `u_at`, cross-track un
 
 ### Harness
 
-- `simc` installed from a pinned commit as a dev dependency. The harness supplies nav via a small custom navfunc / patched loader.
-- Scene generator emits a matched input pair: GeoTIFF DEM + nav for simc (`.ini` config), and the same arrays natively for us. Facet spacing set equal to the DEM posting on both sides so simc's regrid degenerates to (nearly) the same facets.
-- simc outputs for each case are cached as fixtures (with the generating commit + config recorded) so CI never runs simc; a separate script regenerates fixtures.
+- `simc` installed as a dev dependency pinned to commit `bac8b97` (note: its default branch is `master`). The harness (`compare/simc_harness.py`) drives simc **programmatically** — it imports `simc.prep`/`simc.sim`/`simc.output`, builds the confDict directly with the lowercased keys the code actually reads, and supplies nav as the DataFrame simc expects (ECEF x/y/z + datum) — bypassing the CLI, `.ini` parsing, and the broken `GetNav_simpleTest` loader entirely.
+- The scene generator emits a matched input pair: GeoTIFF DEM for simc, the same arrays natively for us. Facet step = DEM posting on both sides (but see the projected-area note above: "matched" spacing still differs by the map scale factor); `demBump=False`, `demInterp=False`; the time window is sized from scene geometry so simc's mod-wrap provably never triggers.
+- simc outputs are cached as fixtures in `tests/fixtures/` (npz + json sidecar recording the simc SHA, full confDict, scene params, and binning convention) so CI never runs simc; `tools/make_fixtures.py` regenerates them.
 
 ### Test scenes (small: ~10–40 traces, few-km windows; airborne geometry ~500–14000 m altitude)
 
@@ -67,13 +71,17 @@ Per trace (platform position `p`, along-track unit vector `u_at`, cross-track un
 
 ### Metrics and thresholds (each scene, numeric pass/fail)
 
-- **Peak alignment**: per-trace argmax twtt within ±1 range bin of simc.
-- **First-return time**: within ±1 bin; first-return ground location within one facet.
-- **Profile shape**: Pearson correlation of per-trace binned power (linear domain) ≥ 0.99 on synthetic scenes.
-- **Power ratio**: total in-window power ratio ours/simc within a few % (both are relative-power tools; a constant scale factor is acceptable and recorded, bin-to-bin scatter is not).
-- **dB residual**: RMS difference over bins above a −40 dB (rel. peak) floor ≤ ~1 dB, after constant-offset removal.
+**Comparison scale.** At the fixture sampling (dt = 10 ns) a range bin is 1.5 m while a facet is 50 m, and simc's per-trace regrid is a *different tessellation of the same surface* — so raw per-bin power is facet-placement shot noise (observed raw Pearson 0.77–0.92 on every scene, raw per-bin ratios scattering 0.3–3×), not a physics signal. No simulator that doesn't clone simc's exact facet geometry can match at raw bin scale. The shape metrics are therefore evaluated on per-trace profiles power-summed along fast time to the facet scale, `posting/(c·dt/2)` ≈ 33 bins; the raw-bin values are recorded alongside every aggregated metric (`raw_pearson`, `raw_bin_diff`, `raw_rms_db`).
 
-Thresholds start at these values and get tightened empirically once we see actual residuals; any loosening requires a written justification in the test.
+Metrics as implemented in `compare/metrics.py` (all five scenes pass):
+
+- **Peak alignment**: per-trace argmax within ±1 *facet-scale* bin. Observed: exact (0) on all scenes.
+- **First-return time**: raw-bin comparison against simc's fret, ±1 bin on flat/hill; **±3 bins on the sloped scenes (tilted, sinusoid, crater)** — verified against a 10× upsampled ground-truth surface, soundersim's first return is within ±1 bin of truth on all scenes while simc's is off by up to 3 bins there, a direct consequence of its int32-truncation DEM sampling displacing heights by up to one pixel on slopes. First-return ground locations agree within 36–93 m (simc's fret facet is a near-tie among adjacent facets on gentle geometry).
+- **Profile shape**: per-trace Pearson correlation (linear power, facet scale) ≥ 0.99. Observed ≥ 0.993.
+- **Power ratio**: gate on the per-trace total-power ratio's coefficient of variation ≤ 3% (constancy is the physics check); the median ratio is recorded, not forced to 1 — observed 1.028 = (1/k)², explained by the projected-area note above. Observed CV ≤ 1.6 × 10⁻⁴.
+- **dB residual**: RMS over facet-scale bins above −40 dB (rel. peak), after removing the constant dB offset, ≤ 1 dB. Observed ≤ 0.64 dB.
+
+Any change to these thresholds or evaluation scales requires written justification in the test (the facet-scale evaluation and the sloped-scene fret tolerance above are the two such justifications to date, documented in `tests/test_parity.py`).
 
 ### Analytic checks independent of simc (unit tests, CI-fast)
 
@@ -85,5 +93,5 @@ Thresholds start at these values and get tightened empirically once we see actua
 
 ### Suite structure
 
-- **CI (fast)**: unit/analytic tests + one tiny simc-fixture comparison (flat plane, ~5 traces). Seconds.
-- **Integration**: all scenes, full metrics, plots (ours vs. simc vs. difference, per-trace profiles) + HTML summary with pass/fail table. Run via `uv run pytest -m integration-incoherent`.
+- **CI (fast)**: unit/analytic tests + the flat-scene simc-fixture comparison with full metrics. Runs in ~1 s; `uv run pytest` (integration tests deselected by default).
+- **Integration**: all five scenes, full metrics, via `uv run pytest -m integration`. Planned additions: per-scene plots (ours vs. simc vs. difference, per-trace profiles) + HTML summary with pass/fail table, and the Haynes altitude-sweep check from the analytic list above (the rest of that list is implemented).

@@ -1,0 +1,66 @@
+{
+ "simc_sha": "bac8b97a66bc8bc327ff48a793031a6d1fcd6915",
+ "simc_url": "https://github.com/lpl-tapir/simc",
+ "created": "2026-07-07",
+ "scene": {
+  "name": "tilted",
+  "crs": "EPSG:3413",
+  "params": {
+   "n_traces": 20,
+   "altitude": 1000.0,
+   "extent": 8000.0,
+   "posting": 50.0,
+   "spacing": 100.0,
+   "slope_deg": 5.0,
+   "elevation": 500.0
+  }
+ },
+ "radar_config": {
+  "dt": 1e-08,
+  "n_samples": 4371,
+  "t0": 0.0,
+  "c": 299792458.0
+ },
+ "confDict": {
+  "simParams": {
+   "speedlight": 299792458.0,
+   "dt": 1e-08,
+   "tracesamples": 4371,
+   "dembump": false,
+   "deminterp": false,
+   "centerplane": false,
+   "antenna_pattern": "none",
+   "coherent": false,
+   "body": "earth"
+  },
+  "facetParams": {
+   "atdist": 4000.0,
+   "ctdist": 4000.0,
+   "atstep": 50.0,
+   "ctstep": 50.0
+  },
+  "outputs": {
+   "shownadir": false,
+   "showfret": false,
+   "combinedadj": false,
+   "combinedcolored": false,
+   "binary": false,
+   "echomap": false,
+   "echomapadj": false,
+   "echomapcolored": false,
+   "echomapgeoref": false,
+   "nadir": false,
+   "exportfacetsarray": false,
+   "exportfacetsarrayh5": false,
+   "combined": true,
+   "left": true,
+   "right": true,
+   "fret": true
+  },
+  "navigation": {
+   "xyzsys": "+proj=geocent +ellps=WGS84 +datum=WGS84 +no_defs",
+   "llesys": "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+  }
+ },
+ "binning": "bin k spans twtt [t0 + k*dt, t0 + (k+1)*dt); datum = t0 = 0 for all traces; window contains all returns (no wrap)"
+}

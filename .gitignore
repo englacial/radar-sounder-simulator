@@ -1,0 +1,11 @@
+# Ignore generated outputs except the committed verification report
+outputs/**
+!outputs/verification/
+!outputs/verification/report.html
+.venv/
+__pycache__/
+*.egg-info
+.pytest_cache/
+.ruff_cache/
+
+reference_papers/
