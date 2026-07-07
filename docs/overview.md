@@ -40,6 +40,9 @@ Stage 3: Add subsurface layers
 * Add bed clutter (using BedMachine topography) to xOPR comparison
 * Create synthetic firn layers and try to match Culberg and Schroeder 2020 firn power plateau results
 
+Stage 4: Antenna patterns and post-processing
+* Add support for varying antenna beampatterns and various levels of post-processing (unfocused SAR, focused SAR)
+
 ## Testing and verification
 
 Build the verification before writing the code.
