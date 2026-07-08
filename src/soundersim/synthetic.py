@@ -113,6 +113,139 @@ def crater_scene(depth=200.0, sigma=800.0, elevation=500.0, **kw):
 ALL_SCENES = (flat_scene, tilted_scene, hill_scene, sinusoid_scene, crater_scene)
 
 
+@dataclass
+class MultilayerScene:
+    """A stack of interface DEMs (top-down) sharing one grid and nav track.
+
+    ``dems[k]`` is interface k's height grid (surface first). ``media`` (Medium
+    list) has one more entry than ``dems``. Feed the DEMs to ``build_facets`` or
+    ``layered.build_layered_scene`` (the surface DEM being the reference).
+    """
+
+    name: str
+    dems: list  # list[np.ndarray] (ny, nx) float32, top-down
+    transform: Affine
+    crs: str
+    nav_llh: np.ndarray
+    media: list  # list[Medium], len == len(dems) + 1
+    params: dict = field(default_factory=dict)
+
+    @property
+    def dem(self):
+        """The top (surface) DEM -- the reference footprint."""
+        return self.dems[0]
+
+
+def _default_slab_media():
+    from .config import Medium
+    return [Medium(name="air", eps_r=1.0), Medium(name="ice", eps_r=3.17),
+            Medium(name="bed", eps_r=6.0)]
+
+
+def _build_multi(name, z_funcs, media, params, *, n_traces=20, altitude=1000.0,
+                 extent=8000.0, posting=50.0, spacing=100.0):
+    """Assemble a multilayer scene from top-down surface functions z(E, N)."""
+    cx, cy = _to_proj.transform(CENTER_LATLON[1], CENTER_LATLON[0])
+    nx = ny = int(round(extent / posting))
+    x_min, y_max = cx - extent / 2, cy + extent / 2
+    transform = Affine.translation(x_min, y_max) * Affine.scale(posting, -posting)
+
+    cols, rows = np.arange(nx), np.arange(ny)
+    xs = x_min + (cols + 0.5) * posting
+    ys = y_max - (rows + 0.5) * posting
+    X, Y = np.meshgrid(xs, ys)
+    dems = [zf(X, Y).astype(np.float32) for zf in z_funcs]
+
+    k = Proj(CRS).get_factors(*CENTER_LATLON[::-1]).meridional_scale
+    offs = (np.arange(n_traces) - (n_traces - 1) / 2) * spacing * k
+    nav_x, nav_y = cx + offs, np.full(n_traces, cy)
+    lon, lat = _to_geo.transform(nav_x, nav_y)
+    h = float(dems[0].mean()) + altitude
+    nav_llh = np.column_stack([lat, lon, np.full(n_traces, h)]).astype(np.float64)
+
+    p = {"n_traces": n_traces, "altitude": altitude, "extent": extent,
+         "posting": posting, "spacing": spacing, **params}
+    return MultilayerScene(name, dems, transform, crs=CRS, nav_llh=nav_llh,
+                           media=media, params=p)
+
+
+def _flat(elev):
+    return lambda X, Y: np.full_like(X, elev)
+
+
+def slab_scene(surface=500.0, depth=300.0, media=None, **kw):
+    """Flat surface at ``surface`` over a flat bed ``depth`` metres below it."""
+    return _build_multi(
+        "slab", [_flat(surface), _flat(surface - depth)],
+        media or _default_slab_media(),
+        {"surface": surface, "depth": depth}, **kw)
+
+
+def tilted_bed_scene(surface=500.0, depth=300.0, slope_deg=5.0, media=None, **kw):
+    """Flat surface over a bed tilted across-track (northing) by slope_deg."""
+    m = np.tan(np.deg2rad(slope_deg))
+    cy = _to_proj.transform(CENTER_LATLON[1], CENTER_LATLON[0])[1]
+    return _build_multi(
+        "tilted_bed",
+        [_flat(surface), lambda X, Y: (surface - depth) + m * (Y - cy)],
+        media or _default_slab_media(),
+        {"surface": surface, "depth": depth, "slope_deg": slope_deg}, **kw)
+
+
+def rough_bed_scene(surface=500.0, depth=300.0, amplitude=50.0,
+                    wavelength=2000.0, media=None, **kw):
+    """Flat surface over a sinusoidal (across-track) bed."""
+    cy = _to_proj.transform(CENTER_LATLON[1], CENTER_LATLON[0])[1]
+    return _build_multi(
+        "rough_bed",
+        [_flat(surface),
+         lambda X, Y: (surface - depth)
+         + amplitude * np.sin(2 * np.pi * (Y - cy) / wavelength)],
+        media or _default_slab_media(),
+        {"surface": surface, "depth": depth, "amplitude": amplitude,
+         "wavelength": wavelength}, **kw)
+
+
+def rough_surface_scene(surface=500.0, depth=300.0, amplitude=50.0,
+                        wavelength=2000.0, media=None, **kw):
+    """Sinusoidal (across-track) surface over a flat bed."""
+    cy = _to_proj.transform(CENTER_LATLON[1], CENTER_LATLON[0])[1]
+    return _build_multi(
+        "rough_surface",
+        [lambda X, Y: surface
+         + amplitude * np.sin(2 * np.pi * (Y - cy) / wavelength),
+         _flat(surface - depth)],
+        media or _default_slab_media(),
+        {"surface": surface, "depth": depth, "amplitude": amplitude,
+         "wavelength": wavelength}, **kw)
+
+
+def offset_stack_scene(surface=500.0, spacings=(2.0, 2.0, 2.0), eps_r=3.17,
+                       **kw):
+    """Flat surface plus N firn layers, each ``spacings[i]`` below the previous.
+
+    Layer DEMs are explicit constant-offset copies of the surface (the physical
+    content of the config-level offset-interface stack). Media between layers
+    all share ``eps_r``; the substrate is the last.
+    """
+    from .config import Medium
+    z_funcs = [_flat(surface)]
+    depth = 0.0
+    for s in spacings:
+        depth += s
+        z_funcs.append(_flat(surface - depth))
+    media = [Medium(name="air", eps_r=1.0)]
+    media += [Medium(name=f"firn_{i}", eps_r=eps_r)
+              for i in range(len(spacings) + 1)]
+    return _build_multi("offset_stack", z_funcs, media,
+                        {"surface": surface, "spacings": list(spacings),
+                         "eps_r": eps_r}, **kw)
+
+
+MULTILAYER_SCENES = (slab_scene, tilted_bed_scene, rough_bed_scene,
+                     rough_surface_scene, offset_stack_scene)
+
+
 def write_dem_geotiff(scene: SyntheticScene, path):
     """Write the scene DEM as a single-band float32 GeoTIFF (nodata=-9999)."""
     ny, nx = scene.dem.shape

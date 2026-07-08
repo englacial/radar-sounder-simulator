@@ -6,7 +6,9 @@ Documented conventions:
   (bin k spans [t0 + k*dt, t0 + (k+1)*dt), the simc/fixture convention).
 - ``nadir_twtt`` = 2·(platform z − z of the horizontally nearest facet
   center)/c in the local frame, i.e. vertical distance to the DEM at nadir via
-  the nearest facet centroid.
+  the nearest facet centroid. Multilayer runs carry it per ``layer`` with
+  in-medium wave speeds (the vertical nadir path is refraction-free), computed
+  by simulate.py and passed in.
 - ``first_return_twtt`` is the minimum *exact* per-facet twtt = 2r/c over
   facets inside the twtt window (simc's fret definition, computed in float64,
   not read off the binned power); that facet's centroid gives
@@ -24,22 +26,33 @@ import soundersim
 
 
 def build_dataset(power, dropped_power, *, scene, frame, facets, track,
-                  sim_config, field=None):
+                  sim_config, field=None, layers=None, nadir_twtt=None):
     """Assemble the output Dataset for one simulation run.
 
     Coherent runs pass ``field`` (complex64, same dims as power); the Dataset
     then also carries ``field`` plus ``frequency``/``wavelength`` attrs per
     docs/output.md.
+
+    Multilayer runs pass ``layers`` (interface names, docs/output.md ``layer``
+    dimension): power/field then carry a trailing ``layer`` dim, and
+    ``dropped_power`` / the caller-supplied per-layer ``nadir_twtt`` are
+    (slow_time, layer). ``facets`` is the surface interface (first-return
+    products stay surface-based).
     """
     rc = sim_config.radar
     power = np.asarray(power, dtype=np.float32)
     n_traces, n_samples = power.shape[0], power.shape[1]
     pos = track.positions
+    has_side = power.ndim == (4 if layers is not None else 3)
 
-    # Nadir: horizontally nearest facet center (see module docstring).
-    d2 = ((facets.centers[None, :, :2] - pos[:, None, :2]) ** 2).sum(-1)
-    nadir_z = facets.centers[d2.argmin(axis=1), 2]
-    nadir_twtt = 2.0 * (pos[:, 2] - nadir_z) / rc.c
+    if nadir_twtt is None:
+        # Nadir: horizontally nearest facet center (see module docstring).
+        d2 = ((facets.centers[None, :, :2] - pos[:, None, :2]) ** 2).sum(-1)
+        nadir_z = facets.centers[d2.argmin(axis=1), 2]
+        nadir_twtt = 2.0 * (pos[:, 2] - nadir_z) / rc.c
+    nadir_dims = ("slow_time", "layer")[:np.ndim(nadir_twtt)]
+    dropped_power = np.asarray(dropped_power, np.float32)
+    dropped_dims = ("slow_time", "layer")[:dropped_power.ndim]
 
     # First return: min exact facet twtt within the window (float64).
     r = np.linalg.norm(facets.centers[None, :, :] - pos[:, None, :], axis=-1)
@@ -49,21 +62,23 @@ def build_dataset(power, dropped_power, *, scene, frame, facets, track,
     first_twtt = ft[np.arange(n_traces), fi]
     first_llh = frame.local_to_llh(facets.centers[fi])
 
-    dims = ("slow_time", "twtt") + (("side",) if power.ndim == 3 else ())
+    dims = (("slow_time", "twtt") + (("side",) if has_side else ())
+            + (("layer",) if layers is not None else ()))
     trace = np.arange(n_traces)
     ds = xr.Dataset(
         {
             "power": (dims, power,
                       {"units": "1", "long_name": "relative received power",
                        "comment": "relative linear power"}),
-            "nadir_twtt": ("slow_time", nadir_twtt,
-                           {"units": "s", "long_name": "two-way time to surface at nadir"}),
+            "nadir_twtt": (nadir_dims, nadir_twtt,
+                           {"units": "s", "long_name": "two-way time to interface at nadir"}),
             "first_return_twtt": ("slow_time", first_twtt,
                                   {"units": "s", "long_name": "earliest in-window arrival"}),
             "first_return_lat": ("slow_time", first_llh[:, 0], {"units": "degrees_north"}),
             "first_return_lon": ("slow_time", first_llh[:, 1], {"units": "degrees_east"}),
-            "dropped_power": ("slow_time", np.asarray(dropped_power, np.float32),
-                              {"units": "1", "long_name": "facet power outside the twtt window"}),
+            "dropped_power": (dropped_dims, dropped_power,
+                              {"units": "1", "long_name":
+                               "facet power outside the twtt window or on invalid refracted paths"}),
         },
         coords={
             "slow_time": trace,  # integer trace numbers: synthetic nav has no timestamps
@@ -97,13 +112,21 @@ def build_dataset(power, dropped_power, *, scene, frame, facets, track,
                         "comment": "complex field at the carrier; power = |field|^2"})
         ds.attrs["frequency"] = rc.f0
         ds.attrs["wavelength"] = rc.wavelength
-    if power.ndim == 3:
+    if has_side:
         ds = ds.assign_coords(side=("side", np.array(["left", "right"])))
+    if layers is not None:
+        ds = ds.assign_coords(layer=("layer", np.array(layers)))
     return ds
 
 
 def combine(ds, dim):
-    """Combine an optional split dimension with the mode-correct rule."""
+    """Combine an optional split dimension with the mode-correct rule.
+
+    Applies to ``side`` and ``layer`` alike (docs/output.md): incoherent power
+    is additive, coherent contributions must be summed as FIELDS first --
+    ``abs(ds.field.sum('layer'))**2`` is the total cluttergram, not
+    ``ds.power.sum('layer')`` (surface/bed returns interfere in-bin).
+    """
     if ds.attrs["mode"] == "incoherent":
         return ds.power.sum(dim)
     return abs(ds.field.sum(dim)) ** 2

@@ -30,6 +30,8 @@ tests/test_coherent_kernel.py: ~1e-4 wavelengths equivalent range error at
 measures ~1e-3 wavelengths there -- also passing, but with 10x less margin).
 """
 
+import functools
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -58,6 +60,37 @@ def lpa_contributions(position, centers, normals, areas, e1, e2, k, gamma,
     amp = (k / TWO_PI) * gamma * cos * areas * s1 * s2 / (r * r)
     phase = (-2.0 * k) * (r - r_ref)  # dtype (and precision) follows the inputs
     return 1j * amp * xp.exp(1j * phase), r
+
+
+@functools.lru_cache(maxsize=None)
+def _coherent_fn(split_sides, n_samples):
+    """Jitted vmapped kernel for one static configuration; run-varying
+    numbers (facet blocks, positions, reference ranges, k/gamma/t0/dt/c) are
+    traced arguments, so value changes reuse the compiled kernel."""
+    n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
+
+    def one_trace(p, u, rr, cb, nb, ab, e1b, e2b, kf, gf, t0, dt, c):
+        def step(carry, blk):
+            hist, dropped = carry
+            fc, fn, fa, f1, f2 = blk
+            contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gf,
+                                           r_ref=rr)
+            b = twtt_bin(2.0 * r / c, t0, dt)
+            valid = (b >= 0) & (b < n_samples)
+            pwr = jnp.real(contrib) ** 2 + jnp.imag(contrib) ** 2
+            if split_sides:
+                right = (jnp.sum((fc - p) * u, axis=-1) > 0).astype(jnp.int32)
+                b = b + right * n_samples
+            seg = jnp.where(valid, b, n_seg)
+            h = jax.ops.segment_sum(contrib, seg, num_segments=n_seg + 1)
+            drop = jnp.sum(jnp.where(valid, jnp.float32(0.0), pwr))
+            return (hist + h[:n_seg], dropped + drop), None
+
+        init = (jnp.zeros(n_seg, jnp.complex64), jnp.float32(0.0))
+        (hist, dropped), _ = jax.lax.scan(step, init, (cb, nb, ab, e1b, e2b))
+        return hist, dropped
+
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 10))
 
 
 def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
@@ -93,31 +126,10 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     phase_ref = np.exp(-1j * ((2.0 * k * r_ref64) % TWO_PI))  # complex128 (T,)
     r_ref = jnp.asarray(r_ref64.astype(np.float32))
 
-    kf, gf = np.float32(k), np.float32(gamma)
-    n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
-
-    def one_trace(p, u, rr):
-        def step(carry, blk):
-            hist, dropped = carry
-            fc, fn, fa, f1, f2 = blk
-            contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gf,
-                                           r_ref=rr)
-            b = twtt_bin(2.0 * r / c, t0, dt)
-            valid = (b >= 0) & (b < n_samples)
-            pwr = jnp.real(contrib) ** 2 + jnp.imag(contrib) ** 2
-            if split_sides:
-                right = (jnp.sum((fc - p) * u, axis=-1) > 0).astype(jnp.int32)
-                b = b + right * n_samples
-            seg = jnp.where(valid, b, n_seg)
-            h = jax.ops.segment_sum(contrib, seg, num_segments=n_seg + 1)
-            drop = jnp.sum(jnp.where(valid, jnp.float32(0.0), pwr))
-            return (hist + h[:n_seg], dropped + drop), None
-
-        init = (jnp.zeros(n_seg, jnp.complex64), jnp.float32(0.0))
-        (hist, dropped), _ = jax.lax.scan(step, init, (cb, nb, ab, e1b, e2b))
-        return hist, dropped
-
-    hist, dropped = jax.jit(jax.vmap(one_trace))(pos, uct, r_ref)
+    fn = _coherent_fn(split_sides, int(n_samples))
+    hist, dropped = fn(pos, uct, r_ref, cb, nb, ab, e1b, e2b, np.float32(k),
+                       np.float32(gamma), np.float32(t0), np.float32(dt),
+                       np.float32(c))
     field = (np.asarray(hist) * phase_ref[:, None]).astype(np.complex64)
     if split_sides:
         field = field.reshape(-1, 2, n_samples).transpose(0, 2, 1)

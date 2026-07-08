@@ -224,6 +224,87 @@ def speckle_panels(path, amplitude, power,
     return path
 
 
+def effective_range_falloff_panel(path, r_eff, meas, pred, *, slope,
+                                  xlabel="effective range h + d/n (m)",
+                                  title="Bed fall-off vs effective range"):
+    """Left: log-log measured bed power vs effective range with the fitted
+    slope and an r_eff^-2 reference; right: measured/closed-form ratio."""
+    r_eff, meas, pred = (np.asarray(a, float) for a in (r_eff, meas, pred))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.4), constrained_layout=True)
+    ax = axes[0]
+    ax.loglog(r_eff, meas, "o-",
+              label=f"bed |field|^2\nfit slope {slope:+.3f}")
+    rr = np.array([r_eff.min(), r_eff.max()])
+    ax.loglog(rr, meas[0] * (rr / r_eff[0]) ** -2.0, "k--",
+              label="reference r_eff^-2")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("relative power")
+    ax.legend()
+    ax.grid(which="both", alpha=0.3)
+    ax = axes[1]
+    ax.semilogx(r_eff, meas / pred, "o-")
+    ax.axhline(1.0, color="k", ls="--", lw=0.8)
+    ax.set_ylim(0.8, 1.2)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("measured / closed-form")
+    ax.grid(which="both", alpha=0.3)
+    fig.suptitle(title)
+    fig.savefig(path, dpi=90)
+    plt.close(fig)
+    return path
+
+
+def referee_profile_panels(path, panels,
+                           title="Two-media kernel vs brute-force referee"):
+    """One panel per sub-case: kernel vs referee power profiles (dB).
+
+    panels: dicts with ``title``, ``x`` (twtt, us), ``kernel``/``referee``
+    (1-D linear-power profiles, e.g. facet-scale aggregated).
+    """
+    fig, axes = plt.subplots(1, len(panels), figsize=(4.6 * len(panels), 3.8),
+                             constrained_layout=True, squeeze=False)
+    for ax, p in zip(axes[0], panels):
+        kern = np.asarray(p["kernel"], float)
+        ref = np.asarray(p["referee"], float)
+        top = max(kern.max(), ref.max())
+        ax.plot(p["x"], _db(kern[None], top)[0], "o-", lw=1.4, ms=4,
+                label="kernel")
+        ax.plot(p["x"], _db(ref[None], top)[0], "x--", lw=1.2, ms=5,
+                label="referee")
+        ax.set_ylim(-45, 2)
+        ax.set_title(p["title"])
+        ax.set_xlabel("twtt (us)")
+        ax.set_ylabel("power (dB)")
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
+    fig.suptitle(title)
+    fig.savefig(path, dpi=90)
+    plt.close(fig)
+    return path
+
+
+def chaining_error_panel(path, amps, rms, mx, *, slope,
+                         title="Local-plane chaining error vs surface "
+                               "roughness amplitude"):
+    """Log-log per-facet optical-path error (RMS and max) vs roughness
+    amplitude with the fitted RMS power-law slope."""
+    amps, rms, mx = (np.asarray(a, float) for a in (amps, rms, mx))
+    fig, ax = plt.subplots(figsize=(6.2, 4.4), constrained_layout=True)
+    ax.loglog(amps, rms, "o-", label=f"RMS opl error (fit slope {slope:+.2f})")
+    ax.loglog(amps, mx, "s--", label="max opl error")
+    aa = np.array([amps.min(), amps.max()])
+    ax.loglog(aa, rms[0] * (aa / amps[0]) ** slope, "k:", lw=1.0,
+              label="fitted power law")
+    ax.set_xlabel("surface roughness amplitude A (m)")
+    ax.set_ylabel("per-facet optical-path error (m)")
+    ax.grid(which="both", alpha=0.3)
+    ax.legend(fontsize=8)
+    fig.suptitle(title)
+    fig.savefig(path, dpi=90)
+    plt.close(fig)
+    return path
+
+
 def haynes_loglog(path, r, per_facet, lead_edge, *,
                   per_facet_slope, lead_slope, title="Haynes altitude sweep"):
     """Log-log plot of per-facet (r^-4) and leading-edge (r^-3) fits vs reference."""

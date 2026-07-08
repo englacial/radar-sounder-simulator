@@ -2,6 +2,9 @@
 outputs/**
 !outputs/verification/
 !outputs/verification/report.html
+!outputs/firn_investigation/
+!outputs/firn_investigation/report.html
+!outputs/firn_investigation/figure_grid.png
 .venv/
 __pycache__/
 *.egg-info

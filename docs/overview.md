@@ -42,6 +42,7 @@ Stage 3: Add subsurface layers
 
 Stage 4: Antenna patterns and post-processing
 * Add support for varying antenna beampatterns and various levels of post-processing (unfocused SAR, focused SAR)
+* Simulate the radar bandwidth assuming a linear chirp
 
 ## Testing and verification
 

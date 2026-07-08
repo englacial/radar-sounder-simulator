@@ -31,6 +31,24 @@ DEM_PRODUCTS = {
     "antarctic": ("rema-mosaics-v2.0-32m", "EPSG:3031"),
     "arctic": ("arcticdem-mosaics-v4.1-32m", "EPSG:3413"),
 }
+# BedMachine bed topography (NSIDC Earthdata Cloud, authenticated via ~/.netrc).
+# Both products reference bed/surface to the EIGEN-6C4 GEOID (verified in the
+# file metadata: variable ``geoid`` is "EIGEN-6C4 Geoid - WGS84 Ellipsoid
+# difference", attr geoid="eigen-6c4 (Forste et al 2014)"); ellipsoidal height
+# = bed + geoid. Native CRSs match the PGC DEM CRSs above.
+_NSIDC = "https://data.nsidc.earthdatacloud.nasa.gov/nsidc-cumulus-prod-protected"
+BEDMACHINE = {
+    "arctic": {
+        "url": f"{_NSIDC}/ICEBRIDGE/IDBMG4/5/1993/01/01/BedMachineGreenland-v5.nc",
+        "product": "BedMachine Greenland v5 (IDBMG4)", "crs": "EPSG:3413",
+        "posting": 150.0,
+    },
+    "antarctic": {
+        "url": f"{_NSIDC}/MEASURES/NSIDC-0756/3/1970/01/01/BedMachineAntarctica-v3.nc",
+        "product": "BedMachine Antarctica v3 (NSIDC-0756)", "crs": "EPSG:3031",
+        "posting": 500.0,
+    },
+}
 DATUM_NOTE = ("heights in m above the WGS84 ellipsoid per PGC documentation; "
               "matches CReSIS Elevation, no geoid offset applied")
 CACHE_DIR = Path(__file__).resolve().parents[2] / "outputs" / "cache"
@@ -186,3 +204,139 @@ def frame_scene(frame, *, n_traces=150, ct_dist=4000.0, region=None,
     scene = SyntheticScene(name, dem, transform, crs, nav_llh, params)
     info = {"trace_idx": idx, "region": region, "fill_fraction": fill_frac}
     return scene, info
+
+
+def fetch_bedmachine_window(bounds, region, pad_m=0.0, cache_dir=None):
+    """Windowed BedMachine bed elevation covering a lon/lat bbox + pad_m meters.
+
+    bounds/region as in ``fetch_dem_window``. Returns (bed, transform, crs,
+    meta) at the product's NATIVE posting (150 m Greenland / 500 m Antarctica),
+    with bed converted to meters above the WGS84 ELLIPSOID (bed + geoid, both
+    read from the product; see BEDMACHINE datum note). ``meta`` records the
+    product/version and the BedMachine mask composition of the window. Cached
+    as GeoTIFF + JSON sidecar under outputs/cache/; reruns are offline.
+    """
+    prod = BEDMACHINE[region]
+    crs = prod["crs"]
+    proj_bounds = _padded_proj_bounds(bounds, crs, pad_m)
+    key = hashlib.sha256(json.dumps(
+        [prod["url"], [round(b, 1) for b in proj_bounds]]).encode()).hexdigest()[:12]
+    cache_dir = Path(cache_dir or CACHE_DIR)
+    tif = cache_dir / f"bedmachine_{region}_{key}.tif"
+
+    if not tif.exists():
+        import earthaccess
+
+        earthaccess.login(strategy="netrc")
+        fs = earthaccess.get_fsspec_https_session()
+        with fs.open(prod["url"], block_size=4 * 2**20,
+                     cache_type="blockcache") as f, \
+                xr.open_dataset(f, engine="h5netcdf") as src:
+            geoid_attrs = dict(src["geoid"].attrs)
+            version = str(src.attrs.get("version", ""))
+            x, y = src["x"].values, src["y"].values  # x asc, y desc
+            step = float(prod["posting"])
+            x0, y0, x1, y1 = proj_bounds
+            ci = np.where((x >= x0 - step) & (x <= x1 + step))[0]
+            ri = np.where((y >= y0 - step) & (y <= y1 + step))[0]
+            if not len(ci) or not len(ri):
+                raise LookupError(f"{prod['product']} does not cover {bounds}")
+            rs, cs = slice(ri[0], ri[-1] + 1), slice(ci[0], ci[-1] + 1)
+            bed = src["bed"][rs, cs].values.astype(np.float32)
+            geoid = src["geoid"][rs, cs].values.astype(np.float32)
+            mask = src["mask"][rs, cs].values
+            bed = np.where(bed == NODATA, np.nan, bed) + geoid  # -> ellipsoidal
+            transform = rasterio.transform.from_origin(
+                x[ci[0]] - step / 2, y[ri[0]] + step / 2, step, step)
+
+        counts = {str(k): int(v) for k, v in
+                  zip(*np.unique(mask, return_counts=True))}
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        out = np.where(np.isfinite(bed), bed, NODATA).astype(np.float32)
+        with rasterio.open(tif, "w", driver="GTiff", height=bed.shape[0],
+                           width=bed.shape[1], count=1, dtype="float32",
+                           crs=crs, transform=transform, nodata=NODATA) as dst:
+            dst.write(out, 1)
+        tif.with_suffix(".json").write_text(json.dumps({
+            "product": prod["product"], "version": version, "url": prod["url"],
+            "crs": crs, "posting_m": step, "bounds_lonlat": list(bounds),
+            "pad_m": pad_m, "proj_bounds": list(proj_bounds),
+            "vertical_datum": ("bed + geoid: meters above the WGS84 ellipsoid; "
+                               "product bed is geoid-referenced, geoid var: "
+                               + json.dumps(geoid_attrs, default=str)),
+            "mask_counts": counts,
+            "mask_legend": "0 ocean, 1 ice-free land, 2 grounded ice, "
+                           "3 floating ice, 4 other",
+        }, indent=1) + "\n")
+
+    with rasterio.open(tif) as src:
+        bed = src.read(1)
+        transform, crs = src.transform, str(src.crs)
+    bed = np.where(bed == NODATA, np.nan, bed).astype(np.float32)
+    meta = json.loads(tif.with_suffix(".json").read_text())
+    return bed, transform, crs, meta
+
+
+def resample_to_grid(src, src_transform, src_crs, shape, transform, crs):
+    """Bilinearly resample a raster onto a target grid (rasterio.warp).
+
+    Used to put the native 150/500 m BedMachine bed on a frame's 32 m surface
+    DEM grid -- heavy oversampling, honest about the bed's true resolution.
+    """
+    from rasterio.warp import Resampling, reproject
+
+    dst = np.full(shape, np.nan, np.float32)
+    reproject(np.asarray(src, np.float32), dst, src_transform=src_transform,
+              src_crs=src_crs, dst_transform=transform, dst_crs=crs,
+              src_nodata=np.nan, dst_nodata=np.nan,
+              resampling=Resampling.bilinear)
+    return dst
+
+
+def load_bottom_pick(frame, cache_dir=None):
+    """The frame's measured Bottom (bed) pick twtt on the frame slow_time grid.
+
+    Loads OPR layer picks via xopr (CSARP_layer files, OPS db fallback),
+    selects the "bottom" layer, and interpolates its twtt onto the frame's
+    slow_time (nearest-neighbor within 2 s, NaN where no pick). Cached as
+    NetCDF under outputs/cache/. Returns a float64 array (n_slow_time,).
+    """
+    season = frame.attrs.get("season")
+    frame_id = frame.attrs.get("frame_id")
+    cache_dir = Path(cache_dir or CACHE_DIR)
+    cache = cache_dir / f"layers_{season}_{frame_id}_bottom.nc"
+    if not cache.exists():
+        import xopr
+
+        conn = xopr.OPRConnection(cache_dir=str(cache_dir / "xopr"))
+        # NetCDF round-trips attrs as numpy ints, which xopr's duckdb STAC
+        # search rejects -- coerce to Python scalars.
+        frame = frame.copy()
+        frame.attrs = {k: (int(v) if isinstance(v, np.integer) else v)
+                       for k, v in frame.attrs.items()}
+        layers = conn.get_layers(frame, errors="error")
+        bot_keys = [k for k in layers if k.lower().split(":")[-1] == "bottom"]
+        if not bot_keys:
+            raise LookupError(
+                f"no bottom layer for {frame_id}; layers: {list(layers)}")
+        lay = layers[bot_keys[0]]
+        ds = xr.Dataset({"twtt": ("slow_time", np.asarray(
+            lay["twtt"].values, np.float64))},
+            coords={"slow_time": lay["slow_time"].values})
+        ds.attrs.update(season=season, frame_id=frame_id, layer=bot_keys[0])
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        ds.to_netcdf(cache, engine="h5netcdf")
+
+    lay = xr.open_dataset(cache, engine="h5netcdf")
+    t_lay = lay.slow_time.values.astype("datetime64[ns]").astype(np.int64)
+    t_frm = frame.slow_time.values.astype("datetime64[ns]").astype(np.int64)
+    tw = np.asarray(lay.twtt.values, np.float64)
+    ok = np.isfinite(tw) & (tw > 0)
+    out = np.full(len(t_frm), np.nan)
+    if ok.any():
+        tl = t_lay[ok]
+        j = np.searchsorted(tl, t_frm).clip(1, len(tl) - 1)
+        j -= (t_frm - tl[j - 1]) < (tl[j] - t_frm)
+        near = np.abs(tl[j] - t_frm) < int(2e9)  # within 2 s
+        out[near] = tw[ok][j[near]]
+    return out

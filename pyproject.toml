@@ -15,6 +15,7 @@ dependencies = [
     "affine",
     "xopr",
     "pystac-client",
+    "earthaccess>=0.17.0",
 ]
 
 [dependency-groups]

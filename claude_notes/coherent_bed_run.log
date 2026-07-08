@@ -1,0 +1,2 @@
+20171121_03_005_coherent_bed: 765.3 s | spacing 11.3m 16628975 facets LPA~26% | surf med 1.5 bins (pass True) | bed med 63.3 vs floor 65.8 thr 70.8 (pass True) | speckle 0.99 | bed/surf -11.7 dB | dropped bed 0.0%
+20170422_01_014_coherent_bed: 266.5 s | spacing 12.7m 5713224 facets LPA~26% | surf med 0.7 bins (pass True) | bed med 6.1 vs floor 6.6 thr 11.6 (pass True) | speckle 0.98 | bed/surf -32.9 dB | dropped bed 0.1%
