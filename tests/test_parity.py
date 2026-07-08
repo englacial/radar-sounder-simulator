@@ -23,11 +23,15 @@ allows loosening only with written justification -- given here with numbers):
    pixel away from their true position (known simc divergence, see
    docs/incoherent_simulation.md "Explicit divergences").
 
-3. The absolute power ratio ours/simc is ~1.028 on every scene: our facets are
+3. The absolute power ratio ours/simc is ~2.055 on every scene: our facets are
    50 m in *projected* EPSG:3413 meters = 50/k true meters (scale factor
-   k = 0.98666 at 75N), simc's are 50 true meters; total incoherent power over
-   a fixed ground area scales with facet area, (1/k)^2 = 1.027. The gate is the
-   documented one: per-trace ratio constancy (CV <= 3%; observed <= 2e-4).
+   k = 0.98666 at 75N), simc's are 50 true meters, so our per-cell area is
+   (1/k)^2 = 1.027 larger; and we place one rectangular facet of area A per cell
+   (power A^2) where simc places two triangles of area A/2 (power 2*(A/2)^2 =
+   A^2/2), a further factor of 2. Total incoherent power scales with facet area,
+   so the ratio is 2*(1/k)^2 = 2.055 -- a tessellation/projection artifact, both
+   tools being relative-power simulators. The gate is the documented one:
+   per-trace ratio constancy (CV <= 3%; observed <= 2e-4).
 """
 
 import json

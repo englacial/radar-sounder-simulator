@@ -1,12 +1,13 @@
 """Scene geometry (CPU, NumPy, float64).
 
 A ``LocalFrame`` is an ENU frame anchored on the WGS84 ellipsoid. ``build_facets``
-turns a projected DEM window into a triangle tessellation (centers/normals/areas)
-expressed in that frame. Curvature matters over km scales, so projected x/y are
-never treated as local metres: every vertex goes DEM -> projected -> geodetic ->
-ECEF -> local ENU.
+turns a projected DEM window into one rectangular mean-plane facet per DEM cell
+(centers/normals/areas plus the two edge vectors) expressed in that frame.
+Curvature matters over km scales, so projected x/y are never treated as local
+metres: every vertex goes DEM -> projected -> geodetic -> ECEF -> local ENU.
 """
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -77,43 +78,61 @@ class LocalFrame:
 
 @dataclass
 class Facets:
-    """Triangle facets in a LocalFrame.
+    """Rectangular mean-plane facets in a LocalFrame, one per DEM cell.
 
-    Two triangles per rectangular DEM cell, sharing the (v00, v11) diagonal.
-    Flat facet index of cell (i, j), triangle t in {0, 1} is
-    ``(i * (nx-1) + j) * 2 + t`` -- see ``index_map``.
+    Per cell with corners v00 (row i, col j), v01, v10, v11: the mean edge
+    vectors ``e1`` (along +column) and ``e2`` (along +row) span a parallelogram
+    whose area and normal are stored. Flat facet index of cell (i, j) is
+    ``i * (nx-1) + j`` -- see ``index_map``.
     """
 
-    centers: np.ndarray   # (N, 3) float64 centroids in local ENU
+    centers: np.ndarray   # (N, 3) float64 centroids (mean of 4 corners) in local ENU
     normals: np.ndarray   # (N, 3) float64 unit normals, +z (up) oriented
-    areas: np.ndarray     # (N,)   float64 true ground areas
+    areas: np.ndarray     # (N,)   float64 mean-plane parallelogram areas (m^2)
+    e1: np.ndarray        # (N, 3) float64 mean edge vector along +column (m)
+    e2: np.ndarray        # (N, 3) float64 mean edge vector along +row (m)
     cell: np.ndarray      # (N, 2) int: (row i, col j) source grid cell
-    tri: np.ndarray       # (N,)   int in {0, 1}
     grid_shape: tuple     # (ny-1, nx-1) number of cells
 
     def index_map(self):
-        """(ny-1, nx-1, 2) -> flat facet index."""
-        n = self.grid_shape[0] * self.grid_shape[1] * 2
-        return np.arange(n).reshape(*self.grid_shape, 2)
+        """(ny-1, nx-1) -> flat facet index."""
+        n = self.grid_shape[0] * self.grid_shape[1]
+        return np.arange(n).reshape(self.grid_shape)
+
+
+def _bilinear(dem, rows, cols):
+    """Sample ``dem`` on the (rows x cols) mesh of fractional pixel indices."""
+    r0 = np.clip(np.floor(rows).astype(int), 0, dem.shape[0] - 2)
+    c0 = np.clip(np.floor(cols).astype(int), 0, dem.shape[1] - 2)
+    fr, fc = (rows - r0)[:, None], (cols - c0)[None, :]
+    d00, d01 = dem[np.ix_(r0, c0)], dem[np.ix_(r0, c0 + 1)]
+    d10, d11 = dem[np.ix_(r0 + 1, c0)], dem[np.ix_(r0 + 1, c0 + 1)]
+    return (d00 * (1 - fr) * (1 - fc) + d01 * (1 - fr) * fc
+            + d10 * fr * (1 - fc) + d11 * fr * fc)
 
 
 def build_facets(dem, transform, crs, frame, spacing=None):
-    """Tessellate a projected DEM window into upward-oriented triangle facets.
+    """Tessellate a projected DEM window into upward-oriented rectangular facets.
 
-    dem values are ellipsoidal heights (m). If ``spacing`` is given, pixel centers
-    are subsampled (nearest) to roughly that posting before tessellation.
+    dem values are ellipsoidal heights (m). ``spacing`` (m) sets the target facet
+    size: coarser than the DEM posting subsamples by stride; finer bilinearly
+    upsamples the DEM (in the projected grid, before the ECEF pipeline) to
+    roughly that size; ``None`` keeps the native posting.
     """
     dem = np.asarray(dem, dtype=np.float64)
     ny, nx = dem.shape
-    if spacing is not None:
-        px = 0.5 * (abs(transform.a) + abs(transform.e))
+    px = 0.5 * (abs(transform.a) + abs(transform.e))
+    if spacing is None or abs(spacing - px) < 1e-9:
+        rows, cols = np.arange(ny, dtype=float), np.arange(nx, dtype=float)
+    elif spacing > px:  # coarser: stride subsample
         step = max(1, int(round(spacing / px)))
-        dem = dem[::step, ::step]
-        rows = np.arange(0, ny, step)
-        cols = np.arange(0, nx, step)
-    else:
-        rows = np.arange(ny)
-        cols = np.arange(nx)
+        rows = np.arange(0, ny, step, dtype=float)
+        cols = np.arange(0, nx, step, dtype=float)
+    else:  # finer: bilinear subdivision toward the target facet size
+        f = px / spacing
+        rows = np.linspace(0, ny - 1, max(2, int(round((ny - 1) * f)) + 1))
+        cols = np.linspace(0, nx - 1, max(2, int(round((nx - 1) * f)) + 1))
+    dem = _bilinear(dem, rows, cols)
 
     # Pixel centers -> projected (E, N), carrying ellipsoidal height.
     J, I = np.meshgrid(cols + 0.5, rows + 0.5)
@@ -125,21 +144,36 @@ def build_facets(dem, transform, crs, frame, spacing=None):
 
     v00, v01 = V[:-1, :-1], V[:-1, 1:]
     v10, v11 = V[1:, :-1], V[1:, 1:]
-    # Triangle 0: (v00, v01, v11); Triangle 1: (v00, v11, v10). Shared diagonal v00-v11.
-    c0 = (v00 + v01 + v11) / 3.0
-    n0 = np.cross(v01 - v00, v11 - v00)
-    c1 = (v00 + v11 + v10) / 3.0
-    n1 = np.cross(v11 - v00, v10 - v00)
-
-    centers = np.stack([c0, c1], axis=2).reshape(-1, 3)
-    raw_n = np.stack([n0, n1], axis=2).reshape(-1, 3)
+    e1 = ((v01 + v11) - (v00 + v10)) / 2.0  # mean edge along +column
+    e2 = ((v10 + v11) - (v00 + v01)) / 2.0  # mean edge along +row
+    centers = ((v00 + v01 + v10 + v11) / 4.0).reshape(-1, 3)
+    raw_n = np.cross(e1, e2).reshape(-1, 3)  # |e1 x e2| = planar-quad area
     mag = np.linalg.norm(raw_n, axis=1)
-    areas = 0.5 * mag
+    areas = mag
     normals = raw_n / mag[:, None]
     normals *= np.where(normals[:, 2] < 0.0, -1.0, 1.0)[:, None]  # orient +up
 
     hc, wc = dem.shape[0] - 1, dem.shape[1] - 1
     ci, cj = np.meshgrid(np.arange(hc), np.arange(wc), indexing="ij")
-    cell = np.stack([np.repeat(ci.ravel(), 2), np.repeat(cj.ravel(), 2)], axis=1)
-    tri = np.tile([0, 1], hc * wc)
-    return Facets(centers, normals, areas, cell, tri, (hc, wc))
+    cell = np.stack([ci.ravel(), cj.ravel()], axis=1)
+    return Facets(centers, normals, areas, e1.reshape(-1, 3), e2.reshape(-1, 3),
+                  cell, (hc, wc))
+
+
+def check_facet_size(facets, wavelength, min_range, beta=0.5):
+    """Fresnel-zone validity check for the linear-phase approximation.
+
+    Warns when the largest facet edge exceeds ``beta * sqrt(wavelength * min_range)``
+    (half a Fresnel-zone radius by default); returns the max edge/limit ratio.
+    Not wired into the incoherent path -- it is for the coherent kernel.
+    """
+    edge = np.maximum(np.linalg.norm(facets.e1, axis=1),
+                      np.linalg.norm(facets.e2, axis=1))
+    limit = beta * np.sqrt(wavelength * min_range)
+    ratio = float(edge.max() / limit)
+    if ratio > 1.0:
+        warnings.warn(
+            f"max facet edge {edge.max():.1f} m exceeds Fresnel-zone limit "
+            f"{limit:.1f} m (ratio {ratio:.2f}); linear-phase approximation "
+            "may be invalid -- subdivide the scene")
+    return ratio

@@ -42,7 +42,8 @@ def small_scene():
 
 
 def test_single_facet_power_and_twtt():
-    """One triangle, one trace: power and bin exact vs hand computation."""
+    """One facet, one trace: power and bin exact vs hand computation. The kernel
+    consumes center/normal/area arrays, so the facet shape is irrelevant here."""
     v1, v2, v3 = np.array([[0.0, 0, 0], [30.0, 0, 0], [0.0, 40, 10]])
     center = (v1 + v2 + v3) / 3
     raw_n = np.cross(v2 - v1, v3 - v1)

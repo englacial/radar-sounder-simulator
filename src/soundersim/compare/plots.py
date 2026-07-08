@@ -112,6 +112,118 @@ def profile_overlays(path, ours, simc, agg, *, twtt=None, traces=None, title="")
     return path
 
 
+def coherent_r2_panel(path, r, lead, pred, *, slope,
+                      title="Haynes coherent altitude sweep"):
+    """Left: log-log coherent nadir-return power vs r with the fitted slope and
+    an r^-2 reference; right: measured/predicted absolute ratio per altitude."""
+    r, lead, pred = (np.asarray(a, float) for a in (r, lead, pred))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.4), constrained_layout=True)
+    ax = axes[0]
+    ax.loglog(r, lead, "o-", label=f"nadir return |field|^2\nfit slope {slope:+.3f}")
+    rr = np.array([r.min(), r.max()])
+    ax.loglog(rr, lead[0] * (rr / r[0]) ** -2.0, "k--", label="reference r^-2")
+    ax.set_xlabel("nadir range r ~ h (m)")
+    ax.set_ylabel("relative power")
+    ax.legend()
+    ax.grid(which="both", alpha=0.3)
+    ax = axes[1]
+    ax.semilogx(r, lead / pred, "o-")
+    ax.axhline(1.0, color="k", ls="--", lw=0.8)
+    ax.set_ylim(0.8, 1.2)
+    ax.set_xlabel("nadir range r ~ h (m)")
+    ax.set_ylabel("measured / closed-form")
+    ax.grid(which="both", alpha=0.3)
+    fig.suptitle(title)
+    fig.savefig(path, dpi=90)
+    plt.close(fig)
+    return path
+
+
+def constants_panel(path, labels, mag_ratio, phase_deg, *, mag_tol, phase_tol,
+                    title="Haynes absolute-constant checks"):
+    """|field| ratio and phase error vs the closed form, with tolerance bands."""
+    x = np.arange(len(labels))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), constrained_layout=True)
+    for ax, y, tol, ref, ylabel in (
+        (axes[0], mag_ratio, mag_tol, 1.0, "|field| / closed form"),
+        (axes[1], phase_deg, phase_tol, 0.0, "phase error (deg)"),
+    ):
+        ax.axhspan(ref - tol, ref + tol, color="green", alpha=0.12)
+        ax.axhline(ref, color="k", ls="--", lw=0.8)
+        ax.plot(x, y, "o")
+        ax.set_xticks(x, labels, rotation=20, ha="right")
+        ax.set_ylabel(ylabel)
+        ax.grid(alpha=0.3)
+    fig.suptitle(title)
+    fig.savefig(path, dpi=90)
+    plt.close(fig)
+    return path
+
+
+def coherence_loss_panels(path, sigma_lam, panels,
+                          title="Fresnel-zone power vs roughness (Haynes Fig. 5)"):
+    """One panel per altitude: ensemble dots vs analytic lines per corr. length.
+
+    panels: list of dicts with keys ``title``, ``curves`` (list of
+    (label, measured, analytic) power arrays over sigma_lam), ``l0`` (analytic
+    zero-correlation curve) and ``floor`` (scalar noise-floor power).
+    """
+    db = lambda p: 10.0 * np.log10(np.maximum(np.asarray(p, float), 1e-300))
+    fig, axes = plt.subplots(1, len(panels), figsize=(5.6 * len(panels), 4.6),
+                             constrained_layout=True, squeeze=False)
+    for ax, p in zip(axes[0], panels):
+        for i, (lbl, meas, ana) in enumerate(p["curves"]):
+            c = f"C{i}"
+            ax.plot(sigma_lam, db(ana), "-", color=c, lw=1.3)
+            ax.plot(sigma_lam, db(meas), "o", color=c, ms=4, label=lbl)
+        ax.plot(sigma_lam, db(p["l0"]), "k--", lw=1.0, label="analytic l = 0")
+        ax.axhline(db([p["floor"]])[0], color="k", ls=":", lw=1.0,
+                   label="noise floor (Eq. 37)")
+        ax.set_title(p["title"])
+        ax.set_xlabel("sigma_h (lambda)")
+        ax.set_ylabel("power (dB)")
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
+    fig.suptitle(title)
+    fig.savefig(path, dpi=90)
+    plt.close(fig)
+    return path
+
+
+def speckle_panels(path, amplitude, power,
+                   title="Rough-surface speckle statistics"):
+    """Amplitude histogram vs Rayleigh pdf; power histogram vs exponential pdf."""
+    amplitude = np.asarray(amplitude, float)
+    power = np.asarray(power, float)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), constrained_layout=True)
+
+    ax = axes[0]
+    s2 = (amplitude ** 2).mean() / 2.0  # Rayleigh scale^2 (moment estimate)
+    a = np.linspace(0, amplitude.max() * 1.05, 300)
+    ax.hist(amplitude, bins=40, density=True, alpha=0.6, label="simulated")
+    ax.plot(a, a / s2 * np.exp(-a ** 2 / (2 * s2)), "k-", lw=1.5,
+            label="Rayleigh pdf")
+    ax.set_xlabel("|field|")
+    ax.set_ylabel("pdf")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    ax = axes[1]
+    mu = power.mean()
+    p = np.linspace(0, power.max() * 1.05, 300)
+    ax.hist(power, bins=40, density=True, alpha=0.6, label="simulated")
+    ax.plot(p, np.exp(-p / mu) / mu, "k-", lw=1.5, label="exponential pdf")
+    ax.set_yscale("log")
+    ax.set_xlabel("|field|^2")
+    ax.set_ylabel("pdf")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    fig.suptitle(title)
+    fig.savefig(path, dpi=90)
+    plt.close(fig)
+    return path
+
+
 def haynes_loglog(path, r, per_facet, lead_edge, *,
                   per_facet_slope, lead_slope, title="Haynes altitude sweep"):
     """Log-log plot of per-facet (r^-4) and leading-edge (r^-3) fits vs reference."""

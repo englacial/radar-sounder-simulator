@@ -8,13 +8,13 @@ In this mode, the behavior of `soundersim` should roughly match the existing ope
 
 ### Scene representation
 
-Facets come directly from the projected DEM grid (Nouvel-style rectangular cells, each split into two triangles for exact area/normal on non-planar cells), built once per scene in a local ENU/scene frame.
+Facets come directly from the projected DEM grid (Nouvel-style rectangular cells, one rectangular mean-plane facet per cell — a mean-plane fit to the cell's four corners giving its area, centroid, unit normal, and the two edge vectors), built once per scene in a local ENU/scene frame.
 
 Scene building (CPU, float64): DEM window → facet centers `(N,3)`, unit normals `(N,3)`, areas `(N,)` in the local frame; nav → per-trace platform positions + track unit vectors in the same frame.
 
 **Projected area handling.** Facet *sizing* is defined in projected map units (the DEM posting, e.g. 50 m in EPSG:3413), but every vertex is carried through projected → geodetic → ECEF → local ENU before tessellation, so the stored areas and normals are *true ground* quantities — the projection's scale distortion never enters the physics. The consequence is that a "50 m" facet is 50 m on the map, not on the ground: at 75°N the EPSG:3413 point scale is k ≈ 0.98666, so a 50 m projected cell is ≈ 50.68 m of true ground and its area is (1/k)² ≈ 2.7% larger than 50 × 50 m².
 
-> **What this means for simc comparison:** simc steps its per-trace grid in true (ECEF) meters, so at nominally matched 50 m settings its facets are (1/k)² smaller in area than ours. Total incoherent power scales with per-facet area (power ∝ A², facet count ∝ 1/A over fixed ground), so soundersim/simc total power sits at a *constant* ratio of (1/k)² ≈ 1.028 at the test scenes' latitude. Both tools produce relative power, so the parity metric gates on the ratio's *constancy* across traces (coefficient of variation), and the median ratio is recorded and checked against this explanation rather than forced to 1.
+> **What this means for simc comparison:** simc steps its per-trace grid in true (ECEF) meters, so at nominally matched 50 m settings its cells are (1/k)² smaller in area than ours. Total incoherent power scales with per-facet area (power ∝ (A cosθ)², facet count ∝ 1/A over fixed ground), so it also depends on the *tessellation granularity*: simc splits each cell into two triangles of area ≈ A/2 (contributing 2·(A/2)² = A²/2 per cell), while we use one rectangular mean-plane facet of area A (contributing A² per cell) — a factor of 2. Combined with the area scale, soundersim/simc total power sits at a *constant* ratio of 2·(1/k)² ≈ 2.055 at the test scenes' latitude. Both tools produce relative power (the ratio is a tessellation-and-projection artifact, not a physics disagreement), so the parity metric gates on the ratio's *constancy* across traces (coefficient of variation), and the median ratio is recorded and checked against this explanation rather than forced to 1.
 
 ### Kernel (JAX)
 
@@ -78,7 +78,7 @@ Metrics as implemented in `compare/metrics.py` (all five scenes pass):
 - **Peak alignment**: per-trace argmax within ±1 *facet-scale* bin. Observed: exact (0) on all scenes.
 - **First-return time**: raw-bin comparison against simc's fret, ±1 bin on flat/hill; **±3 bins on the sloped scenes (tilted, sinusoid, crater)** — verified against a 10× upsampled ground-truth surface, soundersim's first return is within ±1 bin of truth on all scenes while simc's is off by up to 3 bins there, a direct consequence of its int32-truncation DEM sampling displacing heights by up to one pixel on slopes. First-return ground locations agree within 36–93 m (simc's fret facet is a near-tie among adjacent facets on gentle geometry).
 - **Profile shape**: per-trace Pearson correlation (linear power, facet scale) ≥ 0.99. Observed ≥ 0.993.
-- **Power ratio**: gate on the per-trace total-power ratio's coefficient of variation ≤ 3% (constancy is the physics check); the median ratio is recorded, not forced to 1 — observed 1.028 = (1/k)², explained by the projected-area note above. Observed CV ≤ 1.6 × 10⁻⁴.
+- **Power ratio**: gate on the per-trace total-power ratio's coefficient of variation ≤ 3% (constancy is the physics check); the median ratio is recorded, not forced to 1 — observed 2.055 = 2·(1/k)², explained by the projected-area/tessellation note above. Observed CV ≤ 1.7 × 10⁻⁴.
 - **dB residual**: RMS over facet-scale bins above −40 dB (rel. peak), after removing the constant dB offset, ≤ 1 dB. Observed ≤ 0.64 dB.
 
 Any change to these thresholds or evaluation scales requires written justification in the test (the facet-scale evaluation and the sloped-scene fret tolerance above are the two such justifications to date, documented in `tests/test_parity.py`).

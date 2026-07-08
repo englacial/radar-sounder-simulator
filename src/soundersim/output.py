@@ -15,6 +15,7 @@ Documented conventions:
 
 import datetime
 import json
+import warnings
 
 import numpy as np
 import xarray as xr
@@ -22,8 +23,14 @@ import xarray as xr
 import soundersim
 
 
-def build_dataset(power, dropped_power, *, scene, frame, facets, track, sim_config):
-    """Assemble the output Dataset for one incoherent simulation run."""
+def build_dataset(power, dropped_power, *, scene, frame, facets, track,
+                  sim_config, field=None):
+    """Assemble the output Dataset for one simulation run.
+
+    Coherent runs pass ``field`` (complex64, same dims as power); the Dataset
+    then also carries ``field`` plus ``frequency``/``wavelength`` attrs per
+    docs/output.md.
+    """
     rc = sim_config.radar
     power = np.asarray(power, dtype=np.float32)
     n_traces, n_samples = power.shape[0], power.shape[1]
@@ -84,6 +91,12 @@ def build_dataset(power, dropped_power, *, scene, frame, facets, track, sim_conf
                  "origin_h": frame.h0, "orientation": "ENU"}),
         },
     )
+    if field is not None:
+        ds["field"] = (dims, np.asarray(field, dtype=np.complex64),
+                       {"units": "1", "long_name": "relative received field",
+                        "comment": "complex field at the carrier; power = |field|^2"})
+        ds.attrs["frequency"] = rc.f0
+        ds.attrs["wavelength"] = rc.wavelength
     if power.ndim == 3:
         ds = ds.assign_coords(side=("side", np.array(["left", "right"])))
     return ds
@@ -96,7 +109,39 @@ def combine(ds, dim):
     return abs(ds.field.sum(dim)) ** 2
 
 
-def save(ds, path):
-    """Write to NetCDF4 (incoherent data is real, so plain NetCDF4)."""
-    ds.to_netcdf(path, engine="h5netcdf")
+def save(ds, path, strict=False):
+    """Write to NetCDF4 via h5netcdf.
+
+    Incoherent Datasets are plain NetCDF4. Coherent Datasets contain complex
+    ``field`` data: by default they are written with ``invalid_netcdf=True``
+    (valid HDF5, read back transparently by ``load``/xarray). ``strict=True``
+    instead splits ``field`` into float32 ``field_real``/``field_imag`` for
+    strict-NetCDF interchange; ``load`` reassembles them.
+    """
+    if "field" in ds and strict:
+        f = ds.field
+        ds = ds.drop_vars("field")
+        ds["field_real"] = f.dims, np.ascontiguousarray(f.values.real), f.attrs
+        ds["field_imag"] = f.dims, np.ascontiguousarray(f.values.imag), f.attrs
+        ds.to_netcdf(path, engine="h5netcdf")
+    elif "field" in ds:
+        with warnings.catch_warnings():
+            # the deliberate, documented invalid_netcdf choice; don't nag
+            warnings.filterwarnings("ignore",
+                                    message=".*invalid netcdf features.*")
+            ds.to_netcdf(path, engine="h5netcdf", invalid_netcdf=True)
+    else:
+        ds.to_netcdf(path, engine="h5netcdf")
     return path
+
+
+def load(path):
+    """Read a Dataset written by ``save``, reassembling a strict-mode split
+    ``field`` from ``field_real``/``field_imag``."""
+    ds = xr.load_dataset(path, engine="h5netcdf")
+    if "field_real" in ds:
+        field = (ds.field_real.values + 1j * ds.field_imag.values).astype(
+            np.complex64)
+        ds["field"] = ds.field_real.dims, field, dict(ds.field_real.attrs)
+        ds = ds.drop_vars(["field_real", "field_imag"])
+    return ds
