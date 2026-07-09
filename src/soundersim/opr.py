@@ -201,7 +201,12 @@ def frame_scene(frame, *, n_traces=150, ct_dist=4000.0, region=None,
               "posting": 32.0, "ct_dist": ct_dist,
               "n_traces": len(idx), "nodata_fill_fraction": fill_frac,
               "vertical_datum": DATUM_NOTE}
-    scene = SyntheticScene(name, dem, transform, crs, nav_llh, params)
+    # Per-trace attitude for antenna roll_source="nav" (CReSIS Roll: radians,
+    # positive = right wing down); NaNs are treated as 0 downstream.
+    roll = (np.asarray(frame.Roll.values[idx], np.float64)
+            if "Roll" in frame else None)
+    scene = SyntheticScene(name, dem, transform, crs, nav_llh, params,
+                           nav_roll=roll)
     info = {"trace_idx": idx, "region": region, "fill_fraction": fill_frac}
     return scene, info
 

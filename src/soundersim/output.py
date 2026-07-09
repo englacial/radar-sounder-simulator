@@ -106,6 +106,13 @@ def build_dataset(power, dropped_power, *, scene, frame, facets, track,
                  "origin_h": frame.h0, "orientation": "ENU"}),
         },
     )
+    # Waveform provenance (config JSON has it too; these are for discovery).
+    wf = rc.waveform
+    ds.attrs["waveform"] = wf.kind
+    if wf.kind == "chirp":
+        ds.attrs["bandwidth"] = wf.bandwidth
+        ds.attrs["pulse_length"] = wf.pulse_length
+        ds.attrs["waveform_window"] = wf.window
     if field is not None:
         ds["field"] = (dims, np.asarray(field, dtype=np.complex64),
                        {"units": "1", "long_name": "relative received field",

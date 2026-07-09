@@ -35,12 +35,19 @@ def test_firn_investigation_integrity(tmp_path, monkeypatch):
         assert arr["depth"].size > 0
         assert np.isfinite(arr["depth"]).all()
         assert np.isfinite(arr["prof_db"]).all()
+        # complex fields are saved for every run, incl. the reference
+        assert np.iscomplexobj(arr["field"]) and np.isfinite(arr["field"]).all()
+        if rid != "reference":
+            assert np.isfinite(arr["prof_sub_db"]).all()
 
-    # layered runs carry the plateau/secondary-max diagnostics
+    # layered runs carry the plateau/secondary-max diagnostics (raw + subtracted)
     import json
     diag = json.loads((runs_dir / "equal_N10.json").read_text())
     assert diag["grad_interval_primary"]["length_m"] >= 0.0
+    assert diag["grad_interval_primary_sub"]["length_m"] >= 0.0
     assert np.isfinite(diag["realized_gamma_db"]["median"])
+    assert diag["alias_warning_fired"] is False
+    assert diag["surface_field_check_rel"] < 1e-3
 
     report = rfi.build_report()
     assert report.exists()

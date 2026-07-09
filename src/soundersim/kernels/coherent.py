@@ -20,6 +20,25 @@ out-of-window contributions are dropped (never wrapped) with their power
 |contribution|**2 accumulated per trace. Same fixed-size facet blocking as the
 incoherent kernel.
 
+``interp_bins`` (stage 4, M20): when enabled, each facet's complex
+contribution is split LINEARLY between the two adjacent bins b/b+1 with
+weights (1-w)/w, w = (twtt - t0)/dt - b, so the envelope-delay quantization
+error drops from O(dt) to the linear-interp residual (the carrier phase was
+always exact). The two split parts are windowed and dropped independently
+(dropped power accumulates |part|^2); the complex SUM of a facet's binned
+contributions is preserved exactly, but sum-of-|field|^2 is not (fields, not
+powers, are split) -- the M20 energy bookkeeping test documents both. The
+flag is a static in the jit-factory cache key (it changes the graph
+structure); the default False path traces exactly the pre-stage-4 program
+(regression-gated bit-compatible).
+
+Antenna pattern (M22): a non-isotropic pattern weights each facet's FIELD by
+g**2 (two-way, monostatic; g the one-way FIELD gain, see antenna.py),
+evaluated in-kernel from the departure direction. The pattern KIND is static
+in the jit-factory key (the isotropic path traces exactly the pre-M22
+program); the per-trace pattern vector and parameters are traced, so value
+changes never recompile.
+
 Phase precision (stage-2 plan constraint 2, decided by measurement): the f32
 hot loop computes the carrier phase from 2k*(r - r_ref) with r_ref a per-trace
 float64 reference range (platform -> facet-centroid distance), keeping the
@@ -36,6 +55,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from ..antenna import gain_fn
 from .geometry import ranges_and_cos, twtt_bin
 
 TWO_PI = 2.0 * np.pi
@@ -63,45 +83,67 @@ def lpa_contributions(position, centers, normals, areas, e1, e2, k, gamma,
 
 
 @functools.lru_cache(maxsize=None)
-def _coherent_fn(split_sides, n_samples):
+def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic"):
     """Jitted vmapped kernel for one static configuration; run-varying
-    numbers (facet blocks, positions, reference ranges, k/gamma/t0/dt/c) are
-    traced arguments, so value changes reuse the compiled kernel."""
+    numbers (facet blocks, positions, reference ranges, k/gamma/t0/dt/c,
+    pattern vector/params pv/pa/pb) are traced arguments, so value changes
+    reuse the compiled kernel. ``interp`` (static: it changes the graph)
+    enables sub-bin linear splitting; False traces exactly the pre-stage-4
+    program. ``pattern`` (static) selects the antenna gain graph; "isotropic"
+    traces exactly the pre-M22 program."""
     n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
+    gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
-    def one_trace(p, u, rr, cb, nb, ab, e1b, e2b, kf, gf, t0, dt, c):
+    def one_trace(p, u, pv, rr, cb, nb, ab, e1b, e2b, kf, gf, t0, dt, c,
+                  ga, gb):
         def step(carry, blk):
             hist, dropped = carry
             fc, fn, fa, f1, f2 = blk
             contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gf,
                                            r_ref=rr)
-            b = twtt_bin(2.0 * r / c, t0, dt)
-            valid = (b >= 0) & (b < n_samples)
-            pwr = jnp.real(contrib) ** 2 + jnp.imag(contrib) ** 2
+            if gfn is not None:
+                g = gfn((fc - p) / r[..., None], pv, ga, gb)
+                contrib = contrib * (g * g)  # two-way FIELD gain
+            twtt = 2.0 * r / c
+            b = twtt_bin(twtt, t0, dt)
+            if interp:
+                w = (twtt - t0) / dt - b.astype(jnp.float32)
+                parts = ((contrib * (1.0 - w), b), (contrib * w, b + 1))
+            else:
+                parts = ((contrib, b),)
             if split_sides:
                 right = (jnp.sum((fc - p) * u, axis=-1) > 0).astype(jnp.int32)
-                b = b + right * n_samples
-            seg = jnp.where(valid, b, n_seg)
-            h = jax.ops.segment_sum(contrib, seg, num_segments=n_seg + 1)
-            drop = jnp.sum(jnp.where(valid, jnp.float32(0.0), pwr))
-            return (hist + h[:n_seg], dropped + drop), None
+            for pc, pb in parts:
+                valid = (pb >= 0) & (pb < n_samples)
+                pwr = jnp.real(pc) ** 2 + jnp.imag(pc) ** 2
+                if split_sides:
+                    pb = pb + right * n_samples
+                seg = jnp.where(valid, pb, n_seg)
+                h = jax.ops.segment_sum(pc, seg, num_segments=n_seg + 1)
+                drop = jnp.sum(jnp.where(valid, jnp.float32(0.0), pwr))
+                hist, dropped = hist + h[:n_seg], dropped + drop
+            return (hist, dropped), None
 
         init = (jnp.zeros(n_seg, jnp.complex64), jnp.float32(0.0))
         (hist, dropped), _ = jax.lax.scan(step, init, (cb, nb, ab, e1b, e2b))
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 10))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 12))
 
 
 def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
                          k, gamma, t0, dt, n_samples, c, split_sides=False,
-                         block_size=65536):
+                         interp_bins=False, pattern=None, block_size=65536):
     """Binned coherent field for every trace.
 
     Same conventions as ``incoherent_cluttergram`` (local-frame float inputs,
     drop-not-wrap binning, [left, right] side order); returns ``(field,
     dropped)`` with field complex64 (T, n_samples) or (T, n_samples, 2) and
     dropped float32 (T,) accumulating |contribution|**2 outside the window.
+    ``interp_bins`` splits each contribution linearly between adjacent bins
+    (module docstring); default False is bit-compatible with stage 2.
+    ``pattern``: None (isotropic) or an ``antenna.pattern_args`` tuple --
+    per-facet fields then carry the g**2 two-way antenna weighting.
     """
     n = centers.shape[0]
     block_size = min(block_size, n)
@@ -126,10 +168,15 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     phase_ref = np.exp(-1j * ((2.0 * k * r_ref64) % TWO_PI))  # complex128 (T,)
     r_ref = jnp.asarray(r_ref64.astype(np.float32))
 
-    fn = _coherent_fn(split_sides, int(n_samples))
-    hist, dropped = fn(pos, uct, r_ref, cb, nb, ab, e1b, e2b, np.float32(k),
-                       np.float32(gamma), np.float32(t0), np.float32(dt),
-                       np.float32(c))
+    kind, pv, pa, pb = pattern or ("isotropic", np.zeros((len(pos), 3)),
+                                   0.0, 0.0)
+    pv = jnp.asarray(np.asarray(pv, np.float32))
+    pa, pb = np.asarray(pa, np.float32), np.asarray(pb, np.float32)
+
+    fn = _coherent_fn(split_sides, int(n_samples), bool(interp_bins), kind)
+    hist, dropped = fn(pos, uct, pv, r_ref, cb, nb, ab, e1b, e2b,
+                       np.float32(k), np.float32(gamma), np.float32(t0),
+                       np.float32(dt), np.float32(c), pa, pb)
     field = (np.asarray(hist) * phase_ref[:, None]).astype(np.complex64)
     if split_sides:
         field = field.reshape(-1, 2, n_samples).transpose(0, 2, 1)

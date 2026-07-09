@@ -31,6 +31,9 @@ class SyntheticScene:
     crs: str
     nav_llh: np.ndarray  # (n_traces, 3) float64: lat deg, lon deg, ellip. height m
     params: dict = field(default_factory=dict)
+    # Optional per-trace roll (rad, + = right wing down), used by antenna
+    # roll_source="nav" (real frames set it; synthetic scenes leave it None = 0).
+    nav_roll: np.ndarray = None
 
 
 def _build(name, z_func, params, *, n_traces=20, altitude=1000.0,

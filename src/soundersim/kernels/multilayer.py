@@ -50,8 +50,14 @@ the other kernels). The fixed-size block/scan/vmap structure matches
 incoherent.py/coherent.py; dropped power per trace accumulates out-of-window
 AND invalid-path (shadow/non-converged) contributions.
 
+Antenna pattern (M22): a non-isotropic pattern weights each contribution by
+the two-way antenna gain evaluated at the DEPARTURE direction of the AIR leg
+(platform -> first crossing point): field *= g**2 (coherent) / power *= g**4
+(incoherent), g the one-way FIELD gain (antenna.py). Pattern kind is static
+in the factory key; pattern vector/params are traced.
+
 Compilation caching: the jitted callable is built once per static
-configuration -- ``(mode, split_sides, n_samples, n_crossed)``, memoized via
+configuration -- ``(mode, split_sides, n_samples, n_crossed, pattern)``, memoized via
 ``functools.lru_cache`` -- with every run-varying number (t0/dt/c/gamma/k0,
 per-leg eps/index/attenuation, interface lookup constants, facet blocks,
 positions) passed as traced arguments, so repeat calls (and calls that change
@@ -66,6 +72,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from ..antenna import gain_fn
 from ..physics import fresnel_te
 from ..refraction import snell_crossing
 from .geometry import twtt_bin
@@ -92,7 +99,8 @@ def _grid_consts(facets):
 
 
 @functools.lru_cache(maxsize=None)
-def _refracted_fn(coherent, split_sides, n_samples, n_crossed):
+def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
+                  pattern="isotropic"):
     """Build (once per static configuration) the jitted vmapped kernel.
 
     Everything numeric that can vary between runs is a traced argument:
@@ -104,6 +112,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed):
     ``jax.enable_x64()`` so tracing happens in the f64 scope.
     """
     n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
+    gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
     def path(p, q, consts, n_leg, eps_leg, att):
         """Chained refracted path platform -> facet centers (float64).
@@ -117,7 +126,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed):
         opl = jnp.zeros(q.shape[:-1], q.dtype)
         loss_db, sum_par, sum_perp = opl, opl, opl
         tau2 = jnp.ones_like(opl)
-        c_first = c_last = None
+        c_first = c_last = x_first = None
         for i, (gc, gn, coef, mp, mn) in enumerate(consts):
             # Pass 1 (mean plane) only anchors the facet lookup: sub-facet
             # accuracy is plenty, and Newton is quadratic -- 10 iterations is
@@ -137,6 +146,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed):
             c_inc = jnp.maximum(jnp.cos(r2.theta1), _C_MIN)
             if i == 0:
                 c_first = c_inc
+                x_first = r2.x  # first crossing: departure leg is p -> here
             g = fresnel_te(eps_leg[i], eps_leg[i + 1], c_inc, xp=jnp).gamma
             tau2 = tau2 * (1.0 - g * g)
             opl = opl + n_leg[i] * r2.s1
@@ -146,10 +156,10 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed):
             c_last = jnp.maximum(jnp.cos(r2.theta2), _C_MIN)
             cur = r2.x
         return (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c_first,
-                c_last)
+                c_last, x_first)
 
-    def one_trace(p, u, blocks, consts, n_leg, eps_leg, att, t0, dt, c,
-                  gamma, k0):
+    def one_trace(p, u, pv, blocks, consts, n_leg, eps_leg, att, t0, dt, c,
+                  gamma, k0, pa, pb):
         assert len(consts) == n_crossed
         cb, nb, ab, e1b, e2b = blocks
 
@@ -158,7 +168,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed):
             fc, fn, fa, f1, f2 = blk
             q = fc.astype(jnp.float64)
             (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c0,
-             c_last) = path(p, q, consts, n_leg, eps_leg, att)
+             c_last, x_first) = path(p, q, consts, n_leg, eps_leg, att)
             # Final leg (medium j): crossing -> facet.
             d = cur - q                       # facet -> last crossing (up-path)
             s_j = jnp.sqrt(jnp.sum(d * d, axis=-1))
@@ -174,6 +184,14 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed):
             att_f = 10.0 ** (-loss_db / 10.0)  # two-way FIELD = one-way power
             cos_t = jnp.sum(rhat * fn.astype(jnp.float64), axis=-1)
             spread = tau2 * flux / (l_par * l_perp)
+            if gfn is not None:
+                # Antenna gain at the air-leg departure direction; g**2 on the
+                # (squared-in-incoherent) amplitude = field convention.
+                d0 = x_first - p
+                dhat0 = d0 / jnp.maximum(
+                    jnp.sqrt(jnp.sum(d0 * d0, axis=-1)), 1e-30)[..., None]
+                g = gfn(dhat0, pv, pa, pb)
+                spread = spread * (g * g)
             if coherent:
                 kj = k0 * nj
                 s1 = jnp.sinc(jnp.sum(rhat * f1.astype(jnp.float64), -1)
@@ -205,12 +223,12 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed):
         (hist, dropped), _ = jax.lax.scan(step, init, (cb, nb, ab, e1b, e2b))
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0) + (None,) * 10))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 12))
 
 
 def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                           *, mode, t0, dt, n_samples, c, gamma=0.0, k0=None,
-                          split_sides=False, block_size=65536):
+                          split_sides=False, pattern=None, block_size=65536):
     """Binned refracted-path contributions from one target interface.
 
     positions/u_ct: (T, 3) platform positions / cross-track unit vectors
@@ -218,7 +236,9 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     the interfaces above it (top-down). ``eps_leg``/``att_leg``: per-leg medium
     permittivity and one-way attenuation (dB/km), len == len(crossed) + 1.
     ``gamma``/``k0`` are the target reflection coefficient and vacuum
-    wavenumber (coherent mode only).
+    wavenumber (coherent mode only). ``pattern``: None (isotropic) or an
+    ``antenna.pattern_args`` tuple -- contributions then carry the two-way
+    antenna gain at the air-leg departure direction (g**2 field / g**4 power).
 
     Returns ``(out, dropped)`` NumPy arrays: out is float32 power (incoherent)
     or complex64 field (coherent), (T, n_samples) or (T, n_samples, 2) with
@@ -249,12 +269,18 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     pos = np.asarray(positions, np.float64)
     uct = np.asarray(u_ct, np.float64)
 
-    fn = _refracted_fn(coherent, split_sides, int(n_samples), len(crossed))
+    kind, pv, pa, pb = pattern or ("isotropic", np.zeros((len(pos), 3)),
+                                   0.0, 0.0)
+    pv = np.asarray(pv, np.float64)
+    pa, pb = np.asarray(pa, np.float64), np.asarray(pb, np.float64)
+
+    fn = _refracted_fn(coherent, split_sides, int(n_samples), len(crossed),
+                       kind)
     with jax.enable_x64():
-        hist, dropped = fn(pos, uct, blk, consts, n_leg, eps, att,
+        hist, dropped = fn(pos, uct, pv, blk, consts, n_leg, eps, att,
                            np.float64(t0), np.float64(dt), np.float64(c),
                            np.float64(gamma),
-                           np.float64(0.0 if k0 is None else k0))
+                           np.float64(0.0 if k0 is None else k0), pa, pb)
         hist, dropped = np.asarray(hist), np.asarray(dropped)
     if split_sides:
         hist = hist.reshape(-1, 2, n_samples).transpose(0, 2, 1)

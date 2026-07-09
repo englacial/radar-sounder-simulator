@@ -74,15 +74,18 @@ def test_opr_frame(case):
 @pytest.mark.integration
 @pytest.mark.parametrize("case", rocb.CASES, ids=lambda c: c["frame_id"])
 def test_opr_frame_coherent_bed(case, tmp_path):
-    """Coherent surface+bed xOPR case (M18, combined): coherent multilayer
-    kernel on a subdivided facet grid with a BedMachine bed under the PGC
-    surface DEM. Gated against BOTH the frame's Surface pick (coherent surface-
-    layer leading edge) and its Bottom pick (bed-layer nadir timing, floor-
-    aware). Reduced traces/reach and a tmp out_root keep the test fast and leave
+    """Coherent surface+bed xOPR case (M18 structure, M24 processing level):
+    coherent multilayer kernel with the MCoRDS-like chirp + 7-element array
+    (alias-free dt/4 grid, decimated back onto the frame axis) on a subdivided
+    facet grid with a BedMachine bed under the PGC surface DEM. Gated against
+    BOTH the frame's Surface pick (coherent surface-layer leading edge) and its
+    Bottom pick (bed-layer nadir timing, floor-aware). Reduced traces/reach, a
+    small dense sub-segment, and a tmp out_root keep the test fast and leave
     the report artifacts from tools/run_opr_coherent_bed.py untouched."""
     try:
         metrics, out = rocb.run_case(
-            case, n_traces=25, ct_dist=1200.0, out_root=tmp_path, spacing=64.0)
+            case, n_traces=25, ct_dist=1200.0, out_root=tmp_path, spacing=64.0,
+            dense_traces=60, dense_spacing=1.5, dense_ct=800.0)
     except Exception as e:
         if not _cached(case):
             pytest.skip(f"no local cache for {case['frame_id']} and remote "
@@ -111,13 +114,20 @@ def test_opr_frame_coherent_bed(case, tmp_path):
     # Recorded diagnostics are present and finite.
     for k in ("input_bed_error_floor_bins", "speckle_contrast",
               "lpa_nadir_error", "bed_surface_power_ratio_db",
-              "dropped_power_fraction"):
+              "dropped_power_fraction", "alias_free_dt",
+              "clutter_to_surface_db", "speckle_contrast_multilooked",
+              "unfocused_surface_gain_db"):
         assert k in metrics and metrics[k]["value"] == metrics[k]["value"]
+
+    # M24: the chirped run must be alias-free (simulate() warning silent) and
+    # the dense unfocused processing must not trip the Doppler guard.
+    assert metrics["alias_free_dt"]["alias_warning_fired"] is False
+    assert metrics["unfocused_surface_gain_db"]["doppler_guard_warned"] is False
 
     # Artifacts exist for the report builder.
     written = json.loads((out / "metrics.json").read_text())
     assert written["case"] == f"opr_{case['frame_id']}_coherent_bed"
     assert written["group"] == "xOPR clutter"
     for fig in ("radargram_vs_coherent_bed.png", "per_layer_split.png",
-                "speckle.png"):
+                "speckle.png", "unfocused_dense.png"):
         assert (out / fig).exists()

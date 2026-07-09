@@ -1,4 +1,12 @@
-"""Scalar wave-physics helpers (relative-power conventions, no absolute calibration)."""
+"""Scalar wave-physics helpers (relative-power conventions, no absolute calibration).
+
+Antenna gain convention (stage 4, M22; see antenna.py): patterns are ONE-WAY
+FIELD gains g (peak-normalized, dimensionless). Monostatic two-way weighting:
+fields are multiplied by g_tx * g_rx = g**2 (coherent/multilayer kernels) and
+power by (g**2)**2 = g**4 (incoherent kernel) -- i.e. NEVER define G = g**2 as
+a power gain and then square again; the incoherent kernel is consistent with
+|coherent field|**2 by construction.
+"""
 
 from typing import Any, NamedTuple
 
