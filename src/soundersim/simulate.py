@@ -185,9 +185,26 @@ def _wire_scene_dems(scene, sim_config):
     return sim_config.model_copy(update={"interfaces": interfaces}), dem_refs
 
 
+def _joint_pad_to(j, n_max):
+    """Power-of-two padding bucket for a joint-path target under ``j``
+    interfaces (capped at ``n_max``, the run's deepest stack): log2(N_max)
+    executables serve every target layer, with <= 2x padded no-op work."""
+    b = 1
+    while b < j:
+        b *= 2
+    return min(b, n_max)
+
+
 def _simulate_multilayer(scene, sim_config):
     """Multilayer run: surface via the stage-2 kernels (bit-compatible),
-    deeper interfaces via the refracted-path kernel; one layer per interface."""
+    deeper interfaces via the refracted-path kernel; one layer per interface.
+
+    ``sim_config.refraction`` picks the crossing solver for targets under
+    >= 2 interfaces; single-crossing targets (e.g. the bed of a two-media
+    run) always use the sequential path -- the two-point solve is exact
+    there and the joint solver reproduces it to ~2e-11 m (config.py).
+    Joint-path calls are padded to power-of-two interface counts so target
+    layers share compiled executables (kernels/multilayer.py docstring)."""
     if sim_config.radar.waveform.interp_bins:
         raise ValueError(
             "waveform.interp_bins is not yet supported for multilayer runs "
@@ -233,10 +250,14 @@ def _simulate_multilayer(scene, sim_config):
                     track.positions, track.u_ct, surf.centers, surf.normals,
                     surf.areas, **window)
         else:
+            refr = sim_config.refraction if j > 1 else "sequential"
+            n_max = len(layered.interfaces) - 1
             out, drop = refracted_cluttergram(
                 track.positions, track.u_ct, target, layered.interfaces[:j],
                 eps[:j + 1], att[:j + 1], mode=sim_config.mode, gamma=gamma_j,
-                k0=k0 if coherent else None, **window)
+                k0=k0 if coherent else None, refraction=refr,
+                pad_to=_joint_pad_to(j, n_max) if refr == "joint" else None,
+                **window)
         outs.append(out)
         drops.append(drop)
 

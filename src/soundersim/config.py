@@ -189,10 +189,22 @@ class SimConfig(BaseModel):
     ``media`` are ordered top-down (air, ice, ..., substrate) and ``interfaces``
     are the boundaries between them (surface, layer_1, ..., bed), so there is
     always exactly one more medium than interface.
+
+    ``refraction`` selects the multilayer refracted-path solver for targets
+    under two or more interfaces (kernels/multilayer.py): ``"joint"``
+    (default) solves all crossings of the stack at once (the true stationary
+    path of the anchored local planes; O(1)-in-layer-count compiled graph),
+    ``"sequential"`` chains per-interface two-point solves (the stage-3
+    approximation, exact only for one crossing). Targets under a SINGLE
+    interface always use the sequential path: with one crossing the two-point
+    solve is already exact (no chaining approximation exists) and the joint
+    solver reproduces it to ~2e-11 m, so the switch only affects deeper
+    stacks. See docs/refraction.md.
     """
 
     mode: Literal["incoherent", "coherent"]
     split_sides: bool = False
+    refraction: Literal["sequential", "joint"] = "joint"
     radar: RadarConfig
     facets: FacetConfig
     media: list[Medium] = Field(default_factory=_default_media)
