@@ -81,3 +81,122 @@ FULL configuration. Actual: wide 74.4 s, firn_N10 353.2 s, firn_N20 1458.3 s
 4. Measured-vs-sim processing asymmetry stands (f-k SAR + 11 looks vs
    unfocused per-trace raw at 103 m spacing): structure/relative levels are
    the claim, not texture or absolute calibration.
+
+# CSARP_qlook (unfocused) added: the focusing hypothesis, tested (2026-07-28)
+
+Hypothesis under test: the residual mid-band deficit of the sims is (partly)
+an artefact of comparing our UNFOCUSED sims against the SAR-FOCUSED
+CSARP_standard product. `CSARP_qlook` -- pulse compression + presums, NO SAR
+focusing -- is the like-for-like target, so the tool now loads and compares
+against BOTH products.
+
+## How qlook loaded / what had to be aligned
+
+`load_frame(SEASON, FRAME_ID, data_product="CSARP_qlook")` works unchanged
+(cache `outputs/cache/frame_2019_Greenland_P3_20190418_01_009_CSARP_qlook.nc`,
+15 MB). Differences vs CSARP_standard, and how each is handled:
+
+- FAST TIME: IDENTICAL grid -- t0 = 0.26667 us, dt = 16.667 ns, 3044 samples
+  (asserted and recorded as `measured_products.qlook.same_fast_time_grid`).
+  No resampling or re-anchoring needed; the radargram panels reuse the same
+  windowing code path.
+- SLOW TIME: 1265 traces vs standard's 3335 (~39 m vs ~15 m posting). Each
+  product gets its OWN sub-frame, own closest-approach trace, own along-track
+  axis (`sub_frame` is product-agnostic), and its own panel extent.
+- GAIN: qlook is ~11.2 dB hotter in raw amplitude (99.9th pct over the frame)
+  -- different presum/multilook normalization. This cancels exactly, because
+  every depth profile is already normalized to its OWN surface peak. Radargram
+  panels get PER-PRODUCT colour limits (99.5th pct over the sim window), which
+  they already did per-panel.
+- Layer picks: `load_bottom_pick` is keyed on season/frame and interpolates
+  onto whatever slow_time grid it is given, so the qlook panel carries the
+  same Surface/Bottom picks.
+
+## Result: the two measured products are nearly identical in depth-power
+
+Nadir depth-power at the closest-approach trace, dB rel own surface peak
+(medians; `run_config.json:band_levels_db_rel_surface`):
+
+| profile            | 5-20 | 20-60 | 60-120 | **20-70** | **80-120** |
+|--------------------|------|-------|--------|-----------|------------|
+| measured standard  |-20.4 | -19.1 | -34.4  | **-20.2** | **-36.2**  |
+| measured qlook     |-21.5 | -19.4 | -32.1  | **-20.5** | **-35.3**  |
+| surface+bed        |-46.3 | -58.8 | -67.1  | -61.1     | -67.8      |
+| firn_N10           |-23.3 | -32.9 | -50.8  | -32.8     | -60.8      |
+| firn_N20           |-25.6 | -32.4 | -43.4  | -34.1     | -45.2      |
+| firn_N40           |-28.5 | -37.1 | -45.4  | -37.3     | -48.0      |
+| firn_N80           |-26.5 | -32.8 | -39.6  | -33.1     | -42.3      |
+| firn_N40 rand s0/1/2 | -  | -     | -      | -33.7 / -34.1 / -34.2 | -50.6 / -46.5 / -47.7 |
+
+qlook MINUS standard: **+0.34 dB** in 20-70 m, **+0.88 dB** in 80-120 m;
+profile Pearson r (5-200 m) = **0.995**. The two products are the same curve
+to within a dB over the entire firn column (see depth_profile.png: the dashed
+grey qlook trace sits on top of the solid black standard trace).
+
+Profile correlation of each run against both products (metrics.json
+`profile_correlation.corr_standard_* / corr_qlook_*`):
+
+| run | r vs standard | r vs qlook |
+|-----|---------------|------------|
+| surface+bed | 0.677 | 0.655 |
+| firn_N10 | 0.890 | 0.887 |
+| firn_N20 | 0.946 | 0.943 |
+| firn_N40 | 0.949 | 0.945 |
+| firn_N80 | 0.933 | 0.934 |
+| firn_N40_s0/s1/s2 | 0.943 / 0.948 / 0.924 | 0.946 / 0.950 / 0.928 |
+
+## Verdict: SAR focusing does NOT explain the mid-band gap
+
+The mid-band (20-70 m) sim deficit is essentially unchanged when the
+comparison is moved to the unfocused product (metrics.json
+`band_delta_vs_measured`):
+
+| run | vs standard | vs qlook | change |
+|-----|-------------|----------|--------|
+| firn_N10 | -12.7 dB | -12.3 dB | +0.34 |
+| firn_N20 | -14.0 | -13.6 | +0.34 |
+| firn_N40 | -17.1 | -16.8 | +0.34 |
+| firn_N80 | -12.9 | -12.6 | +0.34 |
+| firn_N40 random (3 seeds) | -13.5 / -13.9 / -14.0 | -13.2 / -13.5 / -13.7 | +0.34 |
+| surface+bed | -40.9 | -40.5 | +0.34 |
+
+Deep band (80-120 m) moves the other way by 0.9 dB (qlook is the SLIGHTLY
+weaker reference there, so the deficits grow: N80 -6.1 -> -7.0 dB, N20
+-9.0 -> -9.9 dB).
+
+So the focusing-vs-unfocused asymmetry is worth **~0.3 dB, not ~8-10 dB** --
+the hypothesis is rejected. The mechanism is straightforward in hindsight:
+the depth profile is a RATIO to the trace's own surface peak, and f-k SAR
+focusing raises the surface and the (equally specular, equally along-track
+coherent) firn layers by nearly the same factor, so the ratio survives
+focusing almost untouched. Focusing changes texture, along-track resolution
+and off-nadir clutter rejection -- all visible in radargram panels 1 vs 2,
+where the qlook panel is visibly grainier with less along-track continuity --
+but not the nadir layer-to-surface ratio that the band levels measure.
+
+Honest caveats on this test:
+- qlook is not a perfect analogue of "one raw unfocused trace": it still
+  carries incoherent presum averaging, which suppresses speckle much as
+  multilooking does. It removes SAR FOCUSING from the comparison, which is
+  what the hypothesis was about, but it does not remove all averaging.
+- Single trace, single frame. The bands are medians over a 5 m-smoothed
+  profile at one closest-approach trace per product (the two products' own
+  closest traces, ~6 m and ~88 m from the borehole respectively).
+- The remaining 12-17 dB mid-band deficit therefore still wants a physical
+  explanation: unconverged N (3-6 dB/doubling per the firn investigation),
+  point-sampled rather than volume-integrated permittivity contrasts, no
+  volume scatter, and no small-scale (sub-32 m DEM) layer roughness.
+
+## Bookkeeping: wide surface+bed run re-simulated at the recorded config
+
+The cached `runs/wide_surface_bed.npz` had drifted to a 100-trace scene while
+all seven firn runs are the pilot-shrunk 60-trace / 4-chunk configuration
+recorded in `run_config.json`. `--report-only` now reads that file
+(`_recorded_cfg`) instead of the module defaults, so re-assembly uses the
+configuration the cache was built with; the wide run was re-simulated once at
+60 traces (45.6 s -- the only simulation this touched, no firn run re-ran).
+Consequence: the levels and correlations above supersede the earlier section's
+values (e.g. profile r for N=20 0.90 -> 0.946, N=80 0.880 -> 0.933; the
+surface+bed 5-20 m level -38.7 -> -46.3 dB). Gates still pass on the
+re-assembled run: surface leading edge median 0.00 frame bins, bed nadir
+median 3.9 bins vs input floor 4.0, firn seam 1.02e-3.

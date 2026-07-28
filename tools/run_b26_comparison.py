@@ -6,14 +6,23 @@ the coherent simulator on a ~10 km sub-segment centered on the closest
 approach and compares four aligned radargram panels on shared twtt /
 along-track axes:
 
-  1. measured (CSARP_standard, dB) with Surface/Bottom picks + B26 marker;
-  2. simulated coherent, surface + BedMachine bed only (M24 machinery:
+  1. measured CSARP_standard (SAR-FOCUSED: f-k SAR + 11-look) with
+     Surface/Bottom picks + B26 marker;
+  2. measured CSARP_qlook (UNFOCUSED: pulse compression + presums only) --
+     the like-for-like target for our unfocused per-trace sims;
+  3. simulated coherent, surface + BedMachine bed only (M24 machinery:
      ArcticDEM 32 m surface, BedMachine bed, MCoRDS chirp + 7-element array);
-  3. simulated, surface + N=10 firn layers + bed;
-  4. simulated, surface + N=20 firn layers + bed;
+  4+. simulated, surface + N firn layers + bed (equal + random placements);
 
-plus a nadir depth-power profile at the closest-approach trace (measured vs
-the three sims, upper ~150 m, B26-style) and the run-configuration table.
+plus a nadir depth-power profile at the closest-approach trace (both measured
+products vs the sims, upper ~200 m, B26-style) and the run-configuration table.
+
+The two measured products share the frame's fast-time grid EXACTLY (t0 =
+0.2667 us, dt = 16.667 ns, 3044 samples) but differ in along-track posting
+(standard 3335 traces / ~14.7 m vs qlook 1265 traces / ~39 m) and in absolute
+gain (qlook runs ~10 dB hotter here: different presum/multilook normalization).
+Every depth profile is normalized to its OWN surface peak, so the product gain
+cancels; the radargram panels get per-product colour limits (99.5th pct).
 
 Instrument model: the SEASON'S OWN MCoRDS parameters, read from the frame's
 param_records/param_sar/param_array structs in the CSARP_standard .mat
@@ -59,9 +68,11 @@ Honesty notes (carried into the report): (1) 32 m DEM posting -> statistical
 (speckle/envelope), not phase-deterministic; (2) ~11 m facets -> recorded LPA
 nadir-error estimate; (3) equal-placement point-sampled layers -> morphology
 comparison, not calibrated absolute levels (see the firn findings'
-random-vs-equal caveat); (4) the measured frame is SAR-processed
-(CSARP_standard: f-k SAR + 11-look multilook) while the sims are unfocused
-per-trace raw -- compare structure/relative levels, not resolution.
+random-vs-equal caveat); (4) CSARP_standard is SAR-processed
+(f-k SAR + 11-look multilook) while the sims are unfocused per-trace raw --
+CSARP_qlook is carried alongside precisely to bound how much of the gap that
+processing asymmetry explains; compare structure/relative levels, not
+resolution.
 
 Run: uv run python tools/run_b26_comparison.py            # pilot + runs + report
      uv run python tools/run_b26_comparison.py --report-only
@@ -141,6 +152,11 @@ PRE_SURF_US, POST_BED_US = 0.8, 2.0  # twtt window margins around the picks
 SEAM_WIN_US = 1.5             # seam-check window after the surface peak
 PROFILE_MAX_M = 200.0         # nadir depth-power comparison depth range
 BAND_EDGES_M = (5.0, 20.0, 60.0, 120.0)  # firn band-level diagnostics
+# Extra (overlapping) bands for the focused-vs-unfocused diagnostic: the
+# mid-band where the sims sit below the measured, and the deep firn band.
+EXTRA_BANDS = ((20.0, 70.0), (80.0, 120.0))
+GAP_BAND = "20-70m"            # headline band for the band-delta metric
+MEAS = {"standard": "measured", "qlook": "measured_qlook"}  # profile keys
 
 
 # ========================================================================
@@ -232,6 +248,19 @@ def mcords_2019_params():
     }
     PARAMS_JSON.write_text(json.dumps(doc, indent=1) + "\n")
     return doc
+
+
+def load_qlook_frame():
+    """CSARP_qlook (UNFOCUSED quick-look: pulse compression + presums, no SAR
+    focusing) for the same frame -- the like-for-like measured target for our
+    unfocused sims. Returns None if it cannot be loaded (diagnostic only; the
+    rest of the comparison does not depend on it)."""
+    try:
+        return load_frame(SEASON, FRAME_ID, data_product="CSARP_qlook")
+    except Exception as e:  # offline / product missing for this season
+        print(f"  [warn] CSARP_qlook unavailable: {type(e).__name__}: {e}",
+              flush=True)
+        return None
 
 
 # ========================================================================
@@ -662,13 +691,22 @@ def profile_vs_depth(power, twtt, t_surf, dt, smooth_m=5.0):
     return depth, db
 
 
-def band_levels(depth, db, edges=BAND_EDGES_M):
+def band_levels(depth, db, edges=BAND_EDGES_M, extra=EXTRA_BANDS):
     out = {}
-    for lo, hi in zip(edges[:-1], edges[1:]):
+    for lo, hi in list(zip(edges[:-1], edges[1:])) + list(extra):
         m = (depth >= lo) & (depth < hi)
         out[f"{lo:.0f}-{hi:.0f}m"] = (float(np.median(db[m])) if m.any()
                                       else float("nan"))
     return out
+
+
+def profile_corr(ref, others, lo=5.0, hi=PROFILE_MAX_M):
+    """Pearson r of dB depth profiles vs ``ref`` (name -> (depth, db)), the
+    others interpolated onto ref's depth axis over [lo, hi] m."""
+    d_r, db_r = ref
+    m = (d_r >= lo) & (d_r <= hi)
+    return {k: float(np.corrcoef(db_r[m], np.interp(d_r[m], d, db))[0, 1])
+            for k, (d, db) in others.items()}
 
 
 def surface_peak_twtt(power, twtt, t_guess, dt):
@@ -697,6 +735,7 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
     params = mcords_2019_params()
 
     frame = load_frame(SEASON, FRAME_ID)
+    qframe = load_qlook_frame()
     bot_full = load_bottom_pick(frame)
     cfg_dict = {"n_traces": n_traces, "ct_wide": ct_wide, "ct_firn": ct_firn,
                 "along_m": along_m, "layer_counts": tuple(layer_counts),
@@ -825,27 +864,60 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
     bed_depth_pick = float(thick_pk[j0]) if np.isfinite(thick_pk[j0]) else None
 
     # --- nadir depth-power profiles (closest trace, upper PROFILE_MAX_M) ---
+    # Both measured products are treated identically: own closest-approach
+    # trace, own surface peak, dB rel that peak -- so the ~10 dB product gain
+    # difference (different presum/multilook normalization) cancels.
     meas = np.asarray(fsub.Data.values, np.float64)  # (T_native, twtt_full)
     tw_full = frame.twtt.values
     prof = {}
-    t_surf_meas = surface_peak_twtt(meas[[i0]], tw_full,
-                                    np.array([fsub.Surface.values[i0]]),
-                                    float(tw_full[1] - tw_full[0]))[0]
-    d_m, db_m = profile_vs_depth(meas[i0], tw_full, t_surf_meas,
-                                 float(tw_full[1] - tw_full[0]))
-    prof["measured"] = (d_m, db_m)
+
+    def _meas_profile(sub, tw_p, i):
+        dtp = float(tw_p[1] - tw_p[0])
+        t_s = surface_peak_twtt(np.asarray(sub.Data.values[[i]], np.float64),
+                                tw_p, np.array([sub.Surface.values[i]]),
+                                dtp)[0]
+        return profile_vs_depth(np.asarray(sub.Data.values[i], np.float64),
+                                tw_p, t_s, dtp)
+
+    prof["measured"] = _meas_profile(fsub, tw_full, i0)
+    qsub, qinfo, qlook = None, None, None
+    if qframe is not None:
+        qsub, qinfo = sub_frame(qframe, cfg_dict["along_m"])
+        tw_q = qframe.twtt.values
+        prof["measured_qlook"] = _meas_profile(qsub, tw_q, qinfo["i0_local"])
+        qlook = {"sub": qsub, "info": qinfo, "twtt": tw_q,
+                 "same_fast_time_grid": bool(len(tw_q) == len(tw_full)
+                                             and np.allclose(tw_q, tw_full))}
     for name, E in totals.items():
         p = np.abs(E[j0]) ** 2
         t_s = surface_peak_twtt(p[None], tw, np.array([surf_pick[j0]]), dt)[0]
         prof[name] = profile_vs_depth(p, tw, t_s, dt)
     bands = {k: band_levels(d, db) for k, (d, db) in prof.items()}
-    corr = {}
-    dm, dbm = prof["measured"]
-    mm = (dm >= 5.0) & (dm <= PROFILE_MAX_M)
-    for name in totals:
-        ds_, dbs = prof[name]
-        dbs_i = np.interp(dm[mm], ds_, dbs)
-        corr[name] = float(np.corrcoef(dbm[mm], dbs_i)[0, 1])
+
+    # Correlations against BOTH measured products; each reference also scores
+    # the other measured product (the qlook-vs-standard row).
+    def _targets(ref_key):
+        t = {k: prof[k] for k in totals}
+        other = MEAS["qlook"] if ref_key == MEAS["standard"] else MEAS["standard"]
+        if other in prof:
+            t[other] = prof[other]
+        return t
+
+    corr = profile_corr(prof[MEAS["standard"]], _targets(MEAS["standard"]))
+    corr_q = (profile_corr(prof[MEAS["qlook"]], _targets(MEAS["qlook"]))
+              if MEAS["qlook"] in prof else {})
+    # band deltas (sim - measured, dB) in the two diagnostic bands
+    gap_bands = [f"{lo:.0f}-{hi:.0f}m" for lo, hi in EXTRA_BANDS]
+    gap_run = ("firn_N40" if "firn_N40" in totals
+               else f"firn_N{max(cfg_dict['layer_counts'])}")
+    deltas = {}
+    for tag, mkey in MEAS.items():
+        if mkey not in bands:
+            continue
+        deltas[tag] = {k: {b: round(bands[k][b] - bands[mkey][b], 2)
+                           for b in gap_bands}
+                       for k in list(totals) + [m for m in MEAS.values()
+                                                if m != mkey and m in bands]}
 
     # --- metrics ---
     rec = "recorded only"
@@ -904,11 +976,37 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         "profile_correlation": {
             "value": corr.get("firn_N%d" % max(cfg_dict["layer_counts"])),
             "threshold": None, "pass": True, "op": "record",
-            **{f"r_{k.replace('+', '_')}": v for k, v in corr.items()},
+            **{f"corr_standard_{k.replace('+', '_')}": v
+               for k, v in corr.items()},
+            **{f"corr_qlook_{k.replace('+', '_')}": v
+               for k, v in corr_q.items()},
             "note": "Pearson r of the nadir depth-power dB profiles "
             f"(measured vs sim, 5-{PROFILE_MAX_M:.0f} m below the surface "
-            "peak) at the closest-approach trace. Morphology diagnostic; the "
-            "processing levels differ (SAR vs raw). " + rec},
+            "peak) at each product's own closest-approach trace, against BOTH "
+            "measured products: corr_standard_* = vs CSARP_standard (f-k SAR "
+            "+ 11 looks), corr_qlook_* = vs CSARP_qlook (unfocused, the "
+            "like-for-like processing). corr_standard_measured_qlook / "
+            "corr_qlook_measured are the two products against each other. "
+            "Morphology diagnostic. " + rec},
+        "band_delta_vs_measured": {
+            "value": (deltas.get("qlook", deltas.get("standard", {}))
+                      .get(gap_run, {}).get(GAP_BAND, float("nan"))),
+            "gap_run": gap_run,
+            "threshold": None, "pass": True, "op": "record",
+            "bands": gap_bands,
+            "measured_standard_db": {b: round(bands["measured"][b], 2)
+                                     for b in gap_bands},
+            "measured_qlook_db": ({b: round(bands["measured_qlook"][b], 2)
+                                   for b in gap_bands}
+                                  if "measured_qlook" in bands else None),
+            "delta_vs_standard": deltas.get("standard"),
+            "delta_vs_qlook": deltas.get("qlook"),
+            "note": "median depth-power level (dB rel own surface peak) minus "
+            "the measured product's level, in the mid-band "
+            f"{gap_bands[0]} and deep firn band {gap_bands[1]}; value = "
+            f"firn_N40 vs CSARP_qlook in {GAP_BAND}. Negative = the sim sits "
+            "BELOW the measurement. The vs_qlook column removes the SAR-"
+            "focusing asymmetry from the comparison. " + rec},
         "simulation_wall_s": {
             "value": round(diag_bed["wall_s"] + sum(
                 d[0]["wall_s"] for d in firn_runs.values()), 1),
@@ -941,7 +1039,20 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                          f"random placements (n, seed): "
                          f"{cfg_dict.get('random_runs', ())}",
         "band_levels_db_rel_surface": bands,
+        "band_delta_db_sim_minus_measured": deltas,
         "profile_correlation_r": corr,
+        "profile_correlation_r_qlook": corr_q,
+        "measured_products": {
+            "standard": {"n_traces": int(frame.sizes["slow_time"]),
+                         "note": "f-k SAR sigma_x 2.5 m + 11-look, dline 6"},
+            "qlook": (None if qframe is None else {
+                "n_traces": int(qframe.sizes["slow_time"]),
+                "same_fast_time_grid": qlook["same_fast_time_grid"],
+                "gain_ratio_p999_vs_standard_db": round(float(
+                    10.0 * np.log10(
+                        np.percentile(np.abs(qframe.Data.values), 99.9)
+                        / np.percentile(np.abs(frame.Data.values), 99.9))), 2),
+                "note": "unfocused: pulse compression + presums, no SAR"})},
         "trace_spacing_m": float(np.median(np.diff(s_sim))),
         "closest_trace": {"sim_index": j0, "native_index": int(i0),
                           "s_rel_m": float(s_sim[j0])},
@@ -952,9 +1063,27 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
     }
     (out / "run_config.json").write_text(json.dumps(config, indent=1) + "\n")
 
+    qnote = ""
+    if MEAS["qlook"] in bands:
+        mp = config["measured_products"]["qlook"]
+        qnote = (
+            f" MEASURED PRODUCTS: CSARP_standard (f-k SAR + 11 looks, "
+            f"{config['measured_products']['standard']['n_traces']} traces) AND "
+            f"CSARP_qlook (UNFOCUSED: pulse compression + presums, "
+            f"{mp['n_traces']} traces, identical fast-time grid: "
+            f"{mp['same_fast_time_grid']}; ~{mp['gain_ratio_p999_vs_standard_db']:+.0f}"
+            f" dB product gain difference, cancelled by the per-profile "
+            f"surface-peak normalization). The two measured profiles correlate "
+            f"r={corr_q.get('measured', float('nan')):.2f} and differ by "
+            f"{deltas['qlook']['measured'][GAP_BAND]:+.1f} dB (standard minus "
+            f"qlook) in the {GAP_BAND} band. {gap_run} sits "
+            f"{deltas['standard'][gap_run][GAP_BAND]:+.1f} dB vs standard "
+            f"and {deltas['qlook'][gap_run][GAP_BAND]:+.1f} dB vs qlook "
+            f"there, so the SAR-focusing asymmetry accounts for only part of "
+            f"the mid-band deficit.")
     notes = _notes(cfg_dict, params, spacing, lpa_err, le, bed_med, in_med,
                    off_s, off_b, dt, seam, sinfo, bed_depth_bm, bed_depth_pick,
-                   wall_actual, budget_log, waux)
+                   wall_actual, budget_log, waux, qnote)
     doc = {"case": "b26_comparison", "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -962,7 +1091,7 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
 
     figs = _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas,
                     surf_pick, bot_pick, off_s, off_b, prof, cfg_dict, dt, t0,
-                    firn_runs)
+                    firn_runs, qlook)
     if report:
         _report(out, config, metrics, notes, figs, params)
     # mirror into outputs/verification/ so tools/make_report.py picks it up
@@ -973,13 +1102,15 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             shutil.copy2(f, VER_OUT / f.name)
     print(f"b26_comparison: wall {wall_actual:.1f} s | surf med "
           f"{le['median_bins']:.2f} bins | bed med {bed_med:.1f} vs floor "
-          f"{in_med:.1f} | seam {max(seam.values()):.3g} | corr {corr}",
+          f"{in_med:.1f} | seam {max(seam.values()):.3g} | corr {corr}\n"
+          f"  corr_qlook {corr_q}\n  band delta ({GAP_BAND}) "
+          f"{ {t: {k: v[GAP_BAND] for k, v in d.items()} for t, d in deltas.items()} }",
           flush=True)
     return metrics, out
 
 
 def _notes(cfg, params, spacing, lpa_err, le, bed_med, in_med, off_s, off_b,
-           dt, seam, sinfo, bm, pk, wall, budget_log, waux):
+           dt, seam, sinfo, bm, pk, wall, budget_log, waux, qnote=""):
     wf = params["waveform"]
     shr = (", ".join(f"{k}={v}" for s in budget_log.get("shrink_steps", [])
                      for k, v in s.items()) or "none")
@@ -1027,23 +1158,41 @@ def _notes(cfg, params, spacing, lpa_err, le, bed_med, in_med, off_s, off_b,
         f"f-k SAR processed + 11-look multilooked (~25 m along-track "
         f"resolution) while the sims are unfocused per-trace raw at "
         f"~{cfg['along_m']/cfg['n_traces']:.0f} m trace spacing -- compare "
-        f"structure and relative levels, not resolution or absolute texture; "
+        f"structure and relative levels, not resolution or absolute texture "
+        f"(CSARP_qlook is carried alongside to bound this); "
         f"(5) the sim carries no volume scatter, no receiver noise floor, no "
-        f"waveform-playlist gain stitching.")
+        f"waveform-playlist gain stitching." + qnote)
 
 
 # ========================================================================
 # figures + report
 # ========================================================================
 def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
-             bot_pick, off_s, off_b, prof, cfg, dt, t0, firn_runs):
+             bot_pick, off_s, off_b, prof, cfg, dt, t0, firn_runs, qlook=None):
     s_km = sinfo["s_rel_m"] / 1e3
     s_sim = s_km[idx]
     tw_us = tw * 1e6
-    meas_db = _db(meas)
-    b0f = int(np.searchsorted(tw_full, tw[0] - 1e-12))
-    meas_win = meas_db[:, b0f:b0f + len(tw)]
-    bot_native = _bot_native(fsub)
+
+    def _meas_panel(sub, tw_p, s_axis, label, data=None):
+        """Measured-product panel spec. Colour limits are PER PRODUCT (99.5th
+        pct over the sim window): standard and qlook differ by ~10 dB of
+        processing gain, so a shared scale would black out one of them."""
+        db = _db(np.asarray(sub.Data.values if data is None else data,
+                            np.float64))
+        a = int(np.searchsorted(tw_p, tw[0] - 1e-12))
+        win = db[:, a:a + len(tw)]
+        return {"db": db, "twtt": tw_p, "s": s_axis, "label": label,
+                "surf": np.asarray(sub.Surface.values, np.float64),
+                "bot": _bot_native(sub),
+                "vmax": float(np.percentile(win[np.isfinite(win)], 99.5))}
+
+    meas_panels = [_meas_panel(fsub, tw_full, s_km,
+                               "measured (CSARP_standard: f-k SAR + 11 looks)",
+                               data=meas)]
+    if qlook is not None:
+        meas_panels.append(_meas_panel(
+            qlook["sub"], qlook["twtt"], qlook["info"]["s_rel_m"] / 1e3,
+            "measured (CSARP_qlook: unfocused, pulse compression + presums)"))
 
     # Radargram panels: equal placements + one representative random seed
     # (all random seeds appear in the depth profile).
@@ -1052,34 +1201,37 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
     sims_db = {k: _db(np.abs(totals[k]) ** 2) for k in names}
     vs = np.percentile(np.concatenate(
         [v[np.isfinite(v) & (v > -290)] for v in sims_db.values()]), 99.5)
-    fm = meas_win[np.isfinite(meas_win)]
-    vm = np.percentile(fm, 99.5)
 
     def _panels(fig_path, t_lo, t_hi, title, dyn_db=60.0):
-        # Measured panel re-windowed from the full frame so an extended t_hi
-        # (below the sim window) still shows real data.
-        b_lo = max(0, int(np.searchsorted(tw_full, t_lo * 1e-6)) - 1)
-        b_hi = min(len(tw_full), int(np.searchsorted(tw_full, t_hi * 1e-6)) + 1)
-        meas_w = meas_db[:, b_lo:b_hi]
-        ext_m = [s_km[0], s_km[-1], tw_full[b_hi - 1] * 1e6, tw_full[b_lo] * 1e6]
+        # Measured panels are re-windowed from the full frame so an extended
+        # t_hi (below the sim window) still shows real data.
         ext_s = [s_sim[0], s_sim[-1], tw_us[-1], tw_us[0]]
-        n_panels = 1 + len(names)
+        n_meas = len(meas_panels)
+        n_panels = n_meas + len(names)
         ncols = 2 if n_panels <= 4 else 3
         nrows = -(-n_panels // ncols)
         fig, axs = plt.subplots(nrows, ncols, figsize=(8 * ncols, 5.5 * nrows),
                                 sharex=True, sharey=True)
         axs = np.atleast_1d(axs).ravel()
-        im = axs[0].imshow(meas_w.T, aspect="auto", extent=ext_m, cmap="gray",
-                           vmin=vm - dyn_db, vmax=vm)
-        fig.colorbar(im, ax=axs[0], shrink=0.9, pad=0.01, label="dB")
-        axs[0].plot(s_km, fsub.Surface.values * 1e6, "c", lw=0.7,
+        for num, (ax, mp) in enumerate(zip(axs, meas_panels), start=1):
+            twp = mp["twtt"]
+            b_lo = max(0, int(np.searchsorted(twp, t_lo * 1e-6)) - 1)
+            b_hi = min(len(twp), int(np.searchsorted(twp, t_hi * 1e-6)) + 1)
+            ext_m = [mp["s"][0], mp["s"][-1], twp[b_hi - 1] * 1e6,
+                     twp[b_lo] * 1e6]
+            im = ax.imshow(mp["db"][:, b_lo:b_hi].T, aspect="auto",
+                           extent=ext_m, cmap="gray",
+                           vmin=mp["vmax"] - dyn_db, vmax=mp["vmax"])
+            fig.colorbar(im, ax=ax, shrink=0.9, pad=0.01, label="dB")
+            ax.plot(mp["s"], mp["surf"] * 1e6, "c", lw=0.7,
                     label="Surface pick")
-        axs[0].plot(s_km, bot_native * 1e6, "r", lw=0.7, label="Bottom pick")
-        axs[0].axvline(0.0, color="y", ls="--", lw=1.0, label="B26 core")
-        axs[0].set_title("1. measured (CSARP_standard, dB)")
-        for ax in axs[1 + len(names):]:  # unused panels (fewer layer counts)
+            ax.plot(mp["s"], mp["bot"] * 1e6, "r", lw=0.7, label="Bottom pick")
+            ax.axvline(0.0, color="y", ls="--", lw=1.0, label="B26 core")
+            ax.set_title(f"{num}. {mp['label']}")
+        for ax in axs[n_panels:]:  # unused panels (fewer layer counts)
             ax.set_visible(False)
-        for num, (ax, name) in enumerate(zip(axs[1:], names), start=2):
+        for num, (ax, name) in enumerate(zip(axs[n_meas:], names),
+                                         start=n_meas + 1):
             im = ax.imshow(sims_db[name].T, aspect="auto", extent=ext_s,
                            cmap="gray", vmin=vs - dyn_db, vmax=vs)
             fig.colorbar(im, ax=ax, shrink=0.9, pad=0.01, label="dB")
@@ -1093,9 +1245,8 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
             ax.set_ylim(t_hi, t_lo)
             if ax.get_visible() and ax.has_data():
                 ax.legend(loc="center right", fontsize=7)
-        for ax in axs[2:]:
-            ax.set_xlabel("along-track from B26 (km)")
-        for ax in axs[::2]:
+                ax.set_xlabel("along-track from B26 (km)")
+        for ax in axs[::ncols]:
             ax.set_ylabel("twtt (us)")
         fig.suptitle(title)
         fig.tight_layout()
@@ -1105,7 +1256,8 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
     f1 = out / "radargrams_full.png"
     # Extend past the sim window so the bed pick and echo sit clear of the
     # frame edge (measured panel carries real data there; sims end at ext_s).
-    t_bed_max = np.nanmax([np.nanmax(bot_native), np.nanmax(bot_pick + off_b)])
+    t_bed_max = np.nanmax([np.nanmax(meas_panels[0]["bot"]),
+                           np.nanmax(bot_pick + off_b)])
     # 100 dB range so the (weak) bed reflection is visible above the floor;
     # the near-surface figure keeps 60 dB for firn-zone contrast.
     _panels(f1, tw_us[0], max(tw_us[-1], t_bed_max * 1e6 + 1.5),
@@ -1120,20 +1272,25 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
     # depth-power profile at the closest trace
     f3 = out / "depth_profile.png"
     fig, ax = plt.subplots(figsize=(8.5, 6))
-    styles = {"measured": ("k", 1.6), "surface+bed": ("C7", 1.1),
-              "firn_N10": ("C0", 1.2), "firn_N20": ("C3", 1.2),
-              "firn_N40": ("C1", 1.2), "firn_N80": ("C2", 1.4)}
+    styles = {"measured": ("k", 1.6, "-"),
+              "measured_qlook": ("0.45", 1.6, "--"),
+              "surface+bed": ("C7", 1.1, "-"),
+              "firn_N10": ("C0", 1.2, "-"), "firn_N20": ("C3", 1.2, "-"),
+              "firn_N40": ("C1", 1.2, "-"), "firn_N80": ("C2", 1.4, "-")}
+    labels = {"measured": "measured (CSARP_standard, focused)",
+              "measured_qlook": "measured (CSARP_qlook, unfocused)"}
     rand_labeled = False
     for name, (d, db) in prof.items():
         m = (d >= -5) & (d <= PROFILE_MAX_M)
-        if "_s" in name:  # random-placement seeds: thin shared-color lines
+        if "_s" in name and name.startswith("firn"):  # random-placement seeds
             lbl = None if rand_labeled else \
                 name.split("_s")[0] + " random (3 seeds)"
             rand_labeled = True
             ax.plot(d[m], db[m], color="C4", lw=0.9, alpha=0.8, label=lbl)
             continue
-        c, lw = styles.get(name, ("C5", 1.0))
-        ax.plot(d[m], db[m], color=c, lw=lw, label=name)
+        c, lw, ls = styles.get(name, ("C5", 1.0, "-"))
+        ax.plot(d[m], db[m], color=c, lw=lw, ls=ls,
+                label=labels.get(name, name))
     ax.axvline(rfi.ZMAX, color="k", ls=":", lw=1.2)
     ax.text(rfi.ZMAX + 1.5, -72, f"B26 core ends ({rfi.ZMAX:.1f} m)",
             fontsize=8, rotation=90, va="bottom")
@@ -1192,6 +1349,26 @@ def _report(out, config, metrics, notes, figs, params):
         f"<tr><th>{html.escape(k)}</th>"
         + "".join(f"<td>{v:.1f}</td>" for v in bands[k].values()) + "</tr>"
         for k in bands)
+    # correlation / band-delta table against BOTH measured products
+    cs, cq = config["profile_correlation_r"], config["profile_correlation_r_qlook"]
+    dl = config["band_delta_db_sim_minus_measured"]
+    dbands = list(next(iter(dl["standard"].values()))) if dl else []
+    prows = []
+    def _c(v, fmt="{:.3f}"):
+        return "-" if v is None else fmt.format(v)
+
+    for k in list(cs) + (["measured"] if "measured" in cq else []):
+        cells = [f"<td>{_c(cs.get(k))}</td>", f"<td>{_c(cq.get(k))}</td>"]
+        for tag in ("standard", "qlook"):
+            for b in dbands:
+                cells.append(
+                    f"<td>{_c(dl.get(tag, {}).get(k, {}).get(b), '{:+.1f}')}</td>")
+        prows.append(f"<tr><th>{html.escape(k)}</th>{''.join(cells)}</tr>")
+    dhdr = "".join(f"<th>{t}<br>{b}</th>" for t in ("std", "qlook")
+                   for b in dbands)
+    prof_tbl = (f"<table><tr><th>profile</th><th>r vs standard</th>"
+                f"<th>r vs qlook</th>{dhdr}</tr>{''.join(prows)}</table>")
+
     figs_html = "".join(
         f"<h3>{html.escape(Path(f).stem)}</h3>"
         f"<img src='data:image/png;base64,{b64(f)}' alt='{Path(f).name}'>"
@@ -1207,6 +1384,12 @@ def _report(out, config, metrics, notes, figs, params):
 {''.join(mrows)}</table>
 <h2>Nadir band levels (dB rel own surface peak, closest-approach trace)</h2>
 <table><tr><th>profile</th>{bhdr}</tr>{brows}</table>
+<h2>Profile correlation and band deltas vs BOTH measured products</h2>
+<p>r = Pearson correlation of the dB depth profile (5-{PROFILE_MAX_M:.0f} m);
+the delta columns are profile level minus that measured product's level (dB;
+negative = below the measurement). CSARP_qlook is the UNFOCUSED product, the
+like-for-like target for the unfocused sims.</p>
+{prof_tbl}
 <h2>Run configuration</h2>
 <table>{''.join(crows)}</table>
 <h2>2019 season instrument parameters (from the frame's own product file)</h2>
@@ -1221,15 +1404,33 @@ def _report(out, config, metrics, notes, figs, params):
     print(f"wrote {out / 'report.html'}")
 
 
+def _recorded_cfg(out):
+    """Scene configuration of the CACHED runs (out/run_config.json). Re-using
+    it is what makes --report-only cheap: the pilot may have shrunk n_traces
+    below the module default, and any mismatch changes the run cache keys, so
+    the tool would silently re-simulate everything instead of re-assembling."""
+    p = Path(out) / "run_config.json"
+    if not p.exists():
+        return {}
+    c = json.loads(p.read_text())
+    return {k: c[k] for k in ("n_traces", "ct_wide", "ct_firn", "along_m",
+                              "layer_counts", "random_runs") if k in c}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--report-only", action="store_true",
-                    help="rebuild figures/report from cached runs")
+                    help="rebuild figures/report from cached runs (reuses the "
+                         "recorded run_config.json scene configuration)")
     ap.add_argument("--no-pilot", action="store_true")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--n-traces", type=int, default=None)
     args = ap.parse_args()
+    kw = _recorded_cfg(OUT_DEFAULT) if args.report_only else {}
+    if args.n_traces:
+        kw["n_traces"] = args.n_traces
     run_all(do_pilot=not (args.report_only or args.no_pilot),
-            force=args.force)
+            force=args.force, **kw)
 
 
 if __name__ == "__main__":

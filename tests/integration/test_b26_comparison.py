@@ -32,9 +32,9 @@ _spec.loader.exec_module(rb)
 from soundersim.opr import CACHE_DIR  # noqa: E402
 
 
-def _cached():
+def _cached(product="CSARP_standard"):
     return (CACHE_DIR /
-            f"frame_{rb.SEASON}_{rb.FRAME_ID}_CSARP_standard.nc").exists()
+            f"frame_{rb.SEASON}_{rb.FRAME_ID}_{product}.nc").exists()
 
 
 @pytest.mark.integration
@@ -80,3 +80,29 @@ def test_b26_comparison_tiny(tmp_path):
         assert (out / fig).exists()
     assert (out / "report.html").exists()
     assert (out / "run_config.json").exists()
+
+    # --- CSARP_qlook (unfocused) comparison path ---------------------------
+    cfgd = json.loads((out / "run_config.json").read_text())
+    corr = metrics["profile_correlation"]
+    bands = cfgd["band_levels_db_rel_surface"]
+    sims = [k for k in cfgd["profile_correlation_r"]
+            if not k.startswith("measured")]
+    # metric keys spell "surface+bed" as "surface_bed"
+    assert all(f"corr_standard_{k.replace('+', '_')}" in corr for k in sims)
+    bd = metrics["band_delta_vs_measured"]
+    assert bd["bands"] == ["20-70m", "80-120m"]
+    assert set(bd["delta_vs_standard"]) >= set(sims)
+    assert bd["value"] == bd["value"] and bd["gap_run"] in sims  # finite
+    if not _cached("CSARP_qlook") and cfgd["measured_products"]["qlook"] is None:
+        pytest.skip("CSARP_qlook not cached and remote access failed")
+    # qlook loaded: same fast-time grid, its own profile, and both correlation
+    # / band-delta families keyed against it.
+    q = cfgd["measured_products"]["qlook"]
+    assert q["same_fast_time_grid"] is True
+    assert "measured_qlook" in bands and "20-70m" in bands["measured_qlook"]
+    assert all(f"corr_qlook_{k.replace('+', '_')}" in corr for k in sims)
+    assert bd["measured_qlook_db"] and set(bd["delta_vs_qlook"]) >= set(sims)
+    # the two measured products score each other (product-difference rows)
+    assert "corr_qlook_measured" in corr and "corr_standard_measured_qlook" in corr
+    assert "measured_qlook" in bd["delta_vs_standard"]
+    assert "measured" in bd["delta_vs_qlook"]
