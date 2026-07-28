@@ -47,6 +47,23 @@ complex128 outside the loop (2k*r_ref reduced mod 2pi in float64). Measured in
 tests/test_coherent_kernel.py: ~1e-4 wavelengths equivalent range error at
 20 km / 195 MHz, vs the lambda/50 requirement (a naive f32 exp(-2jkr) path
 measures ~1e-3 wavelengths there -- also passing, but with 10x less margin).
+
+Sub-facet roughness (Gerekos et al. 2023, roughness.py, docs/roughness.md):
+``roughness=(sigma_m, corr_length_m, phasors, n_terms)`` replaces each
+facet's response by
+
+    F * <Phi> + F * sqrt(D_Phi) * phi_r
+
+with F = j*(k/2pi)*gamma*cos(theta)*exp(-2jkr)/r^2 the non-phase-integral
+factor (identical for both terms, antenna weighting included), <Phi> the
+smooth sinc*sinc response times exp(-sigma^2 K^2/2) (K = 2 k cos(theta)),
+D_Phi the Eq 21 incoherent variance from the facet's in-plane coefficients
+A0 = 2k(rhat.e1)/|e1| etc., and phi_r the per-facet frozen speckle phasor
+(one realization per run: along-track speckle decorrelates through F's
+phase/geometry, as in the paper). ``n_terms`` is static (series length);
+``roughness=None`` (default) traces exactly the smooth program, and
+sigma = 0 is bit-identical to it (attenuation 1.0 exact, D_Phi 0.0 exact;
+regression-gated).
 """
 
 import functools
@@ -56,6 +73,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..antenna import gain_fn
+from ..roughness import d_phi, mean_attenuation
 from .geometry import ranges_and_cos, twtt_bin
 
 TWO_PI = 2.0 * np.pi
@@ -82,25 +100,62 @@ def lpa_contributions(position, centers, normals, areas, e1, e2, k, gamma,
     return 1j * amp * xp.exp(1j * phase), r
 
 
+def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
+                            gamma, sigma, l, phasors, n_terms, r_ref=0.0):
+    """Rough-facet LPA contributions (module docstring): the smooth response
+    times exp(-sigma^2 K^2 / 2) plus the incoherent sqrt(D_Phi)*phi_r term
+    with the same non-phase factor. Ops shared with ``lpa_contributions`` are
+    computed identically (sigma = 0 is bit-identical to the smooth path)."""
+    d = position - centers
+    r = jnp.sqrt(jnp.sum(d * d, axis=-1))
+    cos = jnp.sum(d * normals, axis=-1) / r
+    rhat = d / r[..., None]
+    d1 = jnp.sum(rhat * e1, axis=-1)
+    d2 = jnp.sum(rhat * e2, axis=-1)
+    s1 = jnp.sinc(d1 * (k / np.pi))
+    s2 = jnp.sinc(d2 * (k / np.pi))
+    amp = (k / TWO_PI) * gamma * cos * areas * s1 * s2 / (r * r)
+    phase = (-2.0 * k) * (r - r_ref)
+    # facet-local in-plane coefficients: sinc arg k*d1 == Lx*A0/2
+    l1 = jnp.sqrt(jnp.sum(e1 * e1, axis=-1))
+    l2 = jnp.sqrt(jnp.sum(e2 * e2, axis=-1))
+    kk = 2.0 * k * cos
+    dp = d_phi(sigma, l, kk, 2.0 * k * d1 / l1, 2.0 * k * d2 / l2, l1, l2,
+               n_terms=n_terms)
+    amp_i = (k / TWO_PI) * gamma * cos / (r * r) * jnp.sqrt(dp)
+    contrib = amp * mean_attenuation(sigma, kk) + amp_i * phasors
+    return 1j * contrib * jnp.exp(1j * phase), r
+
+
 @functools.lru_cache(maxsize=None)
-def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic"):
+def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
+                 rough_terms=0):
     """Jitted vmapped kernel for one static configuration; run-varying
     numbers (facet blocks, positions, reference ranges, k/gamma/t0/dt/c,
     pattern vector/params pv/pa/pb) are traced arguments, so value changes
     reuse the compiled kernel. ``interp`` (static: it changes the graph)
     enables sub-bin linear splitting; False traces exactly the pre-stage-4
     program. ``pattern`` (static) selects the antenna gain graph; "isotropic"
-    traces exactly the pre-M22 program."""
+    traces exactly the pre-M22 program. ``rough_terms`` (static: series
+    length) switches the per-facet response to the rough-facet form (module
+    docstring); 0 (smooth) traces exactly the pre-roughness program (the
+    phasor blocks and sigma/l scalars are then unused)."""
     n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
     gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
-    def one_trace(p, u, pv, rr, cb, nb, ab, e1b, e2b, kf, gf, t0, dt, c,
-                  ga, gb):
+    def one_trace(p, u, pv, rr, cb, nb, ab, e1b, e2b, phb, sig, lc, kf, gf,
+                  t0, dt, c, ga, gb):
         def step(carry, blk):
             hist, dropped = carry
-            fc, fn, fa, f1, f2 = blk
-            contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gf,
-                                           r_ref=rr)
+            if rough_terms:
+                fc, fn, fa, f1, f2, fph = blk
+                contrib, r = rough_lpa_contributions(
+                    p, fc, fn, fa, f1, f2, kf, gf, sig, lc, fph, rough_terms,
+                    r_ref=rr)
+            else:
+                fc, fn, fa, f1, f2 = blk
+                contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gf,
+                                               r_ref=rr)
             if gfn is not None:
                 g = gfn((fc - p) / r[..., None], pv, ga, gb)
                 contrib = contrib * (g * g)  # two-way FIELD gain
@@ -125,15 +180,17 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic"):
             return (hist, dropped), None
 
         init = (jnp.zeros(n_seg, jnp.complex64), jnp.float32(0.0))
-        (hist, dropped), _ = jax.lax.scan(step, init, (cb, nb, ab, e1b, e2b))
+        xs = (cb, nb, ab, e1b, e2b) + ((phb,) if rough_terms else ())
+        (hist, dropped), _ = jax.lax.scan(step, init, xs)
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 12))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 15))
 
 
 def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
                          k, gamma, t0, dt, n_samples, c, split_sides=False,
-                         interp_bins=False, pattern=None, block_size=65536):
+                         interp_bins=False, pattern=None, roughness=None,
+                         block_size=65536):
     """Binned coherent field for every trace.
 
     Same conventions as ``incoherent_cluttergram`` (local-frame float inputs,
@@ -144,6 +201,11 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     (module docstring); default False is bit-compatible with stage 2.
     ``pattern``: None (isotropic) or an ``antenna.pattern_args`` tuple --
     per-facet fields then carry the g**2 two-way antenna weighting.
+    ``roughness``: None (smooth, the default -- traces the pre-roughness
+    program) or ``(sigma_m, corr_length_m, phasors, n_terms)`` with
+    ``phasors`` the (n_facets,) complex per-facet speckle phasors
+    (``roughness.speckle_phasors``) and ``n_terms`` the static series length
+    (``roughness.n_terms_for``); see the module docstring.
     """
     n = centers.shape[0]
     block_size = min(block_size, n)
@@ -173,8 +235,19 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     pv = jnp.asarray(np.asarray(pv, np.float32))
     pa, pb = np.asarray(pa, np.float32), np.asarray(pb, np.float32)
 
-    fn = _coherent_fn(split_sides, int(n_samples), bool(interp_bins), kind)
-    hist, dropped = fn(pos, uct, pv, r_ref, cb, nb, ab, e1b, e2b,
+    if roughness is not None:
+        sigma, lcorr, phasors, n_terms = roughness
+        ph = np.pad(np.asarray(phasors, np.complex64), (0, pad))
+        phb = jnp.asarray(ph.reshape(n_blocks, block_size))
+    else:
+        sigma = lcorr = 0.0
+        n_terms = 0
+        phb = jnp.zeros((), jnp.complex64)  # unused (rough_terms == 0)
+
+    fn = _coherent_fn(split_sides, int(n_samples), bool(interp_bins), kind,
+                      int(n_terms))
+    hist, dropped = fn(pos, uct, pv, r_ref, cb, nb, ab, e1b, e2b, phb,
+                       np.float32(sigma), np.float32(lcorr),
                        np.float32(k), np.float32(gamma), np.float32(t0),
                        np.float32(dt), np.float32(c), pa, pb)
     field = (np.asarray(hist) * phase_ref[:, None]).astype(np.complex64)

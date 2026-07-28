@@ -24,7 +24,7 @@ with `sinc(x) = sin(x)/x` and `k = 2πf₀/c`. Contributions are complex-summed 
 
 ## Coherent vs incoherent on the same facets
 
-On identical facet grids the two kernels differ by the deterministic per-facet factor `(kΓ/2π)²·sinc²` and, physically, by what they assume about sub-facet scattering: the coherent LPA facet is a specular plate whose sinc² directivity concentrates the return at the leading edge, while the incoherent kernel's Lambertian-like `cos²θ` fills the diffuse off-nadir field. On rough surfaces with decorrelated facet phases, ensemble-averaged coherent power converges to the (scaled) incoherent power — a cross-kernel consistency test in CI. On real frames the measured radargram sits between the two kernels' predictions; capturing the diffuse/specular partition per facet from roughness statistics (Gerekos et al. 2023) is the natural future enhancement.
+On identical facet grids the two kernels differ by the deterministic per-facet factor `(kΓ/2π)²·sinc²` and, physically, by what they assume about sub-facet scattering: the coherent LPA facet is a specular plate whose sinc² directivity concentrates the return at the leading edge, while the incoherent kernel's Lambertian-like `cos²θ` fills the diffuse off-nadir field. On rough surfaces with decorrelated facet phases, ensemble-averaged coherent power converges to the (scaled) incoherent power — a cross-kernel consistency test in CI. On real frames the measured radargram sits between the two kernels' predictions; the diffuse/specular partition per facet from sub-facet roughness statistics (Gerekos et al. 2023) is available via the per-interface `roughness` config — see [roughness.md](roughness.md).
 
 ## Verification (all in the report)
 

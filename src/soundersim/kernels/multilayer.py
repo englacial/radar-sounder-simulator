@@ -94,9 +94,29 @@ sigma iteration); its win is COMPILE time -- seconds, flat in N, vs the
 chain's O(N^2) minutes -- so deep stacks win on first call and lose on
 cached repeats (measured numbers: the ``refraction_joint`` report case).
 
+Sub-facet roughness (Gerekos et al. 2023, roughness.py, docs/roughness.md;
+coherent mode only): ``roughness=(sigma_m, corr_length_m, phasors,
+n_terms)`` applies to the TARGET reflection exactly as in coherent.py, but
+with the LOCAL-medium wavenumber and refracted arrival direction: K = 2 k_j
+cos(theta_t), in-plane coefficients A0 = 2 k_j (rhat.e1)/|e1| etc., and the
+incoherent term sqrt(D_Phi)*phi_r carries the full non-phase factor
+(kj/2pi)*gamma*cos_t*spread*att_f -- transmission, refracted spreading,
+attenuation and antenna weighting identical to the coherent term.
+``crossed_sigma`` (per crossed interface) adds the TRANSMISSION coherent
+attenuation: each crossing multiplies the two-way field by
+exp(-2 sigma_i^2 K_t^2), K_t = k0 (n_i cos(theta1) - n_i+1 cos(theta2)) --
+the down- and up-going rays cross the SAME interface point in the monostatic
+geometry, so their phase perturbations add coherently ((2 K_t)^2 sigma^2 / 2
+in the exponent, i.e. the one-way exp(-sigma^2 K_t^2 / 2) to the 4th power).
+The incoherent (diffusely re-radiated) transmission term is NOT modeled --
+for the low-contrast firn case K_t is ~5 percent of the reflection K, making
+the whole crossing effect near-negligible there. Smooth defaults trace
+exactly the pre-roughness program; sigma = 0 is bit-identical to it.
+
 Compilation caching: the jitted callable is built once per static
 configuration -- ``(mode, split_sides, n_samples, n_crossed, pattern,
-refraction, joint budgets)``, memoized via ``functools.lru_cache`` -- with
+refraction, joint budgets, roughness statics)``, memoized via
+``functools.lru_cache`` -- with
 every run-varying number (t0/dt/c/gamma/k0, per-leg eps/index/attenuation,
 interface lookup constants, facet blocks, positions) passed as traced
 arguments, so repeat calls (and calls that change only numeric values, e.g.
@@ -117,6 +137,7 @@ from ..antenna import gain_fn
 from ..physics import fresnel_te
 from ..refraction import snell_crossing
 from ..refraction_joint import joint_crossings, sequential_chain
+from ..roughness import d_phi, mean_attenuation
 from .geometry import twtt_bin
 
 TWO_PI = 2.0 * np.pi
@@ -190,7 +211,8 @@ def _joint_consts(crossed, pad_to, z_platform):
 @functools.lru_cache(maxsize=None)
 def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                   pattern="isotropic", refraction="sequential",
-                  joint_newton=6, joint_backtrack=4):
+                  joint_newton=6, joint_backtrack=4, rough_terms=0,
+                  rough_cross=False):
     """Build (once per static configuration) the jitted vmapped kernel.
 
     Everything numeric that can vary between runs is a traced argument:
@@ -204,12 +226,14 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
     n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
     gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
-    def path(p, q, consts, n_leg, eps_leg, att):
+    def path(p, q, consts, n_leg, eps_leg, att, k0, sig_c):
         """Chained refracted path platform -> facet centers (float64).
 
         Leg i < j takes the incidence cosine at interface i (its lower end);
         the final leg takes the refraction cosine at interface j-1. For
         parallel planes these equal the per-medium ray angles exactly.
+        ``rough_cross`` folds the two-way transmission roughness attenuation
+        exp(-2 sig_c[i]^2 K_t^2) into tau2 (module docstring).
         """
         cur = p + jnp.zeros_like(q)
         valid = jnp.ones(q.shape[:-1], bool)
@@ -239,6 +263,9 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                 x_first = r2.x  # first crossing: departure leg is p -> here
             g = fresnel_te(eps_leg[i], eps_leg[i + 1], c_inc, xp=jnp).gamma
             tau2 = tau2 * (1.0 - g * g)
+            if rough_cross:
+                kt = k0 * (n_leg[i] * c_inc - n_leg[i + 1] * jnp.cos(r2.theta2))
+                tau2 = tau2 * jnp.exp(-2.0 * (sig_c[i] * kt) ** 2)
             opl = opl + n_leg[i] * r2.s1
             loss_db = loss_db + r2.s1 * (att[i] / 1000.0)
             sum_perp = sum_perp + r2.s1 / n_leg[i]
@@ -248,7 +275,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
         return (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c_first,
                 c_last, x_first)
 
-    def path_joint(p, q, consts, n_leg, eps_leg, att):
+    def path_joint(p, q, consts, n_leg, eps_leg, att, k0, sig_c):
         """Joint refracted path (float64): one block-tridiagonal Newton over
         ALL crossed interfaces (+ no-op padding, module docstring). Same
         returns as ``path`` (final leg excluded; added by ``step``): the
@@ -283,6 +310,12 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
         g = fresnel_te(eps_leg[:-1, None], eps_leg[1:, None], c_inc,
                        xp=jnp).gamma                  # pads: eps-matched, g = 0
         tau2 = jnp.prod(1.0 - g * g, axis=0)
+        if rough_cross:
+            # pads: index-matched and sigma 0 -> K_t = 0, factor exactly 1
+            kt = k0 * (n_leg[:-1, None] * jnp.cos(r2.theta1)
+                       - n_leg[1:, None] * jnp.cos(r2.theta2))
+            tau2 = tau2 * jnp.prod(
+                jnp.exp(-2.0 * (sig_c[:, None] * kt) ** 2), axis=0)
         c_par = jnp.where(is_pad, c_surf[None], c_inc)
         nl = n_leg[:-1, None]
         opl = jnp.sum(nl * s_up, axis=0)
@@ -294,18 +327,21 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                 c_surf, c_last, r2.x[0])
 
     def one_trace(p, u, pv, blocks, consts, n_leg, eps_leg, att, t0, dt, c,
-                  gamma, k0, pa, pb):
+                  gamma, k0, pa, pb, sig_t, l_t, sig_c):
         if refraction == "sequential":
             assert len(consts) == n_crossed
-        cb, nb, ab, e1b, e2b = blocks
 
         def step(carry, blk):
             hist, dropped = carry
-            fc, fn, fa, f1, f2 = blk
+            if rough_terms:
+                fc, fn, fa, f1, f2, fph = blk
+            else:
+                fc, fn, fa, f1, f2 = blk
             q = fc.astype(jnp.float64)
             path_fn = path if refraction == "sequential" else path_joint
             (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c0,
-             c_last, x_first) = path_fn(p, q, consts, n_leg, eps_leg, att)
+             c_last, x_first) = path_fn(p, q, consts, n_leg, eps_leg, att,
+                                        k0, sig_c)
             # Final leg (medium j): crossing -> facet.
             d = cur - q                       # facet -> last crossing (up-path)
             s_j = jnp.sqrt(jnp.sum(d * d, axis=-1))
@@ -337,6 +373,19 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                               * (kj / np.pi))
                 amp = ((kj / TWO_PI) * gamma * cos_t * fa * s1 * s2 * spread
                        * att_f)
+                if rough_terms:
+                    f1d, f2d = f1.astype(jnp.float64), f2.astype(jnp.float64)
+                    d1 = jnp.sum(rhat * f1d, -1)
+                    d2 = jnp.sum(rhat * f2d, -1)
+                    l1 = jnp.sqrt(jnp.sum(f1d * f1d, -1))
+                    l2 = jnp.sqrt(jnp.sum(f2d * f2d, -1))
+                    kk = 2.0 * kj * cos_t
+                    dp = d_phi(sig_t, l_t, kk, 2.0 * kj * d1 / l1,
+                               2.0 * kj * d2 / l2, l1, l2,
+                               n_terms=rough_terms)
+                    amp = (amp * mean_attenuation(sig_t, kk)
+                           + (kj / TWO_PI) * gamma * cos_t * spread * att_f
+                           * jnp.sqrt(dp) * fph)
                 contrib = (1j * amp * jnp.exp(-2j * k0 * opl)).astype(
                     jnp.complex64)
                 pwr = (jnp.real(contrib) ** 2
@@ -357,15 +406,16 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
 
         init = (jnp.zeros(n_seg, jnp.complex64 if coherent else jnp.float32),
                 jnp.float32(0.0))
-        (hist, dropped), _ = jax.lax.scan(step, init, (cb, nb, ab, e1b, e2b))
+        (hist, dropped), _ = jax.lax.scan(step, init, blocks)
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 12))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 15))
 
 
 def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                           *, mode, t0, dt, n_samples, c, gamma=0.0, k0=None,
-                          split_sides=False, pattern=None, block_size=None,
+                          split_sides=False, pattern=None, roughness=None,
+                          crossed_sigma=None, block_size=None,
                           refraction="sequential", pad_to=None,
                           joint_newton=6, joint_backtrack=4):
     """Binned refracted-path contributions from one target interface.
@@ -378,6 +428,15 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     wavenumber (coherent mode only). ``pattern``: None (isotropic) or an
     ``antenna.pattern_args`` tuple -- contributions then carry the two-way
     antenna gain at the air-leg departure direction (g**2 field / g**4 power).
+
+    ``roughness`` (coherent mode only): None (smooth) or ``(sigma_m,
+    corr_length_m, phasors, n_terms)`` for the TARGET reflection --
+    ``phasors`` the (n_facets,) complex per-facet speckle phasors
+    (``roughness.speckle_phasors``), ``n_terms`` the static series length
+    (``roughness.n_terms_for``). ``crossed_sigma`` (coherent mode only):
+    None or per-crossed-interface RMS heights (m, len == len(crossed),
+    zeros where smooth) for the two-way transmission attenuation
+    exp(-2 sigma^2 K_t^2) per crossing (module docstring).
 
     ``refraction`` selects the crossing solver (module docstring): the
     kernel-level default stays ``"sequential"``; simulate() passes the
@@ -397,10 +456,14 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     """
     coherent = mode == "coherent"
     joint = refraction == "joint"
+    if (roughness is not None or crossed_sigma is not None) and not coherent:
+        raise ValueError("roughness requires coherent mode")
     eps = np.asarray(eps_leg, np.float64)
     n_leg = np.sqrt(eps)
     att = np.asarray(att_leg, np.float64)
     pos = np.asarray(positions, np.float64)
+    sig_c = (np.zeros(1) if crossed_sigma is None
+             else np.asarray(crossed_sigma, np.float64))
     if joint:
         consts = _joint_consts(crossed, pad_to or len(crossed),
                                pos[:, 2].min())
@@ -408,6 +471,8 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
         n_leg = np.concatenate([np.full(kp, n_leg[0]), n_leg])
         eps = np.concatenate([np.full(kp, eps[0]), eps])
         att = np.concatenate([np.full(kp, att[0]), att])
+        if crossed_sigma is not None:
+            sig_c = np.concatenate([np.zeros(kp), sig_c])
     else:
         consts = tuple(tuple(g) for g in map(_grid_consts, crossed))
 
@@ -423,6 +488,13 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
 
     blk = (blocks(target.centers), blocks(target.normals),
            blocks(target.areas), blocks(target.e1), blocks(target.e2))
+    if roughness is not None:
+        sig_t, l_t, phasors, n_terms = roughness
+        ph = np.pad(np.asarray(phasors, np.complex64), (0, pad))
+        blk = blk + (jnp.asarray(ph.reshape(n_blocks, block_size)),)
+    else:
+        sig_t = l_t = 0.0
+        n_terms = 0
     # Positions stay float64 NumPy: converted under the x64 scope below, so
     # the platform coordinates (the largest magnitudes) are not truncated.
     uct = np.asarray(u_ct, np.float64)
@@ -434,12 +506,14 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
 
     fn = _refracted_fn(coherent, split_sides, int(n_samples),
                        None if joint else len(crossed), kind, refraction,
-                       int(joint_newton), int(joint_backtrack))
+                       int(joint_newton), int(joint_backtrack), int(n_terms),
+                       crossed_sigma is not None)
     with jax.enable_x64():
         hist, dropped = fn(pos, uct, pv, blk, consts, n_leg, eps, att,
                            np.float64(t0), np.float64(dt), np.float64(c),
                            np.float64(gamma),
-                           np.float64(0.0 if k0 is None else k0), pa, pb)
+                           np.float64(0.0 if k0 is None else k0), pa, pb,
+                           np.float64(sig_t), np.float64(l_t), sig_c)
         hist, dropped = np.asarray(hist), np.asarray(dropped)
     if split_sides:
         hist = hist.reshape(-1, 2, n_samples).transpose(0, 2, 1)

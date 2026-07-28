@@ -39,6 +39,7 @@ from .layered import build_layered_scene
 from .nav import nav_to_frame
 from .output import build_dataset
 from .physics import fresnel_normal
+from .roughness import n_terms_for, speckle_phasors
 from .scene import LocalFrame, build_facets, check_facet_size
 from .synthetic import SyntheticScene
 from .waveform import apply_waveform
@@ -110,6 +111,31 @@ def _antenna_pattern(rc, scene, track):
     return pattern_args(ant, track.u_at, track.u_ct, roll)
 
 
+def _roughness_args(iface, facets, k_local, seed):
+    """Kernel roughness tuple for one interface, or None when smooth.
+
+    ``k_local`` is the wavenumber in the medium ABOVE the interface (the
+    facets' local medium); the series length covers the nadir worst case
+    sigma^2 K^2 = (2 k_local sigma)^2. Warns when the correlation length
+    exceeds the facet size (docs/roughness.md validity limit: such roughness
+    is facet tilt and belongs in the DEM).
+    """
+    rc = iface.roughness
+    if rc is None or rc.sigma_m == 0.0:
+        return None
+    edge = max(float(np.linalg.norm(facets.e1, axis=1).max()),
+               float(np.linalg.norm(facets.e2, axis=1).max()))
+    if rc.corr_length_m > edge:
+        warnings.warn(
+            f"interface {iface.name or '?'}: roughness corr_length_m = "
+            f"{rc.corr_length_m:g} m exceeds the facet size ({edge:.1f} m); "
+            "roughness at scales above the facet is really facet tilt -- "
+            "put it in the DEM (docs/roughness.md)")
+    n_terms = n_terms_for((2.0 * k_local * rc.sigma_m) ** 2)
+    phasors = speckle_phasors(len(facets.centers), seed)
+    return (rc.sigma_m, rc.corr_length_m, phasors, n_terms)
+
+
 def simulate(scene: SyntheticScene, sim_config: SimConfig):
     """Run a simulation on a scene; returns the output xarray Dataset.
 
@@ -151,10 +177,12 @@ def simulate(scene: SyntheticScene, sim_config: SimConfig):
     min_range = max(float(track.positions[:, 2].min()
                           - facets.centers[:, 2].max()), lam)
     check_facet_size(facets, lam, min_range)
+    rough = _roughness_args(sim_config.interfaces[0], facets,
+                            2.0 * np.pi / lam, (sim_config.roughness_seed, 0))
     field, dropped = coherent_cluttergram(
         track.positions, track.u_ct, facets.centers, facets.normals,
         facets.areas, facets.e1, facets.e2, k=2.0 * np.pi / lam, gamma=gamma,
-        interp_bins=rc.waveform.interp_bins, **window)
+        interp_bins=rc.waveform.interp_bins, roughness=rough, **window)
     field = apply_waveform(field, rc, "coherent")
     return build_dataset(np.abs(field) ** 2, dropped, field=field, scene=scene,
                          frame=frame, facets=facets, track=track,
@@ -236,15 +264,23 @@ def _simulate_multilayer(scene, sim_config):
                                   - f.centers[:, 2].max()), lam_j)
             check_facet_size(f, lam_j, min_range)
 
+    ifaces = sim_config.interfaces
+    sig_all = np.array([(ic.roughness.sigma_m if ic.roughness else 0.0)
+                        for ic in ifaces])
+
     outs, drops = [], []
     for j, target in enumerate(layered.interfaces):
         gamma_j = fresnel_normal(eps[j], eps[j + 1])
+        rough = (_roughness_args(ifaces[j], layered.interfaces[j],
+                                 k0 * np.sqrt(eps[j]),
+                                 (sim_config.roughness_seed, j))
+                 if coherent else None)
         if j == 0:
             if coherent:
                 out, drop = coherent_cluttergram(
                     track.positions, track.u_ct, surf.centers, surf.normals,
                     surf.areas, surf.e1, surf.e2, k=k0, gamma=gamma_j,
-                    **window)
+                    roughness=rough, **window)
             else:
                 out, drop = incoherent_cluttergram(
                     track.positions, track.u_ct, surf.centers, surf.normals,
@@ -252,12 +288,14 @@ def _simulate_multilayer(scene, sim_config):
         else:
             refr = sim_config.refraction if j > 1 else "sequential"
             n_max = len(layered.interfaces) - 1
+            crossed_sig = (sig_all[:j] if coherent and sig_all[:j].any()
+                           else None)
             out, drop = refracted_cluttergram(
                 track.positions, track.u_ct, target, layered.interfaces[:j],
                 eps[:j + 1], att[:j + 1], mode=sim_config.mode, gamma=gamma_j,
                 k0=k0 if coherent else None, refraction=refr,
                 pad_to=_joint_pad_to(j, n_max) if refr == "joint" else None,
-                **window)
+                roughness=rough, crossed_sigma=crossed_sig, **window)
         outs.append(out)
         drops.append(drop)
 

@@ -126,7 +126,33 @@ class FacetConfig(BaseModel):
     spacing: Optional[float] = None  # facet spacing (m); None -> use DEM posting
 
 
-class DemInterface(BaseModel):
+class RoughnessConfig(BaseModel):
+    """Sub-facet Gaussian roughness of an interface (Gerekos et al. 2023;
+    docs/roughness.md). ``sigma_m`` is the RMS height along the facet normal,
+    ``corr_length_m`` the isotropic Gaussian correlation length; coherent
+    mode only. Validity: corr_length_m should not exceed the facet size
+    (larger-scale roughness belongs in the DEM as facet tilt)."""
+
+    sigma_m: float          # RMS height (m), >= 0
+    corr_length_m: float    # Gaussian correlation length (m), > 0
+
+    @model_validator(mode="after")
+    def _positive(self):
+        if self.sigma_m < 0:
+            raise ValueError("roughness sigma_m must be >= 0")
+        if self.corr_length_m <= 0:
+            raise ValueError("roughness corr_length_m must be > 0")
+        return self
+
+
+class _InterfaceBase(BaseModel):
+    """Fields shared by every interface kind."""
+
+    name: Optional[str] = None
+    roughness: Optional[RoughnessConfig] = None  # None -> smooth (exact)
+
+
+class DemInterface(_InterfaceBase):
     """An interface given by its own DEM.
 
     ``path`` points to a GeoTIFF; ``ref`` names an in-memory DEM (looked up by
@@ -135,7 +161,6 @@ class DemInterface(BaseModel):
     """
 
     kind: Literal["dem"] = "dem"
-    name: Optional[str] = None
     path: Optional[str] = None  # GeoTIFF path
     ref: Optional[str] = None   # in-memory DEM key
 
@@ -146,15 +171,14 @@ class DemInterface(BaseModel):
         return self
 
 
-class FlatInterface(BaseModel):
+class FlatInterface(_InterfaceBase):
     """A flat interface at a constant ellipsoidal elevation (m)."""
 
     kind: Literal["flat"] = "flat"
-    name: Optional[str] = None
     elevation: float  # constant ellipsoidal height (m)
 
 
-class OffsetInterface(BaseModel):
+class OffsetInterface(_InterfaceBase):
     """A constant vertical offset of another interface (e.g. surface - 2 m).
 
     ``reference`` is the index (int) or name (str) of another interface;
@@ -162,7 +186,6 @@ class OffsetInterface(BaseModel):
     """
 
     kind: Literal["offset"] = "offset"
-    name: Optional[str] = None
     reference: Union[int, str]
     offset: float  # vertical offset (m)
 
@@ -200,11 +223,17 @@ class SimConfig(BaseModel):
     solve is already exact (no chaining approximation exists) and the joint
     solver reproduces it to ~2e-11 m, so the switch only affects deeper
     stacks. See docs/refraction.md.
+
+    ``roughness_seed`` seeds the deterministic per-facet speckle phasors of
+    any interface with a ``roughness`` config (docs/roughness.md); runs with
+    the same seed are reproducible, different seeds draw independent speckle
+    realizations.
     """
 
     mode: Literal["incoherent", "coherent"]
     split_sides: bool = False
     refraction: Literal["sequential", "joint"] = "joint"
+    roughness_seed: int = 0
     radar: RadarConfig
     facets: FacetConfig
     media: list[Medium] = Field(default_factory=_default_media)
@@ -216,6 +245,10 @@ class SimConfig(BaseModel):
             raise ValueError(
                 f"need len(media) == len(interfaces) + 1; got "
                 f"{len(self.media)} media, {len(self.interfaces)} interfaces")
+        if self.mode != "coherent" and any(i.roughness is not None
+                                           for i in self.interfaces):
+            raise ValueError("interface roughness requires coherent mode "
+                             "(the incoherent kernel has no phase to perturb)")
         names = [i.name for i in self.interfaces]
         for i, iface in enumerate(self.interfaces):
             if isinstance(iface, OffsetInterface):
