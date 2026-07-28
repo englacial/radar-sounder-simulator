@@ -299,3 +299,45 @@ def test_config_roughness_validation():
             [_flat_grid_facets(0.0, 40.0, 10.0)], [1.0, 3.17], [0.0, 0.0],
             mode="incoherent", t0=0.0, dt=1e-8, n_samples=10, c=C,
             crossed_sigma=np.array([0.1]))
+
+
+def test_coherent_rough_padding_finite(disk):
+    """Zero-padded block slots (e1 = e2 = 0) must not inject NaN through the
+    incoherent term's 0/0 d_phi arguments (area-mask regression): a padded
+    rough run is finite and matches the unpadded one."""
+    kw = _disk_kw(H, 40.0 * LAM)
+    pos = np.array([[0.0, 0.0, H]])
+    m = len(disk[0])
+    ph = rg.speckle_phasors(m, seed=(7, 0))
+    rough = (0.10 * LAM, 2.0 * LAM, ph, 10)
+    full, dr0 = coherent_cluttergram(pos, UCT, *disk, roughness=rough, **kw)
+    padded, dr1 = coherent_cluttergram(pos, UCT, *disk, roughness=rough,
+                                       block_size=m // 3 + 1, **kw)
+    assert np.all(np.isfinite(padded)) and np.all(np.isfinite(dr1))
+    np.testing.assert_allclose(padded, full, rtol=2e-4, atol=1e-9)
+    np.testing.assert_allclose(dr1, dr0, rtol=1e-6)
+
+
+def test_multilayer_rough_padding_finite(slab_facets):
+    """Same regression for the multilayer kernel, where joint-path blocking
+    (block_size 4096) padded real firn scenes and produced all-NaN layers."""
+    surf, bed = slab_facets
+    pos = np.array([[0.0, 0.0, H_ML]])
+    eps, att = [1.0, EPS_ICE], [0.0, 0.0]
+    ph = rg.speckle_phasors(len(bed.centers), seed=(7, 1))
+    # window opens at the PAD slots' fake arrival (opl ~ H_ML: zeroed facets
+    # sit at the origin) so their NaN would land in-band, as in the real
+    # firn scenes that exposed the bug
+    kw = _ml_kw(t0=2.0 * (H_ML - 5.0) / C, n_samples=500)
+    rough = (0.05 * LAM_M, 1.5 * LAM_M, ph, 10)
+    full, dr0 = refracted_cluttergram(pos, UCT, bed, [surf], eps, att,
+                                      roughness=rough, **kw)
+    padded, dr1 = refracted_cluttergram(pos, UCT, bed, [surf], eps, att,
+                                        roughness=rough,
+                                        block_size=len(bed.centers) // 3 + 1,
+                                        **kw)
+    # pad-slot NaN can surface in the FIELD (in-window fake opl) or in the
+    # DROP counter (out-of-window) depending on geometry -- gate both
+    assert np.all(np.isfinite(padded)) and np.all(np.isfinite(dr1))
+    np.testing.assert_allclose(padded, full, rtol=2e-4, atol=1e-9)
+    np.testing.assert_allclose(dr1, dr0, rtol=1e-6)

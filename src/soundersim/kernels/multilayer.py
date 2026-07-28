@@ -383,9 +383,13 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                     dp = d_phi(sig_t, l_t, kk, 2.0 * kj * d1 / l1,
                                2.0 * kj * d2 / l2, l1, l2,
                                n_terms=rough_terms)
+                    # area-mask: zero-padded block slots (f1 = f2 = 0) make
+                    # the d_phi args 0/0 -> NaN; the smooth term is killed by
+                    # fa = 0 but the incoherent term has no area factor
                     amp = (amp * mean_attenuation(sig_t, kk)
-                           + (kj / TWO_PI) * gamma * cos_t * spread * att_f
-                           * jnp.sqrt(dp) * fph)
+                           + jnp.where(fa > 0,
+                                       (kj / TWO_PI) * gamma * cos_t * spread
+                                       * att_f * jnp.sqrt(dp) * fph, 0.0))
                 contrib = (1j * amp * jnp.exp(-2j * k0 * opl)).astype(
                     jnp.complex64)
                 pwr = (jnp.real(contrib) ** 2

@@ -74,7 +74,7 @@ import numpy as np
 
 from ..antenna import gain_fn
 from ..roughness import d_phi, mean_attenuation
-from .geometry import ranges_and_cos, twtt_bin
+from .geometry import twtt_bin
 
 TWO_PI = 2.0 * np.pi
 
@@ -122,7 +122,11 @@ def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
     kk = 2.0 * k * cos
     dp = d_phi(sigma, l, kk, 2.0 * k * d1 / l1, 2.0 * k * d2 / l2, l1, l2,
                n_terms=n_terms)
-    amp_i = (k / TWO_PI) * gamma * cos / (r * r) * jnp.sqrt(dp)
+    # area-mask: zero-padded block slots have e1 = e2 = 0, so l1 = l2 = 0 and
+    # the d_phi args are 0/0 -> NaN; the smooth term is killed by areas = 0
+    # but the incoherent term has no area factor, so mask it explicitly
+    amp_i = jnp.where(areas > 0,
+                      (k / TWO_PI) * gamma * cos / (r * r) * jnp.sqrt(dp), 0.0)
     contrib = amp * mean_attenuation(sigma, kk) + amp_i * phasors
     return 1j * contrib * jnp.exp(1j * phase), r
 
