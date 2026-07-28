@@ -11,6 +11,11 @@ surface-pick alignment sanity gate (median, offset-removed, <= 5 frame bins).
 Everything else is recorded, not gated (real-frame convention). The alias
 warning must be silent (asserted inside the tool on every simulate() call and
 recorded in the metrics).
+
+The rough-layer runs (firn_N40_rough_*) are far too expensive for the tiny
+run, so they are switched off there and covered CONFIG-LEVEL instead: the
+measured C&S 2020 Fig. 11 roughness must land on every internal layer
+interface and nowhere else.
 """
 
 import importlib.util
@@ -18,6 +23,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +36,40 @@ sys.modules["run_b26_comparison"] = rb
 _spec.loader.exec_module(rb)
 
 from soundersim.opr import CACHE_DIR  # noqa: E402
+from soundersim.config import RadarConfig  # noqa: E402
+
+
+def test_rough_run_config():
+    """Config-level cover of the rough runs (no simulation): the digitized
+    C&S 2020 Fig. 11 profiles interpolate + clamp onto the layer depths, and
+    firn_cfg attaches them to every INTERNAL layer interface only -- the
+    air-firn surface must stay smooth (it carries the seam check and the
+    profile normalization)."""
+    import run_firn_investigation as rfi
+
+    depths = rfi.equal_depths(40)
+    rc = RadarConfig(dt=4.1667e-9, n_samples=64, t0=0.0, f0=195e6)
+    for src, s_rng, l_rng in (("mcords", (0.02, 0.06), (2.0, 3.6)),
+                              ("ar", (0.01, 0.031), (0.9, 3.0))):
+        sig, cl = rb.layer_roughness(depths, src)
+        assert sig.shape == cl.shape == depths.shape
+        assert s_rng[0] <= sig.min() and sig.max() <= s_rng[1]
+        assert l_rng[0] <= cl.min() and cl.max() <= l_rng[1]
+        # clamped past the profile's 90 m end (B26 stack runs to 119.7 m)
+        deep = depths > 90.0
+        assert deep.any() and np.ptp(sig[deep]) == 0 and np.ptp(cl[deep]) == 0
+
+        cfg = rb.firn_cfg(rc, 10.67, depths, (sig, cl))
+        assert cfg.interfaces[0].name == "surface"
+        assert cfg.interfaces[0].roughness is None       # surface stays smooth
+        assert len(cfg.interfaces) == len(depths) + 1
+        for i, iface in enumerate(cfg.interfaces[1:]):
+            assert iface.roughness is not None
+            assert iface.roughness.sigma_m == float(sig[i])
+            assert iface.roughness.corr_length_m == float(cl[i])
+        # ... and the smooth build is untouched
+        assert all(i.roughness is None
+                   for i in rb.firn_cfg(rc, 10.67, depths).interfaces)
 
 
 def _cached(product="CSARP_standard"):
@@ -42,7 +82,7 @@ def test_b26_comparison_tiny(tmp_path):
     try:
         metrics, out = rb.run_all(
             out_root=tmp_path, n_traces=8, layer_counts=(10,), spacing=64.0,
-            do_pilot=False)
+            rough_runs=(), do_pilot=False)
     except Exception as e:
         if not _cached():
             pytest.skip(f"no local cache for {rb.FRAME_ID} and remote access "

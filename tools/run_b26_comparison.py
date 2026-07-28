@@ -12,7 +12,9 @@ along-track axes:
      the like-for-like target for our unfocused per-trace sims;
   3. simulated coherent, surface + BedMachine bed only (M24 machinery:
      ArcticDEM 32 m surface, BedMachine bed, MCoRDS chirp + 7-element array);
-  4+. simulated, surface + N firn layers + bed (equal + random placements);
+  4+. simulated, surface + N firn layers + bed (equal + random placements,
+      plus equal-placement runs whose INTERNAL layer interfaces carry the
+      measured C&S 2020 Fig. 11 sub-facet roughness);
 
 plus a nadir depth-power profile at the closest-approach trace (both measured
 products vs the sims, upper ~200 m, B26-style) and the run-configuration table.
@@ -75,6 +77,9 @@ processing asymmetry explains; compare structure/relative levels, not
 resolution.
 
 Run: uv run python tools/run_b26_comparison.py            # pilot + runs + report
+     uv run python tools/run_b26_comparison.py --no-pilot  # add runs to an
+                                # existing outputs/b26_comparison (reuses its
+                                # recorded scene config; no shrink risk)
      uv run python tools/run_b26_comparison.py --report-only
 """
 
@@ -106,8 +111,8 @@ import run_opr_coherent_bed as rocb  # noqa: E402  M24 frame+DEM+bed machinery
 from run_opr_comparison import _db  # noqa: E402
 
 from soundersim.config import (AntennaConfig, DemInterface, FacetConfig,  # noqa: E402
-                               Medium, OffsetInterface, RadarConfig, SimConfig,
-                               WaveformConfig)
+                               Medium, OffsetInterface, RadarConfig,
+                               RoughnessConfig, SimConfig, WaveformConfig)
 from soundersim.opr import (CACHE_DIR, fetch_bedmachine_window,  # noqa: E402
                             fill_nodata_nearest, frame_scene, load_bottom_pick,
                             load_frame, resample_to_grid)
@@ -136,6 +141,19 @@ LAYER_COUNTS = (10, 20, 40, 80)
 # the residual mid-band gap (firn findings: random placements yield materially
 # stronger returns). N=40 = the converged-mid-band, affordable point.
 RANDOM_RUNS = ((40, 0), (40, 1), (40, 2))
+# Rough-layer runs (n_layers, inversion source): equal-placement N=40 exactly
+# like firn_N40, but every INTERNAL layer interface carries the measured
+# sub-facet roughness of Culberg & Schroeder 2020 Fig. 11 (docs/roughness.md,
+# Gerekos 2023 rough-facet response). The air-firn SURFACE stays smooth (as
+# does the bed, which lives in the wide run), so the seam check and the
+# own-surface-peak profile normalization stay comparable across runs. Tests
+# the remaining hypothesis for the mid-band (20-70 m) deficit: diffuse
+# scattering from sub-wavelength layer roughness.
+ROUGH_RUNS = ((40, "mcords"), (40, "ar"))
+ROUGH_COST_FACTOR = 1.05      # rough/smooth simulate() wall ratio: MEASURED
+# 1.017 on a 2-trace N=40 real crop (85.1 s -> 86.5 s steady, 44469 facets);
+# sigma/lambda_firn ~ 0.05 needs only the 10-term D_Phi series, and the joint
+# refraction solve dominates the cost. 1.05 keeps a small margin.
 SHRINK_STEPS = (("n_traces", 60), ("ct_firn", 400.0), ("along_m", 7000.0))
 BUDGET_S = 12 * 3600.0        # hard ceiling, total simulation wall time
 # (raised from 100 min when N=40/80 were added, 2026-07-09, user-authorized:
@@ -433,18 +451,48 @@ def bed_cfg(rc_sim, spacing):
                                  DemInterface(name="bed")])
 
 
-def firn_cfg(rc_sim, spacing, depths):
+def _rough_table(fname):
+    """Column dict of a Culberg & Schroeder 2020 Fig. 11 digitization CSV
+    (tests/fixtures/firn/, '#' comment block then a header row)."""
+    lines = [ln for ln in (rfi.FIXDIR / fname).read_text().splitlines()
+             if ln.strip() and not ln.lstrip().startswith("#")]
+    cols = [c.strip() for c in lines[0].split(",")]
+    data = np.array([[float(x) for x in ln.split(",")] for ln in lines[1:]])
+    return dict(zip(cols, data.T))
+
+
+def layer_roughness(depths, source):
+    """(sigma_m, corr_length_m) arrays at ``depths`` for inversion ``source``
+    ('ar' | 'mcords' | 'joint'), linearly interpolated from the C&S 2020
+    Fig. 11 inverted layer-roughness profiles (0-90 m at 5 m posting) and
+    CLAMPED to the profile ends outside that range (np.interp semantics) --
+    the B26 stack runs to 119.7 m, deeper than the published inversion."""
+    a, b = _rough_table("fig11a_rms_height.csv"), \
+        _rough_table("fig11b_correlation_length.csv")
+    d = np.asarray(depths, np.float64)
+    return (np.interp(d, a["depth_m"], a[f"rms_height_{source}_m"]),
+            np.interp(d, b["depth_m"], b[f"corr_length_{source}_m"]))
+
+
+def firn_cfg(rc_sim, spacing, depths, rough=None):
     """Coherent B26 firn stack config (the investigation's layered_cfg on the
     real surface DEM): offset interfaces at surface - depth_i, point-sampled
     Kovacs permittivities, substrate = eps(deepest + 1 m). No attenuation in
     the firn media (investigation convention; < 0.2 dB one-way at 120 m for
-    any plausible cold-firn value)."""
+    any plausible cold-firn value).
+
+    ``rough`` = (sigma_m[], corr_length_m[]) per layer attaches Gerekos-2023
+    sub-facet roughness to every INTERNAL layer interface (the air-firn
+    surface stays smooth); None -> the exact smooth path."""
+    sig, cl = (None, None) if rough is None else rough
     media = [Medium(name="air", eps_r=1.0)]
     ifaces = [DemInterface(name="surface")]
     for i, d in enumerate(depths):
         media.append(Medium(name=f"firn{i}", eps_r=rfi.point_eps(d)))
+        rc = None if rough is None else RoughnessConfig(
+            sigma_m=float(sig[i]), corr_length_m=float(cl[i]))
         ifaces.append(OffsetInterface(name=f"L{i}", reference="surface",
-                                      offset=-float(d)))
+                                      offset=-float(d), roughness=rc))
     media.append(Medium(name="substrate",
                         eps_r=rfi.point_eps(float(depths[-1]) + 1.0)))
     return SimConfig(mode="coherent", split_sides=False, radar=rc_sim,
@@ -541,6 +589,13 @@ def run_sim(rid, scene_chunks, cfg, meta, runs_dir, force=False):
         tot_sum += np.asarray(ds.power.values, np.float64).sum((0, 1)) \
             + drop.sum(0)
         facets.append(_n_facets(scene.dem.shape, cfg.facets.spacing))
+    if not np.isfinite(field).all():
+        # Fail before writing the cache: a multi-hour run that produced NaN
+        # must not be recorded as done (and NaN spreads over the whole trace
+        # through the pulse convolution, so the damage is total).
+        bad = [layers[k] for k in range(field.shape[-1])
+               if not np.isfinite(field[..., k]).all()]
+        raise RuntimeError(f"{rid}: non-finite field in layers {bad}")
     drop_frac = (drop_sum / np.maximum(tot_sum, 1e-300)).tolist()
     diag = {"rid": rid, "wall_s": round(wall, 2), "meta_key": key,
             "meta": meta, "warnings": msgs_all, "alias_warning_fired": False,
@@ -620,6 +675,9 @@ def pilot_and_budget(fsub, cfg_dict, rc_sim, spacing, out):
             proj[f"firn_N{n}"] = rate_firn * work * _padwork(n)
         for n, s in cfg_dict.get("random_runs", ()):
             proj[f"firn_N{n}_s{s}"] = rate_firn * work * _padwork(n)
+        for n, src in cfg_dict.get("rough_runs", ()):
+            proj[f"firn_N{n}_rough_{src}"] = (rate_firn * work * _padwork(n)
+                                              * ROUGH_COST_FACTOR)
         proj["compile_pad_est"] = compile_pad
         proj["total"] = sum(proj.values())
         return proj
@@ -727,7 +785,7 @@ def surface_peak_twtt(power, twtt, t_guess, dt):
 # ========================================================================
 def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             along_m=ALONG_M, layer_counts=LAYER_COUNTS,
-            random_runs=RANDOM_RUNS, spacing=None,
+            random_runs=RANDOM_RUNS, rough_runs=ROUGH_RUNS, spacing=None,
             do_pilot=True, force=False, report=True):
     out = Path(out_root or OUT_DEFAULT)
     out.mkdir(parents=True, exist_ok=True)
@@ -739,7 +797,8 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
     bot_full = load_bottom_pick(frame)
     cfg_dict = {"n_traces": n_traces, "ct_wide": ct_wide, "ct_firn": ct_firn,
                 "along_m": along_m, "layer_counts": tuple(layer_counts),
-                "random_runs": tuple(tuple(r) for r in random_runs)}
+                "random_runs": tuple(tuple(r) for r in random_runs),
+                "rough_runs": tuple(tuple(r) for r in rough_runs)}
 
     def _slice(along):
         fsub, sinfo = sub_frame(frame, along)
@@ -786,17 +845,42 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         bed_cfg(rc_sim, spacing),
         {**meta_common, "ct": cfg_dict["ct_wide"], "kind": "surface+bed"},
         runs_dir, force)
-    run_list = [(f"firn_N{n}", rfi.equal_depths(n))
+    run_list = [(f"firn_N{n}", rfi.equal_depths(n), None)
                 for n in sorted(cfg_dict["layer_counts"])]
-    run_list += [(f"firn_N{n}_s{s}", rfi.random_depths(n, s))
+    run_list += [(f"firn_N{n}_s{s}", rfi.random_depths(n, s), None)
                  for n, s in cfg_dict.get("random_runs", ())]
+    rough_spec = {}
+    for n, src in cfg_dict.get("rough_runs", ()):
+        d = rfi.equal_depths(n)
+        sig, cl = layer_roughness(d, src)
+        rough_spec[f"firn_N{n}_rough_{src}"] = {
+            "source": src, "n_layers": int(n),
+            "csv": [f"tests/fixtures/firn/fig11{c}" for c in
+                    ("a_rms_height.csv", "b_correlation_length.csv")],
+            "columns": [f"rms_height_{src}_m", f"corr_length_{src}_m"],
+            "roughness_seed": SimConfig.model_fields["roughness_seed"].default,
+            "smooth_interfaces": ["surface (air-firn)", "bed (wide run)"],
+            "depth_m": [round(float(x), 3) for x in d],
+            "sigma_m": [round(float(x), 6) for x in sig],
+            "corr_length_m": [round(float(x), 4) for x in cl],
+            "note": "Culberg & Schroeder 2020 Fig. 11 inverted layer "
+                    "roughness, linearly interpolated to the equal-placement "
+                    "layer depths and clamped beyond the profile's 0-90 m "
+                    "range; applied to every INTERNAL layer interface only "
+                    "(Gerekos 2023 rough-facet response, docs/roughness.md)"}
+        run_list.append((f"firn_N{n}_rough_{src}", d, (sig, cl)))
     firn_runs = {}
-    for key, depths in run_list:
+    for key, depths, rough in run_list:
+        rmeta = {} if rough is None else {
+            "roughness": [key.split("_rough_")[-1],
+                          round(float(rough[0].sum()), 6),
+                          round(float(rough[1].sum()), 4)]}
         diag, arrs = run_sim(
-            key, chunks, firn_cfg(rc_sim, spacing, depths),
+            key, chunks, firn_cfg(rc_sim, spacing, depths, rough),
             {**meta_common, "ct": cfg_dict["ct_firn"], "kind": key,
              "n_chunks": len(chunks),
-             "depths_hash": round(float(depths.sum()), 4)}, runs_dir, force)
+             "depths_hash": round(float(depths.sum()), 4), **rmeta},
+            runs_dir, force)
         firn_runs[key] = (diag, arrs, depths)
     wall_actual = time.perf_counter() - t_all
 
@@ -1019,6 +1103,30 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             "cache); pilot projection vs actual in budget_log.json / "
             "run_config.json. " + rec},
     }
+    if rough_spec:
+        smooth_ref = f"firn_N{rough_spec[next(iter(rough_spec))]['n_layers']}"
+        gain = {k: (round(bands[k][GAP_BAND] - bands[smooth_ref][GAP_BAND], 2)
+                    if smooth_ref in bands else float("nan"))
+                for k in rough_spec}
+        metrics["roughness_band_delta"] = {
+            "value": gain[next(iter(gain))], "threshold": None, "pass": True,
+            "op": "record", "smooth_reference": smooth_ref, "band": GAP_BAND,
+            "gain_vs_smooth_db": gain,
+            **{f"sigma_cm_range_{k}": [round(100 * min(v["sigma_m"]), 2),
+                                       round(100 * max(v["sigma_m"]), 2)]
+               for k, v in rough_spec.items()},
+            **{f"corr_length_m_range_{k}": [round(min(v["corr_length_m"]), 2),
+                                            round(max(v["corr_length_m"]), 2)]
+               for k, v in rough_spec.items()},
+            "note": "change in the median "
+            f"{GAP_BAND} depth-power level (dB rel own surface peak) of the "
+            "rough-layer runs vs the SMOOTH equal-placement run of the same "
+            "layer count -- i.e. how much of the mid-band deficit the "
+            "measured (C&S 2020 Fig. 11) sub-facet layer roughness recovers. "
+            "Positive = roughness raises the mid-band. The per-product "
+            "deltas of these runs vs the measured products are in "
+            "band_delta_vs_measured / profile_correlation like any other "
+            "run. " + rec}
 
     config = {
         **cfg_dict, "spacing_m": round(spacing, 2),
@@ -1037,7 +1145,9 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         "firn_pipeline": "B26 point-sampled Kovacs eps, equal placement "
                          f"1-{rfi.ZMAX:.1f} m (run_firn_investigation); "
                          f"random placements (n, seed): "
-                         f"{cfg_dict.get('random_runs', ())}",
+                         f"{cfg_dict.get('random_runs', ())}; rough runs "
+                         f"(n, source): {cfg_dict.get('rough_runs', ())}",
+        "roughness_runs": rough_spec,
         "band_levels_db_rel_surface": bands,
         "band_delta_db_sim_minus_measured": deltas,
         "profile_correlation_r": corr,
@@ -1081,9 +1191,34 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             f"and {deltas['qlook'][gap_run][GAP_BAND]:+.1f} dB vs qlook "
             f"there, so the SAR-focusing asymmetry accounts for only part of "
             f"the mid-band deficit.")
+    rnote = ""
+    if rough_spec:
+        rm = metrics["roughness_band_delta"]
+        rnote = (
+            " ROUGH-LAYER RUNS: every INTERNAL firn layer interface of the "
+            "equal-placement stack carries Gerekos-2023 sub-facet Gaussian "
+            "roughness (docs/roughness.md) with sigma / correlation length "
+            "interpolated at that layer's depth from the Culberg & Schroeder "
+            "2020 Fig. 11 inverted layer-roughness profiles (0-90 m, clamped "
+            "below; tests/fixtures/firn/fig11a,b), "
+            + "; ".join(
+                f"{k}: sigma {100 * min(v['sigma_m']):.1f}-"
+                f"{100 * max(v['sigma_m']):.1f} cm, l "
+                f"{min(v['corr_length_m']):.1f}-"
+                f"{max(v['corr_length_m']):.1f} m"
+                for k, v in rough_spec.items())
+            + f". The air-firn surface and the bed stay SMOOTH so the seam "
+            f"check and the own-surface-peak normalization stay comparable. "
+            f"roughness_seed = {SimConfig.model_fields['roughness_seed'].default}"
+            f" (one frozen speckle realization). sigma/lambda_firn ~ 0.05 -- "
+            f"the easy regime (<= ~0.3 dB, docs/roughness.md); l up to "
+            f"{max(max(v['corr_length_m']) for v in rough_spec.values()):.1f} m"
+            f" stays below the {spacing:.1f} m facet size as required. "
+            f"Mid-band ({GAP_BAND}) level change vs the SMOOTH run of the same "
+            f"layer count: {rm['gain_vs_smooth_db']} dB.")
     notes = _notes(cfg_dict, params, spacing, lpa_err, le, bed_med, in_med,
                    off_s, off_b, dt, seam, sinfo, bed_depth_bm, bed_depth_pick,
-                   wall_actual, budget_log, waux, qnote)
+                   wall_actual, budget_log, waux, qnote + rnote)
     doc = {"case": "b26_comparison", "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -1277,6 +1412,8 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
               "surface+bed": ("C7", 1.1, "-"),
               "firn_N10": ("C0", 1.2, "-"), "firn_N20": ("C3", 1.2, "-"),
               "firn_N40": ("C1", 1.2, "-"), "firn_N80": ("C2", 1.4, "-")}
+    # rough runs: keyed on the inversion SOURCE (any layer count)
+    rough_styles = {"mcords": ("m", 1.7, "-"), "ar": ("c", 1.7, "-.")}
     labels = {"measured": "measured (CSARP_standard, focused)",
               "measured_qlook": "measured (CSARP_qlook, unfocused)"}
     rand_labeled = False
@@ -1288,9 +1425,14 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
             rand_labeled = True
             ax.plot(d[m], db[m], color="C4", lw=0.9, alpha=0.8, label=lbl)
             continue
-        c, lw, ls = styles.get(name, ("C5", 1.0, "-"))
-        ax.plot(d[m], db[m], color=c, lw=lw, ls=ls,
-                label=labels.get(name, name))
+        if "_rough_" in name:  # measured C&S20 Fig. 11 layer roughness
+            base, src = name.split("_rough_")
+            c, lw, ls = rough_styles.get(src, ("C6", 1.4, ":"))
+            lbl = f"{base} + rough layers (C&S20 Fig.11 {src} sigma/l)"
+        else:
+            c, lw, ls = styles.get(name, ("C5", 1.0, "-"))
+            lbl = labels.get(name, name)
+        ax.plot(d[m], db[m], color=c, lw=lw, ls=ls, label=lbl)
     ax.axvline(rfi.ZMAX, color="k", ls=":", lw=1.2)
     ax.text(rfi.ZMAX + 1.5, -72, f"B26 core ends ({rfi.ZMAX:.1f} m)",
             fontsize=8, rotation=90, va="bottom")
@@ -1414,7 +1556,8 @@ def _recorded_cfg(out):
         return {}
     c = json.loads(p.read_text())
     return {k: c[k] for k in ("n_traces", "ct_wide", "ct_firn", "along_m",
-                              "layer_counts", "random_runs") if k in c}
+                              "layer_counts", "random_runs", "rough_runs")
+            if k in c}
 
 
 def main():
@@ -1422,11 +1565,17 @@ def main():
     ap.add_argument("--report-only", action="store_true",
                     help="rebuild figures/report from cached runs (reuses the "
                          "recorded run_config.json scene configuration)")
-    ap.add_argument("--no-pilot", action="store_true")
+    ap.add_argument("--no-pilot", action="store_true",
+                    help="skip the pilot/budget projection and reuse the "
+                         "recorded run_config.json scene configuration -- the "
+                         "way to ADD a run to an existing output directory "
+                         "without risking a shrink step that would invalidate "
+                         "every cached run")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--n-traces", type=int, default=None)
     args = ap.parse_args()
-    kw = _recorded_cfg(OUT_DEFAULT) if args.report_only else {}
+    kw = (_recorded_cfg(OUT_DEFAULT)
+          if (args.report_only or args.no_pilot) else {})
     if args.n_traces:
         kw["n_traces"] = args.n_traces
     run_all(do_pilot=not (args.report_only or args.no_pilot),

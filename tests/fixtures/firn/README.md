@@ -28,6 +28,18 @@ never referencing external paths at runtime).
   so they serve as the context/shape reference here. Used for qualitative
   shape comparison only, never as a numerical gate.
 
+- `fig11a_rms_height.csv` / `fig11b_correlation_length.csv` — copied 2026-07-28
+  from the same read-only repo (`~/Documents/clutter/data/`), digitized there
+  with WebPlotDigitizer from Figure 11(a)/(b) of Culberg & Schroeder (2020)
+  (their Section IV-C-2) and interpolated onto a common 0–90 m depth grid at
+  5 m posting. Columns give the depth-resolved *inverted* internal-layer
+  roughness for the three inversion sources: `ar` (Accumulation Radar, dotted
+  curve), `mcords` (MCoRDS3, dashed) and `joint` (solid). Ranges: RMS height
+  sigma 1.5–2.9 cm (ar) / 2.5–5.6 cm (mcords); correlation length l 1.0–2.9 m
+  (ar) / 2.4–3.5 m (mcords). Used as the measured sub-facet roughness input
+  for the B26 rough-layer comparison runs (`tools/run_b26_comparison.py`,
+  `firn_N40_rough_{mcords,ar}`); a physical-plausibility input, never a gate.
+
 ## Primary citation
 
 Culberg, R., & Schroeder, D. M. (2020). Firn Clutter Constraints on the Design

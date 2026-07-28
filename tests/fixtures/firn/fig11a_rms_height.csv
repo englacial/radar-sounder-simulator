@@ -1,0 +1,32 @@
+# Figure 11a: RMS height estimates from rough layer inversion
+# Culberg & Schroeder (2020), Section IV-C-2
+#
+# Digitized from paper using WebPlotDigitizer, then interpolated
+# onto a common depth grid.
+#
+# Columns:
+#   depth_m: Depth below surface [m]
+#   rms_height_ar_m: RMS height from AR inversion [m] (dotted curve)
+#   rms_height_mcords_m: RMS height from MCoRDS3 inversion [m] (dashed curve)
+#   rms_height_joint_m: RMS height from joint inversion [m] (solid curve)
+#
+depth_m,rms_height_ar_m,rms_height_mcords_m,rms_height_joint_m
+0.0,0.028120,0.049474,0.040150
+5.0,0.029409,0.056291,0.055602
+10.0,0.026617,0.052425,0.053484
+15.0,0.025815,0.046466,0.046165
+20.0,0.022473,0.048678,0.047789
+25.0,0.021544,0.032932,0.032571
+30.0,0.020000,0.044414,0.045353
+35.0,0.017972,0.053064,0.053003
+40.0,0.018459,0.039893,0.039609
+45.0,0.020301,0.036762,0.036602
+50.0,0.021332,0.030999,0.030097
+55.0,0.020248,0.024492,0.024211
+60.0,0.019098,0.039463,0.039028
+65.0,0.016735,0.049073,0.049273
+70.0,0.017895,0.041316,0.040150
+75.0,0.017895,0.044850,0.044549
+80.0,0.015068,0.040665,0.040932
+85.0,0.018195,0.035980,0.035996
+90.0,0.018195,0.036541,0.035038

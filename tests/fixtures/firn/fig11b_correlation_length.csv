@@ -1,0 +1,32 @@
+# Figure 11b: Correlation length estimates from rough layer inversion
+# Culberg & Schroeder (2020), Section IV-C-2
+#
+# Digitized from paper using WebPlotDigitizer, then interpolated
+# onto a common depth grid.
+#
+# Columns:
+#   depth_m: Depth below surface [m]
+#   corr_length_ar_m: Correlation length from AR inversion [m] (dotted curve)
+#   corr_length_mcords_m: Correlation length from MCoRDS3 inversion [m] (dashed curve)
+#   corr_length_joint_m: Correlation length from joint inversion [m] (solid curve)
+#
+depth_m,corr_length_ar_m,corr_length_mcords_m,corr_length_joint_m
+0.0,2.929150,2.982179,3.459984
+5.0,1.167438,2.422814,2.006073
+10.0,0.997976,2.759109,1.926366
+15.0,0.997976,2.759109,1.985924
+20.0,1.246096,3.002024,2.389886
+25.0,1.437392,3.502169,2.561920
+30.0,1.253036,3.314956,2.759109
+35.0,1.617626,3.257085,3.369867
+40.0,1.544968,3.500000,3.224335
+45.0,1.751012,3.111336,3.002024
+50.0,1.666185,3.423077,2.606854
+55.0,1.517206,3.257085,2.249422
+60.0,1.754367,2.939050,2.779815
+65.0,1.508097,3.002024,3.339936
+70.0,1.508097,3.002024,3.002024
+75.0,1.362348,2.906593,2.854540
+80.0,1.298149,2.939152,3.307097
+85.0,1.500289,2.759109,2.759109
+90.0,1.508097,3.128904,2.759109
