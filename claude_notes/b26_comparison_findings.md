@@ -262,3 +262,34 @@ annuli, conformal-copy lateral coherence, facet-scale phase decorrelation
 across the refraction chain), and the ~2-3 dB deep-band overshoot.
 Point-sampled permittivity should be considered deprecated for firn
 simulation; effective segment contrasts are the way.
+
+## Eff-contrast N-ladder with 15 dB/km firn attenuation (2026-07-29)
+
+Four runs (--only, other caches flagged stale): N=5/10/20/40 h1eff.
+
+| N | corr (std) | fair 20-70 m | fair 80-120 m | old-metric delta 20-70 |
+|---|---|---|---|---|
+| 5 | 0.758 | -22.14 | -30.83 | -16.57 |
+| 10 | 0.907 | -25.06 | -31.46 | -10.38 |
+| 20 | **0.963** | -24.59 | -32.95 | -7.38 |
+| 40 | 0.960 | -23.46 | -32.91 | -5.06 |
+| measured std/qlook | 1 / 0.995 | -18.06 / -18.40 | -31.75 / -32.12 | 0 |
+
+Findings:
+- **Correlation plateaus at N=20** (0.963 vs 0.960 at N=40; predicted knee
+  N~27 from spacing-vs-range-cell). N=80 is retired; N=20 (22 min) is the
+  efficient standard; N=40 (89 min) for flagship figures.
+- **Fair-metric level is N-insensitive from N>=10** (within 1.6 dB),
+  confirming the 1-D conservation argument in 3-D. The old median metric's
+  apparent monotonic improvement with N (-16.6 -> -5.1) is the
+  sparse-profile median artifact - one more reason mean-power is the metric.
+- **With attenuation the deep band is now essentially exact**: N40
+  -32.91 vs measured -31.75/-32.12 (old-metric delta -0.03 dB). The
+  attenuation costs ~1.5 dB mid-band, putting the fair mid-band gap at
+  5.4 dB - the coherent-realization deficit, the single remaining open
+  physics item, now cleanly isolated.
+- N=5 shows the sparse pathology in both metrics (2 interfaces in band).
+
+Model state after this arc: shape r = 0.96, deep band exact, mid band
+-5.4 dB (realization deficit). Started the week at r = 0.68 (surface+bed
+only) and a 17 dB unexplained gap.
