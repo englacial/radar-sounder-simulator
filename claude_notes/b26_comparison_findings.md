@@ -200,3 +200,32 @@ values (e.g. profile r for N=20 0.90 -> 0.946, N=80 0.880 -> 0.933; the
 surface+bed 5-20 m level -38.7 -> -46.3 dB). Gates still pass on the
 re-assembled run: surface leading edge median 0.00 frame bins, bed nadir
 median 3.9 bins vs input floor 4.0, firn seam 1.02e-3.
+
+## Rough-firn-layer runs (2026-07-28): roughness hypothesis also NEGATIVE at measured values
+
+Two runs with per-layer Gerekos 2023 roughness depth-interpolated from the
+digitized C&S 2020 Fig 11 inversions (surface/bed smooth; equal-placement
+N=40): firn_N40_rough_mcords (sigma 2.68-5.50 cm, l 2.53-3.49 m; 5554.4 s)
+and firn_N40_rough_ar (sigma 1.51-2.92 cm, l 1.00-2.58 m; 5488.7 s).
+Roughness cost only ~4% wall over smooth N=40 (5331 s).
+
+Result: mid-band (20-70 m) gain vs smooth firn_N40 is +0.73 dB (mcords) /
++0.76 dB (ar) -- against a ~17 dB deficit vs measured. Correlations
+essentially unchanged (0.9485/0.9484 vs 0.9491 smooth). At sigma ~ 0.03-0.05
+lambda_local the diffuse D_Phi contribution barely exceeds the coherent
+attenuation exp(-sigma^2 K^2) it replaces at nadir. The sub-wavelength
+LAYER-roughness hypothesis, at the roughness values C&S 2020 actually
+inverted, does NOT close the gap.
+
+Hypothesis scoreboard for the ~17 dB mid-band deficit: equal-vs-random
+placement REJECTED; SAR focusing REJECTED (+0.34 dB); measured layer
+roughness REJECTED (+0.7 dB). Leading remaining candidate: the LAYER
+CONTRAST AMPLITUDES. We point-sample the Kovacs permittivity at N depths,
+which discards the mm-scale density variance the core actually has; C&S
+2020's own 1-D model needed the full-resolution profile to reproduce the
+plateau level. Next experiment: derive each model layer's effective
+reflection coefficient by aggregating the full-resolution profile between
+layer boundaries (e.g. thin-film transfer matrix or RMS contrast), instead
+of sampling epsilon pointwise. Geometry (conformal smooth copies) is now
+verified to matter little at measured roughness; amplitude statistics are
+the untested axis.
