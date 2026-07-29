@@ -91,6 +91,14 @@ def test_effective_contrast_run_config():
     trend = np.array([rfi.point_eps(d) for d in depths]
                      + [rfi.point_eps(float(depths[-1]) + 1.0)])
 
+    # the construction generalizes over the whole N ladder (30 m segments at
+    # N=5 down to 3 m at N=40); every stack stays physical and near the trend
+    for n in rb.EFF_RUNS:
+        e, rr = rb.effective_contrast_eps(rfi.equal_depths(n), rc.wavelength)
+        assert e.shape == (n + 1,) and rr.shape == (n,)
+        assert np.isfinite(e).all() and (e > 1.0).all() and (e < 3.3).all()
+        assert (rr > 0).all() and (20 * np.log10(rr) < -20.0).all()
+
     assert eps.shape == trend.shape == (len(depths) + 1,)
     assert np.isfinite(eps).all() and (eps > 1.0).all() and (eps < 3.3).all()
     assert eps[0] == trend[0]                       # firn0 point-sampled
@@ -122,6 +130,65 @@ def test_effective_contrast_run_config():
         [(i.name, getattr(i, "offset", None)) for i in ref.interfaces]
     with pytest.raises(ValueError):
         rb.firn_cfg(rc, 10.67, depths, eps=eps[:-1])
+
+
+def test_firn_media_attenuate():
+    """Every firn medium AND the substrate must carry the same one-way
+    attenuation as the wide run's ice medium (the old zero-attenuation firn
+    convention was ~10x low and biased the deep firn band specifically); air
+    must not attenuate, on either the point-sampled or the synthetic-eps path."""
+    import run_firn_investigation as rfi
+
+    depths = rfi.equal_depths(10)
+    rc = RadarConfig(dt=4.1667e-9, n_samples=64, t0=0.0, f0=195e6)
+    eps, _ = rb.effective_contrast_eps(depths, rc.wavelength)
+    for cfg in (rb.firn_cfg(rc, 10.67, depths),
+                rb.firn_cfg(rc, 10.67, depths, eps=eps)):
+        assert cfg.media[0].name == "air"
+        assert not cfg.media[0].attenuation_db_per_km
+        assert [m.name for m in cfg.media[1:]][-1] == "substrate"
+        assert all(m.attenuation_db_per_km == rb.ATT_DB_PER_KM
+                   for m in cfg.media[1:])
+    # ... and the same constant the ice medium of the wide run uses
+    ice = [m for m in rb.bed_cfg(rc, 10.67).media if m.name == "ice"][0]
+    assert ice.attenuation_db_per_km == rb.ATT_DB_PER_KM
+
+
+def test_only_flag(tmp_path):
+    """--only parsing, and run_sim's refusal to simulate an excluded run: a
+    present npz is reused AS-IS (flagged cache-stale when its recorded config
+    no longer matches), a missing one is a clear error naming the key."""
+    assert rb._parse_only(None) is None and rb._parse_only("") is None
+    assert rb._parse_only("a") == {"a"}
+    assert rb._parse_only(" a , b ,") == {"a", "b"}
+    with pytest.raises(ValueError):
+        rb._parse_only(",")
+
+    runs = tmp_path / "runs"
+    meta = {"kind": "firn_N5_h1eff"}
+    with pytest.raises(RuntimeError, match="firn_N5_h1eff"):
+        rb.run_sim("firn_N5_h1eff", [], None, meta, runs, allow_sim=False)
+
+    np.savez(runs / "firn_N5_h1eff.npz", field=np.zeros((2, 3, 2), np.complex64))
+    (runs / "firn_N5_h1eff.json").write_text(json.dumps(
+        {"rid": "firn_N5_h1eff", "wall_s": 1.0, "meta_key": "OLD KEY"}))
+    diag, arrs = rb.run_sim("firn_N5_h1eff", [], None, meta, runs,
+                            allow_sim=False)
+    assert diag["provenance"] == "cache-stale" and arrs["field"].shape == (2, 3, 2)
+    (runs / "firn_N5_h1eff.json").write_text(json.dumps(
+        {"rid": "firn_N5_h1eff", "wall_s": 1.0,
+         "meta_key": json.dumps(meta, sort_keys=True)}))
+    diag, _ = rb.run_sim("firn_N5_h1eff", [], None, meta, runs,
+                         allow_sim=False)
+    assert diag["provenance"] == "cache"
+    # scene keys are always restored, run sets only for --report-only
+    assert set(rb.SCENE_KEYS).isdisjoint(rb.RUNSET_KEYS)
+    assert "eff_runs" in rb.RUNSET_KEYS
+    # the --only vocabulary must match what run_all actually builds
+    assert rb.run_keys({"layer_counts": (20, 10), "random_runs": ((40, 0),),
+                        "rough_runs": ((40, "ar"),), "eff_runs": (5, 40)}) == [
+        "wide_surface_bed", "firn_N10", "firn_N20", "firn_N40_s0",
+        "firn_N40_rough_ar", "firn_N5_h1eff", "firn_N40_h1eff"]
 
 
 def _cached(product="CSARP_standard"):

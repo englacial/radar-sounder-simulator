@@ -81,7 +81,12 @@ resolution.
 Run: uv run python tools/run_b26_comparison.py            # pilot + runs + report
      uv run python tools/run_b26_comparison.py --no-pilot  # add runs to an
                                 # existing outputs/b26_comparison (reuses its
-                                # recorded scene config; no shrink risk)
+                                # recorded SCENE config; no shrink risk)
+     uv run python tools/run_b26_comparison.py --only firn_N40_h1eff
+                                # simulate ONLY these keys; every other run is
+                                # assembled from its cached npz AS-IS (stale
+                                # ones are flagged in run_provenance), and a
+                                # missing one is an error. Implies --no-pilot
      uv run python tools/run_b26_comparison.py --report-only
 """
 
@@ -159,7 +164,14 @@ ROUGH_RUNS = ((40, "mcords"), (40, "ar"))
 # profile over that layer's segment (effective_contrast_eps). Tests whether the
 # ~15 dB mid-band deficit is point-sampling discarding the 0.1-0.5 m Bragg-scale
 # density strata: the 1-D 20-70 m band level goes -28.3 -> -17.2 dB rel surface.
-EFF_RUNS = (40,)
+# N-LADDER: the segment-aggregated BAND LEVEL is N-independent by construction
+# (the segments tile the profile, so reflectivity is conserved) -- the 1-D scan
+# gives -16.5 / -19.4 / -18.9 / -17.2 dB in 20-70 m at N = 5 / 10 / 20 / 40 vs
+# -16.7 for the full-res profile, i.e. scatter, not trend. So the ladder's
+# question is profile SHAPE, not level: the correlation against the measured
+# depth profile should climb while the layer spacing (119.7/N m) is coarser
+# than the ~4.4 m in-firn range cell and plateau once it is finer (N ~ 27).
+EFF_RUNS = (5, 10, 20, 40)
 EFF_METHOD = "tmm_segment_aggregate_v1"
 ROUGH_COST_FACTOR = 1.05      # rough/smooth simulate() wall ratio: MEASURED
 # 1.017 on a 2-trace N=40 real crop (85.1 s -> 86.5 s steady, 44469 facets);
@@ -568,9 +580,17 @@ def effective_contrast_eps(depths, lam):
 def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
     """Coherent B26 firn stack config (the investigation's layered_cfg on the
     real surface DEM): offset interfaces at surface - depth_i, point-sampled
-    Kovacs permittivities, substrate = eps(deepest + 1 m). No attenuation in
-    the firn media (investigation convention; < 0.2 dB one-way at 120 m for
-    any plausible cold-firn value).
+    Kovacs permittivities, substrate = eps(deepest + 1 m), every firn medium
+    (and the substrate) attenuating at ATT_DB_PER_KM = 15 dB/km one-way -- the
+    same constant the wide run's ice medium uses.
+
+    This corrects the earlier "no attenuation in the firn media (< 0.2 dB
+    one-way at 120 m for any plausible cold-firn value)" convention, which was
+    ~10x low: 15 dB/km over 120 m is 1.8 dB ONE-way, 3.6 dB two-way, growing
+    with depth and therefore biasing the deep firn band specifically. The
+    analytic bracket in claude_notes/b26_gap_hypotheses.md (attenuation
+    addendum) puts the optimal uniform value at 8-12 dB/km; 15 dB/km is adopted
+    for consistency with the ice medium rather than tuned to the residual.
 
     ``rough`` = (sigma_m[], corr_length_m[]) per layer attaches Gerekos-2023
     sub-facet roughness to every INTERNAL layer interface (the air-firn
@@ -588,12 +608,14 @@ def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
     media = [Medium(name="air", eps_r=1.0)]
     ifaces = [DemInterface(name="surface")]
     for i, d in enumerate(depths):
-        media.append(Medium(name=f"firn{i}", eps_r=float(e[i])))
+        media.append(Medium(name=f"firn{i}", eps_r=float(e[i]),
+                            attenuation_db_per_km=ATT_DB_PER_KM))
         rc = None if rough is None else RoughnessConfig(
             sigma_m=float(sig[i]), corr_length_m=float(cl[i]))
         ifaces.append(OffsetInterface(name=f"L{i}", reference="surface",
                                       offset=-float(d), roughness=rc))
-    media.append(Medium(name="substrate", eps_r=float(e[-1])))
+    media.append(Medium(name="substrate", eps_r=float(e[-1]),
+                        attenuation_db_per_km=ATT_DB_PER_KM))
     return SimConfig(mode="coherent", split_sides=False, radar=rc_sim,
                      facets=FacetConfig(spacing=spacing), media=media,
                      interfaces=ifaces)
@@ -648,20 +670,39 @@ def _simulate_checked(scene, cfg):
     return ds, msgs
 
 
-def run_sim(rid, scene_chunks, cfg, meta, runs_dir, force=False):
+def run_sim(rid, scene_chunks, cfg, meta, runs_dir, force=False,
+            allow_sim=True):
     """Cached simulate() over one or more (scene, trace_rows) chunks:
     decimated per-layer complex field + nadir_twtt + diagnostics assembled
     over all traces into runs/<rid>.npz/.json, keyed on ``meta`` (config
-    identity). Returns (diag dict, arrays dict)."""
+    identity). Returns (diag dict, arrays dict); diag["provenance"] is
+    "simulated" / "cache" / "cache-stale".
+
+    ``allow_sim=False`` (the --only flag) forbids simulating: the existing
+    runs/<rid>.npz is returned AS-IS even when its recorded ``meta`` no longer
+    matches the current configuration ("cache-stale" -- the point of the flag),
+    and a missing one is an error rather than a silent multi-hour run."""
     runs_dir.mkdir(parents=True, exist_ok=True)
     jp, npz_p = runs_dir / f"{rid}.json", runs_dir / f"{rid}.npz"
     key = json.dumps(meta, sort_keys=True)
-    if jp.exists() and npz_p.exists() and not force:
-        diag = json.loads(jp.read_text())
-        if diag.get("meta_key") == key:
-            print(f"  [skip-exists] {rid} ({diag['wall_s']:.1f} s recorded)",
-                  flush=True)
-            return diag, dict(np.load(npz_p))
+    have = jp.exists() and npz_p.exists()
+    cached = json.loads(jp.read_text()) if have else None
+    usable = have and not force and cached.get("meta_key") == key
+    if not allow_sim:
+        if not have:
+            raise RuntimeError(
+                f"{rid}: excluded from simulation by --only but "
+                f"{npz_p.relative_to(runs_dir.parent)} does not exist -- add "
+                f"'{rid}' to --only to simulate it, or drop --only")
+        cached["provenance"] = "cache" if usable else "cache-stale"
+        print(f"  [only-{cached['provenance']}] {rid} "
+              f"({cached['wall_s']:.1f} s recorded)", flush=True)
+        return cached, dict(np.load(npz_p))
+    if usable:
+        cached["provenance"] = "cache"
+        print(f"  [skip-exists] {rid} ({cached['wall_s']:.1f} s recorded)",
+              flush=True)
+        return cached, dict(np.load(npz_p))
     n_traces = sum(len(rows) for _, rows in scene_chunks)
     field = twtt = nadir = None
     drop_sum = tot_sum = None
@@ -706,7 +747,7 @@ def run_sim(rid, scene_chunks, cfg, meta, runs_dir, force=False):
     jp.write_text(json.dumps(diag, indent=1) + "\n")
     print(f"  [ok] {rid}  {wall:.1f} s  chunks {len(scene_chunks)} "
           f"facets/iface/chunk ~{int(np.mean(facets))}", flush=True)
-    return diag, arrs
+    return {**diag, "provenance": "simulated"}, arrs
 
 
 # ========================================================================
@@ -881,13 +922,24 @@ def surface_peak_twtt(power, twtt, t_guess, dt):
     return out
 
 
+def run_keys(cfg_dict):
+    """Every run key this configuration builds, in construction order (the
+    --only vocabulary). Must stay in step with run_all's run_list."""
+    return (["wide_surface_bed"]
+            + [f"firn_N{n}" for n in sorted(cfg_dict["layer_counts"])]
+            + [f"firn_N{n}_s{s}" for n, s in cfg_dict.get("random_runs", ())]
+            + [f"firn_N{n}_rough_{src}"
+               for n, src in cfg_dict.get("rough_runs", ())]
+            + [f"firn_N{n}_h1eff" for n in cfg_dict.get("eff_runs", ())])
+
+
 # ========================================================================
 # main runner
 # ========================================================================
 def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             along_m=ALONG_M, layer_counts=LAYER_COUNTS,
             random_runs=RANDOM_RUNS, rough_runs=ROUGH_RUNS, eff_runs=EFF_RUNS,
-            spacing=None, do_pilot=True, force=False, report=True):
+            spacing=None, do_pilot=True, force=False, report=True, only=None):
     out = Path(out_root or OUT_DEFAULT)
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
@@ -901,6 +953,12 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                 "random_runs": tuple(tuple(r) for r in random_runs),
                 "rough_runs": tuple(tuple(r) for r in rough_runs),
                 "eff_runs": tuple(int(n) for n in eff_runs)}
+    only = None if only is None else set(only)
+    if only is not None and not only <= set(run_keys(cfg_dict)):
+        # before ANY simulation: a typo'd key must not cost a run first
+        raise ValueError(
+            f"--only names unknown runs {sorted(only - set(run_keys(cfg_dict)))}"
+            f"; this configuration has {run_keys(cfg_dict)}")
 
     def _slice(along):
         fsub, sinfo = sub_frame(frame, along)
@@ -946,7 +1004,7 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         "wide_surface_bed", [(wscene, np.arange(len(idx)))],
         bed_cfg(rc_sim, spacing),
         {**meta_common, "ct": cfg_dict["ct_wide"], "kind": "surface+bed"},
-        runs_dir, force)
+        runs_dir, force, allow_sim=only is None or "wide_surface_bed" in only)
     run_list = [(f"firn_N{n}", rfi.equal_depths(n), None, None)
                 for n in sorted(cfg_dict["layer_counts"])]
     run_list += [(f"firn_N{n}_s{s}", rfi.random_depths(n, s), None, None)
@@ -1000,6 +1058,7 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                     "the Kovacs trend. Same equal-placement geometry as "
                     f"firn_N{n}; everything else identical."}
         run_list.append((f"firn_N{n}_h1eff", d, None, eps_eff))
+    assert [k for k, *_ in run_list] == run_keys(cfg_dict)[1:]
     firn_runs = {}
     for key, depths, rough, eps_eff in run_list:
         rmeta = {} if rough is None else {
@@ -1011,11 +1070,14 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         diag, arrs = run_sim(
             key, chunks, firn_cfg(rc_sim, spacing, depths, rough, eps_eff),
             {**meta_common, "ct": cfg_dict["ct_firn"], "kind": key,
-             "n_chunks": len(chunks),
+             "n_chunks": len(chunks), "att_db_per_km": ATT_DB_PER_KM,
              "depths_hash": round(float(depths.sum()), 4), **rmeta},
-            runs_dir, force)
+            runs_dir, force, allow_sim=only is None or key in only)
         firn_runs[key] = (diag, arrs, depths)
     wall_actual = time.perf_counter() - t_all
+    prov = {"wide_surface_bed": diag_bed.get("provenance"),
+            **{k: d[0].get("provenance") for k, d in firn_runs.items()}}
+    stale = sorted(k for k, v in prov.items() if v == "cache-stale")
 
     # --- assemble fields on the frame subwindow grid ---
     tw = run_bed["twtt"]  # decimated == frame bins b0..b0+nb-1
@@ -1260,6 +1322,19 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             "deltas of these runs vs the measured products are in "
             "band_delta_vs_measured / profile_correlation like any other "
             "run. " + rec}
+    metrics["run_provenance"] = {
+        "value": len(stale), "threshold": None, "pass": True, "op": "record",
+        "only": sorted(only) if only else None, "provenance": prov,
+        "simulated_this_invocation": sorted(
+            k for k, v in prov.items() if v == "simulated"),
+        "cache_stale": stale,
+        "note": "how each assembled run was obtained: 'simulated' this "
+        "invocation, 'cache' (recorded config matches), or 'cache-stale' "
+        "(--only excluded it from simulation and its cached npz was reused "
+        "AS-IS although its recorded config no longer matches the current "
+        "module defaults). value = number of cache-stale runs: NON-ZERO MEANS "
+        "THIS REPORT MIXES PROVENANCES and the listed runs are not directly "
+        "comparable to the freshly simulated ones. " + rec}
 
     config = {
         **cfg_dict, "spacing_m": round(spacing, 2),
@@ -1275,6 +1350,9 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                    "roll_source=nav",
         "media_bed_run": f"air / ice(eps {EPS_ICE}, {ATT_DB_PER_KM} dB/km "
                          f"one-way) / bed(eps {EPS_BED})",
+        "firn_attenuation_db_per_km": ATT_DB_PER_KM,
+        "run_provenance": prov,
+        "only": sorted(only) if only else None,
         "firn_pipeline": "B26 point-sampled Kovacs eps, equal placement "
                          f"1-{rfi.ZMAX:.1f} m (run_firn_investigation); "
                          f"random placements (n, seed): "
@@ -1372,10 +1450,26 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                 for k, v in eff_spec.items())
             + ". firn0 keeps its point-sampled value (surface interface, seam "
             "check and surface-peak normalization unchanged); the full eps "
-            "arrays are in run_config.json effective_contrast_runs.")
+            "arrays are in run_config.json effective_contrast_runs. The "
+            "segment-aggregated band LEVEL is N-independent by construction, "
+            "so the N-ladder tests profile SHAPE: correlation should plateau "
+            "once the layer spacing beats the ~4.4 m in-firn range cell "
+            "(N ~ 27).")
+    pnote = ""
+    if stale:
+        pnote = (
+            f" MIXED PROVENANCE: this report was assembled with --only "
+            f"{sorted(only)}, so {stale} were NOT re-simulated -- their cached "
+            f"fields are reused AS-IS even though their recorded configuration "
+            f"no longer matches the current module defaults (e.g. the firn "
+            f"attenuation default). Freshly simulated here: "
+            f"{sorted(k for k, v in prov.items() if v == 'simulated')}. Treat "
+            f"cross-run comparisons involving the stale runs with care; "
+            f"metrics.json run_provenance has the per-run detail.")
     notes = _notes(cfg_dict, params, spacing, lpa_err, le, bed_med, in_med,
                    off_s, off_b, dt, seam, sinfo, bed_depth_bm, bed_depth_pick,
-                   wall_actual, budget_log, waux, qnote + rnote + enote)
+                   wall_actual, budget_log, waux,
+                   qnote + rnote + enote + pnote)
     doc = {"case": "b26_comparison", "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -1424,7 +1518,13 @@ def _notes(cfg, params, spacing, lpa_err, le, bed_med, in_med, off_s, off_b,
         f"32 m; bed {waux['bed_meta']['product']} (150 m, bilinear to 32 m); "
         f"media air / ice(3.17, {ATT_DB_PER_KM:.0f} dB/km one-way constant -- "
         f"the M24 warm-ice value, generous for this cold interior site, "
-        f"recorded) / bed(eps 8). Firn: B26 point-sampled Kovacs eps, EQUAL "
+        f"recorded) / bed(eps 8); every FIRN medium (and the substrate) also "
+        f"attenuates at {ATT_DB_PER_KM:.0f} dB/km one-way = "
+        f"{2 * ATT_DB_PER_KM * rfi.ZMAX / 1000:.1f} dB two-way at the bottom "
+        f"of the core (the earlier zero-attenuation firn convention was ~10x "
+        f"low and biased the deep firn band specifically; the analytic bracket "
+        f"is 8-12 dB/km, 15 adopted for consistency with the ice medium). "
+        f"Firn: B26 point-sampled Kovacs eps, EQUAL "
         f"placement over 1-{rfi.ZMAX:.1f} m, N in {cfg['layer_counts']}, as "
         f"OFFSET interfaces of the ArcticDEM surface, computed on a +-"
         f"{cfg['ct_firn']:.0f} m strip and FIELD-SUMMED (layer 0 excluded) "
@@ -1488,8 +1588,15 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
 
     # Radargram panels: equal placements + one representative random seed
     # (all random seeds appear in the depth profile).
-    names = ["surface+bed"] + [k for k in sorted(firn_runs)
-                               if "_s" not in k or k.endswith("_s0")]
+    # (one representative random seed; of the H1 effective-contrast ladder only
+    # the finest N -- the whole ladder appears in the depth profile.)
+    eff_keys = [k for k in firn_runs if k.endswith("_h1eff")]
+    eff_show = ({max(eff_keys, key=lambda k: int(k.split("_N")[1].split("_")[0]))}
+                if eff_keys else set())
+    names = ["surface+bed"] + [
+        k for k in sorted(firn_runs)
+        if ("_s" not in k or k.endswith("_s0"))
+        and (not k.endswith("_h1eff") or k in eff_show)]
     sims_db = {k: _db(np.abs(totals[k]) ** 2) for k in names}
     vs = np.percentile(np.concatenate(
         [v[np.isfinite(v) & (v > -290)] for v in sims_db.values()]), 99.5)
@@ -1571,6 +1678,10 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
               "firn_N40": ("C1", 1.2, "-"), "firn_N80": ("C2", 1.4, "-")}
     # rough runs: keyed on the inversion SOURCE (any layer count)
     rough_styles = {"mcords": ("m", 1.7, "-"), "ar": ("c", 1.7, "-.")}
+    # H1 effective-contrast ladder: a dark-red ramp, darkest at the finest N
+    eff_styles = {5: ("#e8837a", 1.2, "--"), 10: ("#d4544a", 1.3, "--"),
+                  20: ("#a81f18", 1.5, "-"), 40: ("darkred", 1.8, "-"),
+                  80: ("#3d0000", 1.8, "-")}
     labels = {"measured": "measured (CSARP_standard, focused)",
               "measured_qlook": "measured (CSARP_qlook, unfocused)"}
     rand_labeled = False
@@ -1583,8 +1694,10 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
             ax.plot(d[m], db[m], color="C4", lw=0.9, alpha=0.8, label=lbl)
             continue
         if name.endswith("_h1eff"):    # synthetic effective-contrast eps (H1)
-            c, lw, ls = "darkred", 1.8, "-"
-            lbl = f"{name[:-len('_h1eff')]} eff-contrast (H1)"
+            base = name[:-len("_h1eff")]
+            c, lw, ls = eff_styles.get(int(base.split("_N")[1]),
+                                       ("darkred", 1.5, "-"))
+            lbl = f"{base} eff-contrast (H1)"
         elif "_rough_" in name:  # measured C&S20 Fig. 11 layer roughness
             base, src = name.split("_rough_")
             c, lw, ls = rough_styles.get(src, ("C6", 1.4, ":"))
@@ -1706,19 +1819,36 @@ like-for-like target for the unfocused sims.</p>
     print(f"wrote {out / 'report.html'}")
 
 
-def _recorded_cfg(out):
-    """Scene configuration of the CACHED runs (out/run_config.json). Re-using
-    it is what makes --report-only cheap: the pilot may have shrunk n_traces
-    below the module default, and any mismatch changes the run cache keys, so
-    the tool would silently re-simulate everything instead of re-assembling."""
+SCENE_KEYS = ("n_traces", "ct_wide", "ct_firn", "along_m")
+RUNSET_KEYS = ("layer_counts", "random_runs", "rough_runs", "eff_runs")
+
+
+def _recorded_cfg(out, runsets=False):
+    """Configuration of the CACHED runs (out/run_config.json).
+
+    The SCENE keys are always restored: the pilot may have shrunk n_traces
+    below the module default, and any mismatch changes every run cache key, so
+    the tool would silently re-simulate everything instead of re-assembling.
+
+    The RUN-SET keys (which runs exist) are restored only for --report-only,
+    which reproduces exactly what is cached. --no-pilot deliberately takes them
+    from the module defaults -- that is what makes it "the way to ADD a run"."""
     p = Path(out) / "run_config.json"
     if not p.exists():
         return {}
     c = json.loads(p.read_text())
-    return {k: c[k] for k in ("n_traces", "ct_wide", "ct_firn", "along_m",
-                              "layer_counts", "random_runs", "rough_runs",
-                              "eff_runs")
-            if k in c}
+    keys = SCENE_KEYS + (RUNSET_KEYS if runsets else ())
+    return {k: c[k] for k in keys if k in c}
+
+
+def _parse_only(s):
+    """--only value -> set of run keys, or None when the flag is absent."""
+    if not s:
+        return None
+    keys = {k.strip() for k in s.split(",") if k.strip()}
+    if not keys:
+        raise ValueError("--only given but empty")
+    return keys
 
 
 def main():
@@ -1732,15 +1862,26 @@ def main():
                          "way to ADD a run to an existing output directory "
                          "without risking a shrink step that would invalidate "
                          "every cached run")
+    ap.add_argument("--only", default=None, metavar="KEY[,KEY...]",
+                    help="restrict SIMULATION to these run keys (e.g. "
+                         "firn_N40_h1eff,firn_N20_h1eff). Every other run is "
+                         "assembled from its existing runs/<key>.npz AS-IS, "
+                         "even if its recorded configuration is stale against "
+                         "the current module defaults (recorded as "
+                         "cache-stale in run_provenance); a missing one is an "
+                         "error, never a silent multi-hour run. Implies "
+                         "--no-pilot (the pilot itself simulates)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--n-traces", type=int, default=None)
     args = ap.parse_args()
-    kw = (_recorded_cfg(OUT_DEFAULT)
-          if (args.report_only or args.no_pilot) else {})
+    only = _parse_only(args.only)
+    no_pilot = args.no_pilot or only is not None
+    kw = (_recorded_cfg(OUT_DEFAULT, runsets=args.report_only)
+          if (args.report_only or no_pilot) else {})
     if args.n_traces:
         kw["n_traces"] = args.n_traces
-    run_all(do_pilot=not (args.report_only or args.no_pilot),
-            force=args.force, **kw)
+    run_all(do_pilot=not (args.report_only or no_pilot), force=args.force,
+            only=only, **kw)
 
 
 if __name__ == "__main__":
