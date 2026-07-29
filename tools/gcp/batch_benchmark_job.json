@@ -1,0 +1,28 @@
+{
+  "taskGroups": [{
+    "taskSpec": {
+      "runnables": [{
+        "script": {
+          "text": "export HOME=/root; gcloud storage cp gs://ice-infrastructure-soundersim/bundle/vm_bootstrap.sh /tmp/ && bash /tmp/vm_bootstrap.sh firn_N40 firn_N40_rough_mcords firn_N40_rough_ar"
+        }
+      }],
+      "computeResource": {"cpuMilli": 8000, "memoryMib": 30000},
+      "maxRunDuration": "21600s",
+      "maxRetryCount": 2
+    },
+    "taskCount": 1
+  }],
+  "allocationPolicy": {
+    "instances": [{
+      "installGpuDrivers": true,
+      "policy": {
+        "machineType": "n1-standard-8",
+        "provisioningModel": "SPOT",
+        "accelerators": [{"type": "nvidia-tesla-v100", "count": 1}],
+        "bootDisk": {"sizeGb": 100}
+      }
+    }],
+    "location": {"allowedLocations": ["regions/us-central1"]}
+  },
+  "logsPolicy": {"destination": "CLOUD_LOGGING"}
+}
