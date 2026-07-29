@@ -250,3 +250,30 @@ band contribution of the surface layer's field). Rank low; piggyback only.
    Fig 9 independently shows the full-res profile reproduces the measured
    plateau. Predicted post-fix band: ~ -26 dB rel surface vs measured -20.5.
 3. H3 surface-roughness wide runs (~minutes) to account for the residual.
+
+## Post-H1 addendum (2026-07-29): deep-band overshoot resolved analytically
+
+Complex-r gate FAILED in 1-D (claude_notes/b26_complex_r_gate.py): |r|-only
+h1eff already matches the full-res deep band to 0.09 dB (at N=40 a 4.4 m
+range cell holds ~1.45 layers -- nothing to decohere); realized phase moves
+it +1.4 dB the WRONG way. No 3-D run wasted.
+
+Firn attenuation bracket (analytic reweighting of the cached h1eff per-layer
+fields, fair metric; alpha one-way, uniform):
+
+| alpha (dB/km) | 20-70 m | 80-120 m |
+|---|---|---|
+| 0 (current) | -21.95 | -30.07 |
+| 5 | -22.46 | -31.02 |
+| 10 | -22.96 | -31.97 |
+| 15 | -23.46 | -32.91 |
+| measured std/qlook | -18.06 / -18.40 | -31.75 / -32.12 |
+
+**alpha ~ 8-12 dB/km one-way eliminates the deep-band overshoot exactly**,
+at a physically standard value (tool's own deep-ice number: 15 dB/km; the
+firn_cfg docstring's "<0.2 dB one-way at 120 m" claim is ~10x low and
+should be corrected). Cost: ~1 dB more mid-band deficit, leaving the
+~5 dB coherent-realization deficit as the single remaining open item.
+Proper fix: set a defensible temperature/density-based attenuation profile
+in firn_cfg (e.g. MacGregor-style Arrhenius) and re-run; the analytic
+bracket already fixes the magnitude and direction.
