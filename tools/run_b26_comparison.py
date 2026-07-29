@@ -516,10 +516,11 @@ def _tmm_r(n_stack, dz, lam):
     return M[1, 0] / M[0, 0]
 
 
-def segment_reflectivity(depths, lam):
-    """|r| of the raw full-resolution B26 profile aggregated by transfer matrix
-    over each layer's SEGMENT -- segment j spans the midpoints either side of
-    depths[j] (the first starts at depths[0], the last ends at the core end).
+def segment_reflectivity(depths, lam, complex_r=False):
+    """|r| (or complex r, referenced to the SEGMENT TOP) of the raw
+    full-resolution B26 profile aggregated by transfer matrix over each layer's
+    SEGMENT -- segment j spans the midpoints either side of depths[j] (the
+    first starts at depths[0], the last ends at the core end).
 
     The profile ABOVE depths[0] is not covered: it is what the air-firn surface
     interface already represents, and its aggregate |r| (-13.7 dB) is far too
@@ -536,7 +537,8 @@ def segment_reflectivity(depths, lam):
         s, e = int(np.searchsorted(z, a)), int(np.searchsorted(z, b))
         stack = np.concatenate(([n[s - 1] if s else 1.0], n[s:e],
                                 [n[min(e, len(n) - 1)]]))
-        out.append(abs(_tmm_r(stack, dz, lam)))
+        rj = _tmm_r(stack, dz, lam)
+        out.append(rj if complex_r else abs(rj))
     return np.array(out)
 
 
