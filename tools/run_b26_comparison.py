@@ -13,8 +13,10 @@ along-track axes:
   3. simulated coherent, surface + BedMachine bed only (M24 machinery:
      ArcticDEM 32 m surface, BedMachine bed, MCoRDS chirp + 7-element array);
   4+. simulated, surface + N firn layers + bed (equal + random placements,
-      plus equal-placement runs whose INTERNAL layer interfaces carry the
-      measured C&S 2020 Fig. 11 sub-facet roughness);
+      equal-placement runs whose INTERNAL layer interfaces carry the measured
+      C&S 2020 Fig. 11 sub-facet roughness, and an equal-placement run whose
+      layer permittivities are SYNTHETIC effective contrasts reproducing the
+      full-resolution density profile's per-segment reflectivity -- H1);
 
 plus a nadir depth-power profile at the closest-approach trace (both measured
 products vs the sims, upper ~200 m, B26-style) and the run-configuration table.
@@ -150,6 +152,15 @@ RANDOM_RUNS = ((40, 0), (40, 1), (40, 2))
 # the remaining hypothesis for the mid-band (20-70 m) deficit: diffuse
 # scattering from sub-wavelength layer roughness.
 ROUGH_RUNS = ((40, "mcords"), (40, "ar"))
+# Effective-contrast runs (hypothesis H1, claude_notes/b26_gap_hypotheses.md):
+# equal-placement N=40 exactly like firn_N40, but the layer permittivities are
+# SYNTHETIC -- built so each interface's plain Fresnel contrast equals the
+# transfer-matrix aggregate |r| of the RAW full-resolution (1 mm) B26 density
+# profile over that layer's segment (effective_contrast_eps). Tests whether the
+# ~15 dB mid-band deficit is point-sampling discarding the 0.1-0.5 m Bragg-scale
+# density strata: the 1-D 20-70 m band level goes -28.3 -> -17.2 dB rel surface.
+EFF_RUNS = (40,)
+EFF_METHOD = "tmm_segment_aggregate_v1"
 ROUGH_COST_FACTOR = 1.05      # rough/smooth simulate() wall ratio: MEASURED
 # 1.017 on a 2-trace N=40 real crop (85.1 s -> 86.5 s steady, 44469 facets);
 # sigma/lambda_firn ~ 0.05 needs only the 10-term D_Phi series, and the joint
@@ -474,7 +485,85 @@ def layer_roughness(depths, source):
             np.interp(d, b["depth_m"], b[f"corr_length_{source}_m"]))
 
 
-def firn_cfg(rc_sim, spacing, depths, rough=None):
+def _b26_raw_index():
+    """(depth_m, refractive index) of the RAW (unsmoothed, 1 mm) B26 core --
+    the pipeline's 0.1 m pre-smoothing alone costs 1.4 dB of band level, so the
+    effective-contrast construction reads the fixture directly."""
+    path = rfi.FIXDIR / "ngt37C95.2_density.tab"
+    lines = path.read_text().splitlines()
+    hdr = next(i for i, ln in enumerate(lines)
+               if ln.startswith("Depth ice/snow"))
+    d = np.loadtxt(path, delimiter="\t", skiprows=hdr + 1)
+    return d[:, 0], np.sqrt(rfi.eps_kovacs(d[:, 1]))
+
+
+def _tmm_r(n_stack, dz, lam):
+    """Normal-incidence transfer-matrix reflection coefficient (Yeh; C&S 2020
+    Sec. IV-C) of ``len(n_stack) - 2`` slabs of thickness ``dz`` and indices
+    ``n_stack[1:-1]``, between half-spaces n_stack[0] / n_stack[-1]."""
+    kx = 2.0 * np.pi / lam * np.asarray(n_stack, np.float64)
+    phi = kx[1:-1] * dz
+
+    def interface(m):  # index-matching matrix from medium m to m+1
+        q = kx[m + 1] / kx[m]
+        return 0.5 * np.array([[1 + q, 1 - q], [1 - q, 1 + q]], complex)
+
+    M = np.eye(2, dtype=complex)
+    for m in range(len(phi)):
+        M = M @ interface(m) @ np.diag([np.exp(-1j * phi[m]),
+                                        np.exp(1j * phi[m])])
+    M = M @ interface(len(phi))
+    return M[1, 0] / M[0, 0]
+
+
+def segment_reflectivity(depths, lam):
+    """|r| of the raw full-resolution B26 profile aggregated by transfer matrix
+    over each layer's SEGMENT -- segment j spans the midpoints either side of
+    depths[j] (the first starts at depths[0], the last ends at the core end).
+
+    The profile ABOVE depths[0] is not covered: it is what the air-firn surface
+    interface already represents, and its aggregate |r| (-13.7 dB) is far too
+    large to express as one Fresnel step (it would demand eps ~3.9 at 4 m, a
+    spurious super-ice reflector). Every other segment is identical to
+    claude_notes/b26_contrast_calc.py's segment-aggregated stack.
+    """
+    z, n = _b26_raw_index()
+    dz = float(np.median(np.diff(z)))
+    d = np.asarray(depths, np.float64)
+    bnd = np.concatenate([[d[0]], (d[:-1] + d[1:]) / 2.0, [z[-1]]])
+    out = []
+    for a, b in zip(bnd[:-1], bnd[1:]):
+        s, e = int(np.searchsorted(z, a)), int(np.searchsorted(z, b))
+        stack = np.concatenate(([n[s - 1] if s else 1.0], n[s:e],
+                                [n[min(e, len(n) - 1)]]))
+        out.append(abs(_tmm_r(stack, dz, lam)))
+    return np.array(out)
+
+
+def effective_contrast_eps(depths, lam):
+    """(eps[len(depths)+1], |r|[len(depths)]): synthetic permittivities for the
+    media of the H1 effective-contrast stack (firn0..firn_{N-1} + substrate),
+    whose PLAIN Fresnel interface contrasts equal segment_reflectivity().
+
+    firn0 keeps its point-sampled value (so the air-firn surface interface, the
+    seam check and the surface-peak normalization are untouched); thereafter
+    n_{j+1} = n_j (1 +- r_j)/(1 -+ r_j) with the sign taken to land closest to
+    the point-sampled Kovacs trend, which keeps the sequence bounded around it
+    instead of drifting (|r_j| is typically larger than the trend's own step).
+    """
+    r = segment_reflectivity(depths, lam)
+    trend = np.array([rfi.point_eps(d) for d in depths]
+                     + [rfi.point_eps(float(depths[-1]) + 1.0)])
+    n_tr = np.sqrt(trend)
+    n = np.empty(len(trend))
+    n[0] = n_tr[0]
+    for j, rj in enumerate(r):
+        cand = [n[j] * (1.0 + s * rj) / (1.0 - s * rj) for s in (1.0, -1.0)]
+        n[j + 1] = min(cand, key=lambda v: abs(v - n_tr[j + 1]))
+    return n ** 2, r
+
+
+def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
     """Coherent B26 firn stack config (the investigation's layered_cfg on the
     real surface DEM): offset interfaces at surface - depth_i, point-sampled
     Kovacs permittivities, substrate = eps(deepest + 1 m). No attenuation in
@@ -483,18 +572,26 @@ def firn_cfg(rc_sim, spacing, depths, rough=None):
 
     ``rough`` = (sigma_m[], corr_length_m[]) per layer attaches Gerekos-2023
     sub-facet roughness to every INTERNAL layer interface (the air-firn
-    surface stays smooth); None -> the exact smooth path."""
+    surface stays smooth); None -> the exact smooth path.
+
+    ``eps`` = len(depths)+1 permittivities (firn0..firn_{N-1}, substrate)
+    replacing the point-sampled ones (effective_contrast_eps, H1); None -> the
+    exact point-sampled path."""
     sig, cl = (None, None) if rough is None else rough
+    e = (np.array([rfi.point_eps(d) for d in depths]
+                  + [rfi.point_eps(float(depths[-1]) + 1.0)])
+         if eps is None else np.asarray(eps, np.float64))
+    if e.shape != (len(depths) + 1,):
+        raise ValueError(f"eps must have {len(depths) + 1} entries")
     media = [Medium(name="air", eps_r=1.0)]
     ifaces = [DemInterface(name="surface")]
     for i, d in enumerate(depths):
-        media.append(Medium(name=f"firn{i}", eps_r=rfi.point_eps(d)))
+        media.append(Medium(name=f"firn{i}", eps_r=float(e[i])))
         rc = None if rough is None else RoughnessConfig(
             sigma_m=float(sig[i]), corr_length_m=float(cl[i]))
         ifaces.append(OffsetInterface(name=f"L{i}", reference="surface",
                                       offset=-float(d), roughness=rc))
-    media.append(Medium(name="substrate",
-                        eps_r=rfi.point_eps(float(depths[-1]) + 1.0)))
+    media.append(Medium(name="substrate", eps_r=float(e[-1])))
     return SimConfig(mode="coherent", split_sides=False, radar=rc_sim,
                      facets=FacetConfig(spacing=spacing), media=media,
                      interfaces=ifaces)
@@ -678,6 +775,8 @@ def pilot_and_budget(fsub, cfg_dict, rc_sim, spacing, out):
         for n, src in cfg_dict.get("rough_runs", ()):
             proj[f"firn_N{n}_rough_{src}"] = (rate_firn * work * _padwork(n)
                                               * ROUGH_COST_FACTOR)
+        for n in cfg_dict.get("eff_runs", ()):  # same cost as the smooth run
+            proj[f"firn_N{n}_h1eff"] = rate_firn * work * _padwork(n)
         proj["compile_pad_est"] = compile_pad
         proj["total"] = sum(proj.values())
         return proj
@@ -785,8 +884,8 @@ def surface_peak_twtt(power, twtt, t_guess, dt):
 # ========================================================================
 def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             along_m=ALONG_M, layer_counts=LAYER_COUNTS,
-            random_runs=RANDOM_RUNS, rough_runs=ROUGH_RUNS, spacing=None,
-            do_pilot=True, force=False, report=True):
+            random_runs=RANDOM_RUNS, rough_runs=ROUGH_RUNS, eff_runs=EFF_RUNS,
+            spacing=None, do_pilot=True, force=False, report=True):
     out = Path(out_root or OUT_DEFAULT)
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
@@ -798,7 +897,8 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
     cfg_dict = {"n_traces": n_traces, "ct_wide": ct_wide, "ct_firn": ct_firn,
                 "along_m": along_m, "layer_counts": tuple(layer_counts),
                 "random_runs": tuple(tuple(r) for r in random_runs),
-                "rough_runs": tuple(tuple(r) for r in rough_runs)}
+                "rough_runs": tuple(tuple(r) for r in rough_runs),
+                "eff_runs": tuple(int(n) for n in eff_runs)}
 
     def _slice(along):
         fsub, sinfo = sub_frame(frame, along)
@@ -845,9 +945,9 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         bed_cfg(rc_sim, spacing),
         {**meta_common, "ct": cfg_dict["ct_wide"], "kind": "surface+bed"},
         runs_dir, force)
-    run_list = [(f"firn_N{n}", rfi.equal_depths(n), None)
+    run_list = [(f"firn_N{n}", rfi.equal_depths(n), None, None)
                 for n in sorted(cfg_dict["layer_counts"])]
-    run_list += [(f"firn_N{n}_s{s}", rfi.random_depths(n, s), None)
+    run_list += [(f"firn_N{n}_s{s}", rfi.random_depths(n, s), None, None)
                  for n, s in cfg_dict.get("random_runs", ())]
     rough_spec = {}
     for n, src in cfg_dict.get("rough_runs", ()):
@@ -868,15 +968,46 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                     "layer depths and clamped beyond the profile's 0-90 m "
                     "range; applied to every INTERNAL layer interface only "
                     "(Gerekos 2023 rough-facet response, docs/roughness.md)"}
-        run_list.append((f"firn_N{n}_rough_{src}", d, (sig, cl)))
+        run_list.append((f"firn_N{n}_rough_{src}", d, (sig, cl), None))
+    eff_spec = {}
+    for n in cfg_dict.get("eff_runs", ()):
+        d = rfi.equal_depths(n)
+        eps_eff, r_eff = effective_contrast_eps(d, rc_sim.wavelength)
+        trend = [rfi.point_eps(x) for x in d] + [rfi.point_eps(float(d[-1]) + 1)]
+        eff_spec[f"firn_N{n}_h1eff"] = {
+            "method": EFF_METHOD, "n_layers": int(n),
+            "source": "tests/fixtures/firn/ngt37C95.2_density.tab (RAW 1 mm, "
+                      "Kovacs eps; NOT the 0.1 m-smoothed pipeline profile)",
+            "lambda_m": round(float(rc_sim.wavelength), 6),
+            "depth_m": [round(float(x), 3) for x in d],
+            "segment_abs_r_db": [round(float(20 * np.log10(max(x, 1e-30))), 3)
+                                 for x in r_eff],
+            "eps_r": [round(float(x), 6) for x in eps_eff],
+            "eps_r_point_sampled": [round(float(x), 6) for x in trend],
+            "eps_range": [round(float(eps_eff.min()), 4),
+                          round(float(eps_eff.max()), 4)],
+            "max_abs_eps_minus_trend": round(float(np.abs(
+                eps_eff - np.array(trend)).max()), 4),
+            "note": "H1 (claude_notes/b26_gap_hypotheses.md): media "
+                    "firn0..firn_{N-1} + substrate whose PLAIN Fresnel "
+                    "interface contrasts equal the transfer-matrix aggregate "
+                    "|r| of the raw full-resolution B26 profile over each "
+                    "layer's segment (segment_reflectivity); firn0 keeps its "
+                    "point-sampled value so the surface interface and the "
+                    "seam check are unchanged, and the per-step sign tracks "
+                    "the Kovacs trend. Same equal-placement geometry as "
+                    f"firn_N{n}; everything else identical."}
+        run_list.append((f"firn_N{n}_h1eff", d, None, eps_eff))
     firn_runs = {}
-    for key, depths, rough in run_list:
+    for key, depths, rough, eps_eff in run_list:
         rmeta = {} if rough is None else {
             "roughness": [key.split("_rough_")[-1],
                           round(float(rough[0].sum()), 6),
                           round(float(rough[1].sum()), 4)]}
+        if eps_eff is not None:
+            rmeta["eps"] = [EFF_METHOD, round(float(np.sum(eps_eff)), 6)]
         diag, arrs = run_sim(
-            key, chunks, firn_cfg(rc_sim, spacing, depths, rough),
+            key, chunks, firn_cfg(rc_sim, spacing, depths, rough, eps_eff),
             {**meta_common, "ct": cfg_dict["ct_firn"], "kind": key,
              "n_chunks": len(chunks),
              "depths_hash": round(float(depths.sum()), 4), **rmeta},
@@ -1146,8 +1277,11 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                          f"1-{rfi.ZMAX:.1f} m (run_firn_investigation); "
                          f"random placements (n, seed): "
                          f"{cfg_dict.get('random_runs', ())}; rough runs "
-                         f"(n, source): {cfg_dict.get('rough_runs', ())}",
+                         f"(n, source): {cfg_dict.get('rough_runs', ())}; "
+                         f"effective-contrast (H1) runs (n): "
+                         f"{cfg_dict.get('eff_runs', ())}",
         "roughness_runs": rough_spec,
+        "effective_contrast_runs": eff_spec,
         "band_levels_db_rel_surface": bands,
         "band_delta_db_sim_minus_measured": deltas,
         "profile_correlation_r": corr,
@@ -1216,9 +1350,30 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             f" stays below the {spacing:.1f} m facet size as required. "
             f"Mid-band ({GAP_BAND}) level change vs the SMOOTH run of the same "
             f"layer count: {rm['gain_vs_smooth_db']} dB.")
+    enote = ""
+    if eff_spec:
+        enote = (
+            " EFFECTIVE-CONTRAST (H1) RUNS: same equal-placement geometry, but "
+            "the layer permittivities are SYNTHETIC -- each interface's plain "
+            "Fresnel contrast equals the transfer-matrix aggregate |r| of the "
+            "RAW full-resolution (1 mm) B26 density profile over that layer's "
+            "segment, so the 0.1-0.5 m Bragg-scale strata that point sampling "
+            "discards are represented as an effective contrast "
+            "(claude_notes/b26_gap_hypotheses.md H1; 1-D 20-70 m band level "
+            "-28.3 -> -17.2 dB rel surface). "
+            + "; ".join(
+                f"{k}: eps {v['eps_range'][0]:.2f}-{v['eps_range'][1]:.2f} "
+                f"(max {v['max_abs_eps_minus_trend']:.2f} off the "
+                f"point-sampled trend), segment |r| "
+                f"{min(v['segment_abs_r_db']):.1f} to "
+                f"{max(v['segment_abs_r_db']):.1f} dB"
+                for k, v in eff_spec.items())
+            + ". firn0 keeps its point-sampled value (surface interface, seam "
+            "check and surface-peak normalization unchanged); the full eps "
+            "arrays are in run_config.json effective_contrast_runs.")
     notes = _notes(cfg_dict, params, spacing, lpa_err, le, bed_med, in_med,
                    off_s, off_b, dt, seam, sinfo, bed_depth_bm, bed_depth_pick,
-                   wall_actual, budget_log, waux, qnote + rnote)
+                   wall_actual, budget_log, waux, qnote + rnote + enote)
     doc = {"case": "b26_comparison", "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -1425,7 +1580,10 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
             rand_labeled = True
             ax.plot(d[m], db[m], color="C4", lw=0.9, alpha=0.8, label=lbl)
             continue
-        if "_rough_" in name:  # measured C&S20 Fig. 11 layer roughness
+        if name.endswith("_h1eff"):    # synthetic effective-contrast eps (H1)
+            c, lw, ls = "darkred", 1.8, "-"
+            lbl = f"{name[:-len('_h1eff')]} eff-contrast (H1)"
+        elif "_rough_" in name:  # measured C&S20 Fig. 11 layer roughness
             base, src = name.split("_rough_")
             c, lw, ls = rough_styles.get(src, ("C6", 1.4, ":"))
             lbl = f"{base} + rough layers (C&S20 Fig.11 {src} sigma/l)"
@@ -1556,7 +1714,8 @@ def _recorded_cfg(out):
         return {}
     c = json.loads(p.read_text())
     return {k: c[k] for k in ("n_traces", "ct_wide", "ct_firn", "along_m",
-                              "layer_counts", "random_runs", "rough_runs")
+                              "layer_counts", "random_runs", "rough_runs",
+                              "eff_runs")
             if k in c}
 
 

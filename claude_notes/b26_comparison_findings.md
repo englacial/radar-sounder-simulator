@@ -234,3 +234,31 @@ the untested axis.
 transfer-matrix budget (full-res vs point-sampled reflectivity; the ledger
 closes the 17 dB) in `claude_notes/b26_gap_hypotheses.md` (calc:
 `claude_notes/b26_contrast_calc.py`).
+
+## H1 effective-contrast run (2026-07-29): CONFIRMED — the gap closes to ~4 dB
+
+firn_N40_h1eff (segment-TMM effective dielectric contrasts replacing
+point-sampled eps; identical N=40 geometry; 5345 s, same cost as smooth):
+
+- 20-70 m fair-metric (mean power, all traces): -33.29 -> -21.95 dB rel
+  surface = +11.34 dB, vs the 1-D predicted +11.3. Remaining gap vs
+  measured: 3.9 dB (standard) / 3.6 dB (qlook), down from 15.2/14.9.
+- Old median metric: band delta -17.13 -> -3.80 dB.
+- Correlation vs measured RISES to 0.954 (std) / 0.955 (qlook) — best of
+  all 11 runs.
+- Deep band (80-120 m) now overshoots measured by ~2-3 dB (was -12 dB
+  under) — plausibly the |r|-magnitude matching discarding intra-segment
+  phase, or real deep-strata decorrelation nature has and we don't.
+- The coherent-realization deficit is UNCHANGED at -4.8 dB (realized
+  -21.95 vs 1-D expectation -17.2) — exactly as the H2 ledger predicted.
+  It is now the whole remaining mid-band story.
+
+Scoreboard final: placement REJECTED / focusing REJECTED (+0.3) /
+roughness REJECTED (+0.7) / H2 metric asymmetry PARTIAL (+1.9) /
+**H1 contrast sampling CONFIRMED (+11.3)**. Remaining open physics:
+the ~5 dB coherent-realization deficit (3-D facet sum under-realizing the
+1-D reflectivity — candidates: finite strip truncation of the Fresnel
+annuli, conformal-copy lateral coherence, facet-scale phase decorrelation
+across the refraction chain), and the ~2-3 dB deep-band overshoot.
+Point-sampled permittivity should be considered deprecated for firn
+simulation; effective segment contrasts are the way.

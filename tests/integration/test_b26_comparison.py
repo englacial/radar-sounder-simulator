@@ -12,10 +12,12 @@ Everything else is recorded, not gated (real-frame convention). The alias
 warning must be silent (asserted inside the tool on every simulate() call and
 recorded in the metrics).
 
-The rough-layer runs (firn_N40_rough_*) are far too expensive for the tiny
-run, so they are switched off there and covered CONFIG-LEVEL instead: the
-measured C&S 2020 Fig. 11 roughness must land on every internal layer
-interface and nowhere else.
+The rough-layer runs (firn_N40_rough_*) and the H1 effective-contrast run
+(firn_N40_h1eff) are far too expensive for the tiny run, so they are switched
+off there and covered CONFIG-LEVEL instead: the measured C&S 2020 Fig. 11
+roughness must land on every internal layer interface and nowhere else, and
+the synthetic effective-contrast permittivities must reproduce the
+full-resolution per-segment reflectivities.
 """
 
 import importlib.util
@@ -72,6 +74,56 @@ def test_rough_run_config():
                    for i in rb.firn_cfg(rc, 10.67, depths).interfaces)
 
 
+def test_effective_contrast_run_config():
+    """Config-level cover of the H1 effective-contrast run (no simulation): the
+    synthetic permittivity sequence must (a) keep firn0 at its point-sampled
+    value -- the surface interface, the seam check and the surface-peak
+    normalization ride on it -- (b) stay physical and near the Kovacs trend,
+    (c) have PLAIN Fresnel interface contrasts equal to the full-resolution
+    transfer-matrix segment reflectivities, and (d) lift the 1-D 20-70 m band
+    by the ~11 dB the hypothesis predicts. firn_cfg must change nothing but
+    the media permittivities."""
+    import run_firn_investigation as rfi
+
+    depths = rfi.equal_depths(40)
+    rc = RadarConfig(dt=4.1667e-9, n_samples=64, t0=0.0, f0=195e6)
+    eps, r = rb.effective_contrast_eps(depths, rc.wavelength)
+    trend = np.array([rfi.point_eps(d) for d in depths]
+                     + [rfi.point_eps(float(depths[-1]) + 1.0)])
+
+    assert eps.shape == trend.shape == (len(depths) + 1,)
+    assert np.isfinite(eps).all() and (eps > 1.0).all() and (eps < 3.3).all()
+    assert eps[0] == trend[0]                       # firn0 point-sampled
+    assert np.abs(eps - trend).max() < 0.5          # tracks the Kovacs trend
+    # segment reflectivities: median ~ -38.5 dB, all far below a Fresnel step
+    rdb = 20.0 * np.log10(r)
+    assert r.shape == depths.shape and (rdb < -20.0).all()
+    assert -40.0 < np.median(rdb) < -37.0
+
+    n = np.sqrt(eps)
+    gam = ((n[:-1] - n[1:]) / (n[:-1] + n[1:])) ** 2
+    assert np.abs(gam - r ** 2).max() < 1e-15      # contrasts reproduce |r|
+
+    # 1-D mid-band lift over the point-sampled stack (H1's +11 dB prediction)
+    nt = np.sqrt(trend)
+    gam_pt = ((nt[:-1] - nt[1:]) / (nt[:-1] + nt[1:])) ** 2
+    band = (depths >= 20.0) & (depths <= 70.0)
+    lift = 10.0 * np.log10(gam[band].sum() / gam_pt[band].sum())
+    assert 10.0 < lift < 13.0
+
+    cfg = rb.firn_cfg(rc, 10.67, depths, eps=eps)
+    ref = rb.firn_cfg(rc, 10.67, depths)
+    assert [m.eps_r for m in cfg.media[1:]] == [float(x) for x in eps]
+    assert [m.eps_r for m in ref.media[1:]] == [float(x) for x in trend]
+    assert cfg.media[0].eps_r == 1.0 and cfg.media[1].eps_r == ref.media[1].eps_r
+    # geometry / roughness identical to the smooth point-sampled run
+    assert all(i.roughness is None for i in cfg.interfaces)
+    assert [(i.name, getattr(i, "offset", None)) for i in cfg.interfaces] == \
+        [(i.name, getattr(i, "offset", None)) for i in ref.interfaces]
+    with pytest.raises(ValueError):
+        rb.firn_cfg(rc, 10.67, depths, eps=eps[:-1])
+
+
 def _cached(product="CSARP_standard"):
     return (CACHE_DIR /
             f"frame_{rb.SEASON}_{rb.FRAME_ID}_{product}.nc").exists()
@@ -82,7 +134,7 @@ def test_b26_comparison_tiny(tmp_path):
     try:
         metrics, out = rb.run_all(
             out_root=tmp_path, n_traces=8, layer_counts=(10,), spacing=64.0,
-            rough_runs=(), do_pilot=False)
+            rough_runs=(), eff_runs=(), do_pilot=False)
     except Exception as e:
         if not _cached():
             pytest.skip(f"no local cache for {rb.FRAME_ID} and remote access "
