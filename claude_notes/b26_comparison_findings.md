@@ -229,3 +229,8 @@ layer boundaries (e.g. thin-film transfer matrix or RMS contrast), instead
 of sampling epsilon pointwise. Geometry (conformal smooth copies) is now
 verified to matter little at measured roughness; amplitude statistics are
 the untested axis.
+
+2026-07-28 follow-up: ranked hypothesis list with a quantitative 1-D
+transfer-matrix budget (full-res vs point-sampled reflectivity; the ledger
+closes the 17 dB) in `claude_notes/b26_gap_hypotheses.md` (calc:
+`claude_notes/b26_contrast_calc.py`).
