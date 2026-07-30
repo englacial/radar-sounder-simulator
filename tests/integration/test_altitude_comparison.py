@@ -40,6 +40,47 @@ def _frame_cached():
             f"frame_{SEASON}_{FRAME}_CSARP_standard.nc").exists()
 
 
+def test_firn_config():
+    """Config-level cover of the --firn path (no simulation): region-keyed
+    core selection (B26 Greenland; B25 Antarctic proxy WITH its caveat), the
+    effective-contrast stack construction (soundersim.firn: plain Fresnel
+    contrasts reproduce the segment TMM |r|, firn media + substrate attenuate
+    at the ice constant, conformal surface offsets over [1 m, zmax]), and the
+    firn facet spacing (deepest layer binds; 32 m-divisor snap)."""
+    import numpy as np
+    from soundersim.firn import firn_stack
+
+    core, region, label, note = rac.firn_core_for(77.0)
+    assert region == "greenland" and "B26" in label and note is None
+    b25, region2, label2, note2 = rac.firn_core_for(-75.0)
+    assert region2 == "antarctica" and "B25" in label2
+    assert note2 and "proxy" in note2          # proxy caveat must be carried
+    assert abs(core.zmax - 119.66) < 0.01
+    assert abs(b25.zmax - 178.213) < 0.001
+
+    lam = 299792458.0 / 195e6
+    for c in (core, b25):
+        depths = c.equal_depths(10)
+        assert depths[0] == 1.0 and depths[-1] == c.zmax
+        eps, r = c.effective_contrast_eps(depths, lam)
+        n = np.sqrt(eps)
+        gam = np.abs((n[:-1] - n[1:]) / (n[:-1] + n[1:]))
+        assert np.abs(gam - r).max() < 1e-15   # contrasts reproduce |r|
+        media, ifaces = firn_stack(depths, eps, rac.ATT_DB_PER_KM)
+        assert media[0].name == "air" and not media[0].attenuation_db_per_km
+        assert media[-1].name == "substrate"
+        assert all(m.attenuation_db_per_km == rac.ATT_DB_PER_KM
+                   for m in media[1:])
+        assert ifaces[0].name == "surface"
+        assert [i.offset for i in ifaces[1:]] == [-float(d) for d in depths]
+        assert all(i.reference == "surface" for i in ifaces[1:])
+
+    # facet spacing: deepest firn layer binds at low altitude; snapped 32/k
+    sp = rac.firn_facet_spacing(lam, 500.0, core)
+    assert sp < 32.0 and abs(32.0 / sp - round(32.0 / sp)) < 1e-9
+    assert sp <= rac.firn_facet_spacing(lam, 9000.0, core)
+
+
 @pytest.mark.integration
 def test_altitude_comparison(tmp_path):
     try:

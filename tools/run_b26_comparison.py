@@ -117,9 +117,9 @@ import run_firn_investigation as rfi  # noqa: E402  B26 density->eps pipeline
 import run_opr_coherent_bed as rocb  # noqa: E402  M24 frame+DEM+bed machinery
 from run_opr_comparison import _db  # noqa: E402
 
+from soundersim import firn  # noqa: E402
 from soundersim.config import (AntennaConfig, DemInterface, FacetConfig,  # noqa: E402
-                               Medium, OffsetInterface, RadarConfig,
-                               RoughnessConfig, SimConfig, WaveformConfig)
+                               Medium, RadarConfig, SimConfig, WaveformConfig)
 from soundersim.opr import (CACHE_DIR, fetch_bedmachine_window,  # noqa: E402
                             fill_nodata_nearest, frame_scene, load_bottom_pick,
                             load_frame, resample_to_grid)
@@ -497,84 +497,27 @@ def layer_roughness(depths, source):
             np.interp(d, b["depth_m"], b[f"corr_length_{source}_m"]))
 
 
-def _b26_raw_index():
-    """(depth_m, refractive index) of the RAW (unsmoothed, 1 mm) B26 core --
-    the pipeline's 0.1 m pre-smoothing alone costs 1.4 dB of band level, so the
-    effective-contrast construction reads the fixture directly."""
-    path = rfi.FIXDIR / "ngt37C95.2_density.tab"
-    lines = path.read_text().splitlines()
-    hdr = next(i for i, ln in enumerate(lines)
-               if ln.startswith("Depth ice/snow"))
-    d = np.loadtxt(path, delimiter="\t", skiprows=hdr + 1)
-    return d[:, 0], np.sqrt(rfi.eps_kovacs(d[:, 1]))
-
-
-def _tmm_r(n_stack, dz, lam):
-    """Normal-incidence transfer-matrix reflection coefficient (Yeh; C&S 2020
-    Sec. IV-C) of ``len(n_stack) - 2`` slabs of thickness ``dz`` and indices
-    ``n_stack[1:-1]``, between half-spaces n_stack[0] / n_stack[-1]."""
-    kx = 2.0 * np.pi / lam * np.asarray(n_stack, np.float64)
-    phi = kx[1:-1] * dz
-
-    def interface(m):  # index-matching matrix from medium m to m+1
-        q = kx[m + 1] / kx[m]
-        return 0.5 * np.array([[1 + q, 1 - q], [1 - q, 1 + q]], complex)
-
-    M = np.eye(2, dtype=complex)
-    for m in range(len(phi)):
-        M = M @ interface(m) @ np.diag([np.exp(-1j * phi[m]),
-                                        np.exp(1j * phi[m])])
-    M = M @ interface(len(phi))
-    return M[1, 0] / M[0, 0]
+# Effective-contrast construction: promoted to soundersim.firn (FirnCore);
+# this module keeps thin delegates on the B26 fixture so its public API (and
+# the cached runs' meta keys) are unchanged. FirnCore replicates
+# rfi.load_b26/point_eps exactly (0.1 m edge-normalized boxcar), so the
+# delegates are byte-identical to the pre-refactor local implementations.
+B26_CORE = firn.FirnCore(rfi.FIXDIR / "ngt37C95.2_density.tab")
 
 
 def segment_reflectivity(depths, lam, complex_r=False):
-    """|r| (or complex r, referenced to the SEGMENT TOP) of the raw
-    full-resolution B26 profile aggregated by transfer matrix over each layer's
-    SEGMENT -- segment j spans the midpoints either side of depths[j] (the
-    first starts at depths[0], the last ends at the core end).
-
-    The profile ABOVE depths[0] is not covered: it is what the air-firn surface
-    interface already represents, and its aggregate |r| (-13.7 dB) is far too
-    large to express as one Fresnel step (it would demand eps ~3.9 at 4 m, a
-    spurious super-ice reflector). Every other segment is identical to
-    claude_notes/b26_contrast_calc.py's segment-aggregated stack.
-    """
-    z, n = _b26_raw_index()
-    dz = float(np.median(np.diff(z)))
-    d = np.asarray(depths, np.float64)
-    bnd = np.concatenate([[d[0]], (d[:-1] + d[1:]) / 2.0, [z[-1]]])
-    out = []
-    for a, b in zip(bnd[:-1], bnd[1:]):
-        s, e = int(np.searchsorted(z, a)), int(np.searchsorted(z, b))
-        stack = np.concatenate(([n[s - 1] if s else 1.0], n[s:e],
-                                [n[min(e, len(n) - 1)]]))
-        rj = _tmm_r(stack, dz, lam)
-        out.append(rj if complex_r else abs(rj))
-    return np.array(out)
+    """B26 segment-aggregate TMM reflectivity (FirnCore.segment_reflectivity
+    on the raw 1 mm fixture; the profile ABOVE depths[0] is what the air-firn
+    surface interface already represents -- its aggregate |r| of -13.7 dB
+    would demand a spurious eps ~3.9 super-ice reflector at 4 m)."""
+    return B26_CORE.segment_reflectivity(depths, lam, complex_r)
 
 
 def effective_contrast_eps(depths, lam):
-    """(eps[len(depths)+1], |r|[len(depths)]): synthetic permittivities for the
-    media of the H1 effective-contrast stack (firn0..firn_{N-1} + substrate),
-    whose PLAIN Fresnel interface contrasts equal segment_reflectivity().
-
-    firn0 keeps its point-sampled value (so the air-firn surface interface, the
-    seam check and the surface-peak normalization are untouched); thereafter
-    n_{j+1} = n_j (1 +- r_j)/(1 -+ r_j) with the sign taken to land closest to
-    the point-sampled Kovacs trend, which keeps the sequence bounded around it
-    instead of drifting (|r_j| is typically larger than the trend's own step).
-    """
-    r = segment_reflectivity(depths, lam)
-    trend = np.array([rfi.point_eps(d) for d in depths]
-                     + [rfi.point_eps(float(depths[-1]) + 1.0)])
-    n_tr = np.sqrt(trend)
-    n = np.empty(len(trend))
-    n[0] = n_tr[0]
-    for j, rj in enumerate(r):
-        cand = [n[j] * (1.0 + s * rj) / (1.0 - s * rj) for s in (1.0, -1.0)]
-        n[j + 1] = min(cand, key=lambda v: abs(v - n_tr[j + 1]))
-    return n ** 2, r
+    """H1 synthetic permittivities for the B26 core
+    (FirnCore.effective_contrast_eps: plain Fresnel contrasts reproduce
+    segment_reflectivity, firn0 point-sampled, sign tracks the Kovacs trend)."""
+    return B26_CORE.effective_contrast_eps(depths, lam)
 
 
 def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
@@ -599,23 +542,10 @@ def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
     ``eps`` = len(depths)+1 permittivities (firn0..firn_{N-1}, substrate)
     replacing the point-sampled ones (effective_contrast_eps, H1); None -> the
     exact point-sampled path."""
-    sig, cl = (None, None) if rough is None else rough
     e = (np.array([rfi.point_eps(d) for d in depths]
                   + [rfi.point_eps(float(depths[-1]) + 1.0)])
          if eps is None else np.asarray(eps, np.float64))
-    if e.shape != (len(depths) + 1,):
-        raise ValueError(f"eps must have {len(depths) + 1} entries")
-    media = [Medium(name="air", eps_r=1.0)]
-    ifaces = [DemInterface(name="surface")]
-    for i, d in enumerate(depths):
-        media.append(Medium(name=f"firn{i}", eps_r=float(e[i]),
-                            attenuation_db_per_km=ATT_DB_PER_KM))
-        rc = None if rough is None else RoughnessConfig(
-            sigma_m=float(sig[i]), corr_length_m=float(cl[i]))
-        ifaces.append(OffsetInterface(name=f"L{i}", reference="surface",
-                                      offset=-float(d), roughness=rc))
-    media.append(Medium(name="substrate", eps_r=float(e[-1]),
-                        attenuation_db_per_km=ATT_DB_PER_KM))
+    media, ifaces = firn.firn_stack(depths, e, ATT_DB_PER_KM, roughness=rough)
     return SimConfig(mode="coherent", split_sides=False, radar=rc_sim,
                      facets=FacetConfig(spacing=spacing), media=media,
                      interfaces=ifaces)

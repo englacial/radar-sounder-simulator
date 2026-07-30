@@ -45,9 +45,18 @@ radargram panels on a shared surface-referenced twtt axis, and a nadir
 depth-power overlay. A copy of metrics.json + figures is mirrored under
 outputs/verification/altitude_<frame_id>/ for tools/make_report.py.
 
+Optional firn layers (``--firn N``): N effective-contrast layers from the
+region-appropriate density core (B26 Greenland / B25 Antarctic REPRESENTATIVE
+proxy), the run_b26_comparison standard methodology (soundersim.firn): segment
+transfer-matrix reflectivities of the raw core profile as plain Fresnel
+contrasts, conformal DEM offsets over [1 m, core zmax], 15 dB/km firn
+attenuation, simulated on a narrow cross-track strip and field-summed with the
+surface+bed run (firn surface layer excluded). Without --firn the surface+bed
+path (and its caches) is untouched.
+
 Run:
   uv run python tools/run_altitude_comparison.py \
-      --season 2019_Greenland_P3 --frame 20190418_01_009
+      --season 2019_Greenland_P3 --frame 20190418_01_009 [--firn 10]
 """
 
 import argparse
@@ -82,9 +91,10 @@ from soundersim.config import (AntennaConfig, DemInterface, FacetConfig,  # noqa
 from soundersim.opr import (CACHE_DIR, fetch_bedmachine_window,  # noqa: E402
                             fill_nodata_nearest, frame_scene, load_bottom_pick,
                             load_frame, resample_to_grid)
+from soundersim import firn  # noqa: E402
 from soundersim.physics import fresnel_normal  # noqa: E402
 from soundersim.simulate import simulate  # noqa: E402
-from soundersim.synthetic import MultilayerScene  # noqa: E402
+from soundersim.synthetic import MultilayerScene, SyntheticScene  # noqa: E402
 
 C = 299792458.0
 # Physics / instrument constants (shared with the M24 surface+bed run).
@@ -104,6 +114,46 @@ PROF_FLOOR_DB = -150.0                # nadir-profile y floor (dB rel surf peak)
 
 OUT_DEFAULT = ROOT / "outputs" / "altitude_comparison"
 VER_ROOT = ROOT / "outputs" / "verification"
+
+# ---- optional firn layers (--firn N; the b26 effective-contrast standard) ---
+# Model layers carry the segment-aggregate transfer-matrix reflectivity of the
+# region-appropriate core's RAW density profile (soundersim.firn; point-sampled
+# eps is deprecated, ~12 dB weak in the 20-70 m band), placed as conformal
+# OffsetInterfaces of the surface DEM over [1 m, core zmax], firn media
+# attenuating at the ice medium's 15 dB/km. The firn contribution runs on a
+# NARROW cross-track strip (off-nadir firn returns are sinc-suppressed) in
+# along-track chunks and is field-summed with the wide surface+bed run,
+# EXCLUDING the firn run's own surface layer (no double count) -- the
+# run_b26_comparison construction. Unlike b26 the firn strip has its OWN facet
+# spacing (the surface+bed caches predate --firn and must stay valid), so the
+# exact-lattice seam check is replaced by a recorded gamma-scaled surface-layer
+# agreement diagnostic.
+CT_FIRN = 600.0                       # firn-strip cross-track reach (m)
+FIRN_EFF_METHOD = "tmm_segment_aggregate_v1"
+FIXDIR = ROOT / "tests" / "fixtures" / "firn"
+FIRN_CORES = {  # hemisphere -> (fixture, label, proxy caveat or None)
+    "greenland": ("ngt37C95.2_density.tab", "B26 (ngt37C95.2)", None),
+    "antarctica": ("BER11C95_25_density.tab", "B25 (BER11C95_25)",
+                   "B25 (Berkner Island summit) is a REPRESENTATIVE Antarctic "
+                   "firn proxy: this frame does not pass a cored site, so the "
+                   "firn stack is a plausible stand-in, not site truth"),
+}
+# Optional sub-facet SURFACE roughness (--surf-rough): Gerekos-2023 rough-facet
+# response on the wide run's surface interface, at the C&S 2020 Fig. 11 mcords
+# inversion's shallow (0 m) clamp -- tests/fixtures/firn/fig11a/b first row --
+# a REPRESENTATIVE cm-scale snow-surface roughness the 32 m DEM lacks, not a
+# site measurement. Iteration-validated 2026-07-29 on both frames (mean-power
+# metric, with-firn): 2012 real corr 0.867 -> 0.917, 20-70 m delta -13.1 ->
+# -9.6 dB; 2019 real corr 0.921 -> 0.930, -9.8 -> -7.7 dB. Default OFF: the
+# smooth path and its caches are byte-identical; rough runs cache under their
+# own rids (level_<spec>_srough[_firnN]).
+SURF_ROUGH_SIGMA_M = 0.049474             # fig11a rms_height_mcords_m @ 0 m
+SURF_ROUGH_CL_M = 2.982179                # fig11b corr_length_mcords_m @ 0 m
+BAND_EDGES_M = (5.0, 20.0, 60.0, 120.0)   # firn band-level diagnostics (b26)
+EXTRA_BANDS = ((20.0, 70.0), (80.0, 120.0))
+GAP_BAND = "20-70m"
+PROFILE_MAX_M = 200.0
+SEAM_WIN_US = 1.5
 
 
 # ========================================================================
@@ -199,7 +249,7 @@ def mcords_params(season, frame_id):
     if radar is None:
         raise LookupError(
             f"no known param layout in {frame_id}: tried "
-            + ", ".join(l[0] for l in _PARAM_LAYOUTS)
+            + ", ".join(lay[0] for lay in _PARAM_LAYOUTS)
             + f"; product attrs: {sorted(k for k in a if 'param' in k)}")
 
     def uniq(key):
@@ -396,14 +446,21 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
     return rc_sim, rc_frame, b0
 
 
-def bed_cfg(rc_sim, spacing):
+def bed_cfg(rc_sim, spacing, surf_rough=False):
+    """Surface+bed config; ``surf_rough`` attaches the representative C&S
+    Fig. 11 shallow-clamp sub-facet roughness to the SURFACE interface only
+    (the bed stays smooth; see the SURF_ROUGH_* provenance note)."""
+    from soundersim.config import RoughnessConfig
+    rc = (RoughnessConfig(sigma_m=SURF_ROUGH_SIGMA_M,
+                          corr_length_m=SURF_ROUGH_CL_M) if surf_rough
+          else None)
     return SimConfig(mode="coherent", split_sides=False, radar=rc_sim,
                      facets=FacetConfig(spacing=spacing),
                      media=[Medium(name="air", eps_r=1.0),
                             Medium(name="ice", eps_r=EPS_ICE,
                                    attenuation_db_per_km=ATT_DB_PER_KM),
                             Medium(name="bed", eps_r=EPS_BED)],
-                     interfaces=[DemInterface(name="surface"),
+                     interfaces=[DemInterface(name="surface", roughness=rc),
                                  DemInterface(name="bed")])
 
 
@@ -413,6 +470,329 @@ def _n_facets(dem_shape, spacing):
     nrv = max(2, int(round((ny - 1) * f)) + 1)
     ncv = max(2, int(round((nx - 1) * f)) + 1)
     return (nrv - 1) * (ncv - 1)
+
+
+# ========================================================================
+# firn layers (--firn N)
+# ========================================================================
+def firn_core_for(lat_mean):
+    """(FirnCore, region, label, proxy_note) for the frame's hemisphere."""
+    region = "greenland" if lat_mean > 0 else "antarctica"
+    fname, label, note = FIRN_CORES[region]
+    return firn.FirnCore(FIXDIR / fname), region, label, note
+
+
+def firn_facet_spacing(lam, r_min, core):
+    """beta=0.5 Fresnel spacing for the firn strip, minimized over the surface
+    (lam, r_min) and the deepest firn layer (in-firn lam, r_min + zmax; it
+    binds), snapped down to a 32 m divisor. Independent of the surface+bed
+    run's spacing (whose caches predate --firn and must stay valid)."""
+    cands = [lam * r_min,
+             lam / np.sqrt(core.point_eps(core.zmax)) * (r_min + core.zmax)]
+    s = float(BETA * np.sqrt(min(cands)))
+    return 32.0 / np.ceil(32.0 / s) if s < 32.0 else s
+
+
+def firn_strip_scenes(base, ct_firn, nav_z, n_chunks=None):
+    """Narrow-strip SURFACE-ONLY scenes for the firn contribution, cropped
+    from the base scene's surface DEM in ALONG-TRACK CHUNKS (the b26
+    firn_scenes construction: one bbox around a long diagonal track would
+    carry many times the intended +-ct_firn strip area; each chunk's DEM is
+    its own traces' bbox padded by ct_firn + 100 m so every trace keeps full
+    +-ct_firn coverage). Platform height overridden to ``nav_z`` per level.
+    Returns [(SyntheticScene, trace_rows), ...]."""
+    n_traces = len(base.nav_llh)
+    n_chunks = n_chunks or max(1, round(n_traces / 17))
+    tr = Transformer.from_crs("EPSG:4326", base.crs, always_xy=True)
+    px, py = tr.transform(base.nav_llh[:, 1], base.nav_llh[:, 0])
+    pad = ct_firn + 100.0
+    ny, nx = base.dem.shape
+    out = []
+    for rows_idx in np.array_split(np.arange(n_traces), n_chunks):
+        x, y = px[rows_idx], py[rows_idx]
+        cols, rows = (~base.transform) * (
+            np.array([x.min() - pad, x.max() + pad]),
+            np.array([y.min() - pad, y.max() + pad]))
+        c0 = int(np.clip(np.floor(min(cols)), 0, nx - 2))
+        c1 = int(np.clip(np.ceil(max(cols)) + 1, c0 + 2, nx))
+        r0 = int(np.clip(np.floor(min(rows)), 0, ny - 2))
+        r1 = int(np.clip(np.ceil(max(rows)) + 1, r0 + 2, ny))
+        dem = np.ascontiguousarray(base.dems[0][r0:r1, c0:c1])
+        tr_c = base.transform * Affine.translation(c0, r0)
+        nav = base.nav_llh[rows_idx].copy()
+        nav[:, 2] = nav_z[rows_idx]
+        roll = getattr(base, "nav_roll", None)
+        sc = SyntheticScene(
+            f"{base.name}_firnstrip{rows_idx[0]}", dem, tr_c, base.crs, nav,
+            {**base.params, "ct_dist_firn": ct_firn},
+            nav_roll=None if roll is None else np.asarray(roll)[rows_idx])
+        out.append((sc, rows_idx))
+    return out
+
+
+def run_firn_level(rid, chunks, cfg, meta, runs_dir, oversample, force=False):
+    """Cached chunked firn simulate() for one level (the b26 run_sim shape):
+    decimated per-layer complex fields assembled over all traces into
+    runs/<rid>.npz/.json, keyed on ``meta``. Alias warning asserted silent;
+    a non-finite field fails BEFORE the cache is written."""
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    jp, npz_p = runs_dir / f"{rid}.json", runs_dir / f"{rid}.npz"
+    key = json.dumps(meta, sort_keys=True)
+    if jp.exists() and npz_p.exists() and not force:
+        diag = json.loads(jp.read_text())
+        if diag.get("meta_key") == key:
+            print(f"  [skip-exists] {rid} ({diag['wall_s']:.1f} s recorded)",
+                  flush=True)
+            return diag, dict(np.load(npz_p))
+    n_traces = sum(len(rows) for _, rows in chunks)
+    field = twtt = None
+    msgs_all, facets, wall = [], [], 0.0
+    for scene, rows in chunks:
+        t = time.perf_counter()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            ds = simulate(scene, cfg)
+        wall += time.perf_counter() - t
+        msgs = [str(w.message) for w in caught]
+        if any("alias" in m for m in msgs):
+            raise RuntimeError(f"in-band-alias warning fired for {rid}: {msgs}")
+        msgs_all += msgs
+        ds_dec = ds.isel(twtt=slice(None, None, oversample))
+        f = np.asarray(ds_dec.field.values, np.complex64)   # (t, nb, L)
+        if field is None:
+            field = np.zeros((n_traces,) + f.shape[1:], np.complex64)
+            twtt = ds_dec.twtt.values
+        field[rows] = f
+        facets.append(_n_facets(scene.dem.shape, cfg.facets.spacing))
+    if not np.isfinite(field).all():
+        raise RuntimeError(f"{rid}: non-finite field")
+    diag = {"rid": rid, "wall_s": round(wall, 2), "meta_key": key, "meta": meta,
+            "n_chunks": len(chunks), "n_facets_per_interface_per_chunk": facets,
+            "warnings": msgs_all}
+    arrs = dict(field=field, twtt=twtt)
+    np.savez_compressed(npz_p, **arrs)
+    jp.write_text(json.dumps(diag, indent=1) + "\n")
+    print(f"  [ok] {rid}  {wall:.1f} s  chunks {len(chunks)} "
+          f"facets/iface/chunk ~{int(np.mean(facets))}", flush=True)
+    return diag, arrs
+
+
+def firn_seam(E_wide_surf, E_firn_surf, twtt, t_surf, dt, eps_firn0):
+    """Recorded diagnostic (NOT the b26 exact-lattice gate): median over traces
+    of the max relative deviation between the firn run's gamma-scaled surface
+    field and the wide run's surface field in [t_surf-0.3us, t_surf+1.5us].
+    The two runs use different facet spacings here, so agreement is
+    approximate away from the specular peak."""
+    ratio = fresnel_normal(1.0, EPS_ICE) / fresnel_normal(1.0, eps_firn0)
+    rel = []
+    for t in range(E_wide_surf.shape[0]):
+        if not np.isfinite(t_surf[t]):
+            continue
+        a = int(np.clip((t_surf[t] - 0.3e-6 - twtt[0]) / dt, 0, len(twtt) - 2))
+        b = int(np.clip((t_surf[t] + SEAM_WIN_US * 1e-6 - twtt[0]) / dt,
+                        a + 1, len(twtt)))
+        den = np.abs(E_wide_surf[t, a:b]).max()
+        if den > 0:
+            rel.append(float(np.abs(E_firn_surf[t, a:b] * ratio
+                                    - E_wide_surf[t, a:b]).max() / den))
+    return float(np.median(rel)) if rel else float("nan")
+
+
+def profile_vs_depth(power, twtt, t_surf, dt, eps_mean, smooth_m=5.0):
+    """(depth_m, dB rel surface peak): twtt below the surface peak converted
+    with c/sqrt(eps_mean) (the b26 convention), 5 m boxcar."""
+    bin_depth = C * dt / (2.0 * np.sqrt(eps_mean))
+    w = max(int(round(smooth_m / bin_depth)) | 1, 3)
+    ps = np.convolve(power, np.ones(w) / w, mode="same")
+    i0 = int(np.clip(np.searchsorted(twtt, t_surf) - int(0.3e-6 / dt), 0,
+                     len(twtt) - 2))
+    i1 = int(np.clip(np.searchsorted(twtt, t_surf + 1.0e-6), i0 + 1, len(twtt)))
+    pk = ps[i0:i1].max()
+    depth = (twtt - t_surf) * C / (2.0 * np.sqrt(eps_mean))
+    db = 10.0 * np.log10(np.maximum(ps / max(pk, 1e-300), 1e-15))
+    return depth, db
+
+
+def band_levels(depth, db, edges=BAND_EDGES_M, extra=EXTRA_BANDS):
+    out = {}
+    for lo, hi in list(zip(edges[:-1], edges[1:])) + list(extra):
+        m = (depth >= lo) & (depth < hi)
+        out[f"{lo:.0f}-{hi:.0f}m"] = (float(np.median(db[m])) if m.any()
+                                      else float("nan"))
+    return out
+
+
+def profile_corr(ref, other, lo=5.0, hi=PROFILE_MAX_M):
+    """Pearson r of dB depth profiles, ``other`` interpolated onto ref's depth
+    axis over [lo, hi] m."""
+    d_r, db_r = ref
+    m = (d_r >= lo) & (d_r <= hi)
+    d, db = other
+    return float(np.corrcoef(db_r[m], np.interp(d_r[m], d, db))[0, 1])
+
+
+def mean_power_profile(P, twtt, t_guess, dt, eps_mean, pre_us=0.5,
+                       smooth_m=5.0):
+    """(depth_m, dB rel surface peak): MEAN POWER over all traces, each
+    aligned on its own surface-peak bin and normalized to its own surface
+    peak, then 5 m boxcar. The b26 findings' fair-metric convention:
+    speckle-averaged, so band medians and correlations are stable across
+    levels (a single trace's deep inter-layer nulls are realization noise).
+    Kept alongside the single-trace profile_vs_depth for comparability."""
+    tpk = surface_peak_twtt(P, twtt, t_guess, dt)
+    k0 = int(round(pre_us * 1e-6 / dt))
+    n_rel = k0 + P.shape[1]
+    acc, cnt = np.zeros(n_rel), np.zeros(n_rel)
+    for t in range(P.shape[0]):
+        if not np.isfinite(tpk[t]):
+            continue
+        pk = int(round((tpk[t] - twtt[0]) / dt))
+        w = float(P[t, max(0, pk - 31):pk + 32].max())
+        if w <= 0:
+            continue
+        a = max(0, pk - k0)
+        seg = P[t, a:] / w
+        off = k0 - (pk - a)
+        acc[off:off + len(seg)] += seg
+        cnt[off:off + len(seg)] += 1
+    prof = acc / np.maximum(cnt, 1)
+    bin_d = C * dt / (2.0 * np.sqrt(eps_mean))
+    wln = max(int(round(smooth_m / bin_d)) | 1, 3)
+    ps = np.convolve(prof, np.ones(wln) / wln, mode="same")
+    depth = (np.arange(n_rel) - k0) * bin_d
+    pk0 = ps[np.abs(depth) < 3.0].max()
+    db = 10.0 * np.log10(np.maximum(ps / max(pk0, 1e-300), 1e-15))
+    return depth, db
+
+
+def _firn_analysis(fctx, results, frame, fsub, sinfo, j0):
+    """Per-level firn assembly + nadir depth-power comparison vs measured.
+    PRIMARY profile/metric: trace-averaged mean power (mean_power_profile,
+    the b26 fair-metric convention -- adopted 2026-07-29 after it raised the
+    with-firn correlation at every level and stabilized the band deltas);
+    the single representative-trace profile (b26 profile_vs_depth pattern)
+    is recorded alongside as repr_trace. Mutates each result: E_comb =
+    surface+bed + firn internal layers (firn layer 0 excluded -- no surface
+    double count); firn_profiles for the figure. Returns the firn_doc dict."""
+    em = fctx["eps_mean"]
+    tw_full = frame.twtt.values
+    dt_full = float(tw_full[1] - tw_full[0])
+    i0 = sinfo["i0_local"]
+    surf_nat = np.asarray(fsub.Surface.values, np.float64)
+    meas_all = np.asarray(fsub.Data.values, np.float64)
+    prof_meas = mean_power_profile(meas_all, tw_full, surf_nat, dt_full, em)
+    t_s = surface_peak_twtt(meas_all[[i0]], tw_full,
+                            np.array([surf_nat[i0]]), dt_full)[0]
+    prof_meas_1 = profile_vs_depth(meas_all[i0], tw_full, t_s, dt_full, em)
+    mb, mb1 = band_levels(*prof_meas), band_levels(*prof_meas_1)
+    doc = {"measured_bands": {b: round(v, 2) for b, v in mb.items()},
+           "prof_measured": prof_meas, "per_level": {}}
+    for spec, r in results.items():
+        tw, dt_l = r["arrs"]["twtt"], r["rc_frame"].dt
+        E2 = r["arrs"]["field"].sum(-1)
+        Ef = r["firn"]["arrs"]["field"]
+        E3 = E2 + Ef[..., 1:].sum(-1)
+        r["E_comb"] = E3
+        nad0 = r["arrs"]["nadir_twtt"][:, 0]
+        seam = firn_seam(r["arrs"]["field"][..., 0], Ef[..., 0], tw, nad0,
+                         dt_l, float(fctx["eps"][0]))
+        pr, pr1 = {}, {}
+        for name, E in (("surface+bed", E2), ("with_firn", E3)):
+            P = np.abs(E) ** 2
+            pr[name] = mean_power_profile(P, tw, nad0, dt_l, em)
+            ts = surface_peak_twtt(P[[j0]], tw, np.array([nad0[j0]]), dt_l)[0]
+            pr1[name] = profile_vs_depth(P[j0], tw, ts, dt_l, em)
+        r["firn_profiles"] = pr
+        bands = {k: band_levels(*v) for k, v in pr.items()}
+        bands1 = {k: band_levels(*v) for k, v in pr1.items()}
+        doc["per_level"][spec] = {
+            "seam_rel": round(seam, 5),
+            "spacing_firn_m": round(r["firn"]["spacing"], 3),
+            "wall_s_firn": r["firn"]["diag"]["wall_s"],
+            "bands_db": {k: {b: round(x, 2) for b, x in v.items()}
+                         for k, v in bands.items()},
+            "delta_vs_measured_db": {
+                k: {b: round(v[b] - mb[b], 2) for b in v}
+                for k, v in bands.items()},
+            "corr_vs_measured": {k: round(profile_corr(prof_meas, v), 4)
+                                 for k, v in pr.items()},
+            "repr_trace": {
+                "delta_vs_measured_db": {
+                    k: {b: round(v[b] - mb1[b], 2) for b in v}
+                    for k, v in bands1.items()},
+                "corr_vs_measured": {k: round(profile_corr(prof_meas_1, v), 4)
+                                     for k, v in pr1.items()}}}
+    return doc
+
+
+def _firn_metric(firn_doc, firn_n, fctx, order):
+    pl = firn_doc["per_level"]
+    first = order[0]
+    return {
+        "value": pl[first]["delta_vs_measured_db"]["with_firn"][GAP_BAND],
+        "threshold": None, "op": "record", "pass": True,
+        "band": GAP_BAND, "n_layers": firn_n, "core": fctx["label"],
+        "measured_bands_db": firn_doc["measured_bands"],
+        "per_level_delta_vs_measured_db": {
+            s: v["delta_vs_measured_db"] for s, v in pl.items()},
+        "per_level_corr_vs_measured": {
+            s: v["corr_vs_measured"] for s, v in pl.items()},
+        "per_level_seam_rel": {s: v["seam_rel"] for s, v in pl.items()},
+        "note": f"nadir depth-power (dB rel own surface peak, MEAN POWER over "
+        f"all traces each aligned/normalized on its own surface peak -- the "
+        f"b26 fair-metric convention; single-trace values recorded under "
+        f"repr_trace in run_config.json) minus measured, in the {GAP_BAND} "
+        f"firn band, for the {first} level WITH the N={firn_n} "
+        f"effective-contrast firn stack ({fctx['label']}); per-level before "
+        f"(surface+bed) / after (with_firn) deltas, Pearson r "
+        f"(5-{PROFILE_MAX_M:.0f} m) and the approximate gamma-scaled seam "
+        f"diagnostic recorded alongside. "
+        + (f"CAVEAT: {fctx['proxy_note']}. " if fctx["proxy_note"] else "")
+        + "recorded only"}
+
+
+def _firn_figure(out, results, order, fctx, firn_doc):
+    """Per-level nadir depth-power panels: measured vs surface+bed vs
+    +firn (the firn zone is where the stack should lift the sim toward the
+    measured near-surface falloff)."""
+    zmax = fctx["core"].zmax
+    x_hi = min(PROFILE_MAX_M, zmax + 40.0)
+    ncols = min(2, len(order))
+    nrows = -(-len(order) // ncols)
+    fig, axs = plt.subplots(nrows, ncols, figsize=(7.0 * ncols, 4.6 * nrows),
+                            sharex=True, sharey=True, squeeze=False)
+    axs = axs.ravel()
+    for ax in axs[len(order):]:
+        ax.set_visible(False)
+    d_m, db_m = firn_doc["prof_measured"]
+    for k, spec in enumerate(order):
+        ax = axs[k]
+        r = results[spec]
+        ax.plot(d_m, db_m, "k", lw=1.8, label="measured")
+        d, db = r["firn_profiles"]["surface+bed"]
+        ax.plot(d, db, color="0.55", lw=1.2, ls="--", label="surface+bed")
+        d, db = r["firn_profiles"]["with_firn"]
+        ax.plot(d, db, color="tab:blue", lw=1.4,
+                label=f"+firn N={len(fctx['depths'])}")
+        ax.axvline(zmax, color="tab:red", lw=0.7, ls=":",
+                   label=f"core end {zmax:.0f} m")
+        ax.set_xlim(0, x_hi)
+        ax.set_ylim(-90, 3)
+        ax.grid(alpha=0.3)
+        ax.set_title(f"{spec} (AGL {r['h_med']:.0f} m)", fontsize=10)
+        if k == 0:
+            ax.legend(fontsize=8, loc="upper right")
+    for c in range(0, len(order), ncols):
+        axs[c].set_ylabel("dB rel surface peak (mean power)")
+    for ax in axs[max(0, len(order) - ncols):len(order)]:
+        ax.set_xlabel(f"depth (m, c/sqrt({fctx['eps_mean']:.2f}))")
+    fig.suptitle(f"nadir depth-power (trace-averaged) vs measured: "
+                 f"{fctx['label']} effective-contrast firn stack", fontsize=11)
+    fig.tight_layout()
+    fp = out / "firn_profiles.png"
+    fig.savefig(fp, dpi=140)
+    plt.close(fig)
+    return fp
 
 
 # ========================================================================
@@ -535,7 +915,7 @@ def platform_z(level, real_elev, surf_elev, trace_spacing_m):
 # ========================================================================
 def run(season, frame_id, levels=DEFAULT_LEVELS, n_traces=100, along_m=10000.0,
         ct_cap=6000.0, out_root=None, min_spacing=None, force=False,
-        make_report=True):
+        make_report=True, firn_n=None, ct_firn=CT_FIRN, surf_rough=False):
     lvls = [parse_level(s) for s in levels.split(",") if s.strip()]
     out = Path(out_root or (OUT_DEFAULT / f"altitude_{frame_id}"))
     out.mkdir(parents=True, exist_ok=True)
@@ -580,6 +960,23 @@ def run(season, frame_id, levels=DEFAULT_LEVELS, n_traces=100, along_m=10000.0,
     s_sim = sinfo["s_rel_m"][idx] / 1e3
     j0 = int(np.argmin(np.abs(sinfo["s_rel_m"][idx])))  # representative trace
 
+    # --- optional firn stack (region-appropriate core, effective contrasts) --
+    fctx = None
+    if firn_n:
+        lat_mean = float(np.nanmean(_lonlat(fsub)[0]))
+        core, region, core_label, proxy_note = firn_core_for(lat_mean)
+        depths = core.equal_depths(firn_n)
+        eps_eff, r_eff = core.effective_contrast_eps(depths, lam)
+        fctx = {"core": core, "region": region, "label": core_label,
+                "proxy_note": proxy_note, "depths": depths, "eps": eps_eff,
+                "r": r_eff, "eps_mean": float(core.eps.mean()),
+                "file": FIRN_CORES[region][0]}
+        print(f"firn: N={firn_n} effective-contrast layers from {core_label} "
+              f"({fctx['file']}), 1-{core.zmax:.1f} m, strip +-{ct_firn:.0f} m",
+              flush=True)
+        if proxy_note:
+            print(f"WARNING: {proxy_note}", flush=True)
+
     results = {}          # spec -> dict(diag, arrs, rc_frame, level info)
     for level in lvls:
         pz = platform_z(level, real_elev, surf_elev, trace_spacing)
@@ -603,7 +1000,7 @@ def run(season, frame_id, levels=DEFAULT_LEVELS, n_traces=100, along_m=10000.0,
         ct = min(ct_needed, ct_cap)
         cap_bound = ct_needed > ct_cap
         scene = crop_scene(base, ct, pz, f"{base.name}_{level['spec']}")
-        rid = f"level_{level['spec']}"
+        rid = f"level_{level['spec']}" + ("_srough" if surf_rough else "")
         meta = {"season": season, "frame_id": frame_id, "spec": level["spec"],
                 "n_traces": n, "along_m": along_m, "spacing_m": round(spacing, 4),
                 "ct_m": round(ct, 1), "dt_sim_ns": round(rc_sim.dt * 1e9, 5),
@@ -611,8 +1008,39 @@ def run(season, frame_id, levels=DEFAULT_LEVELS, n_traces=100, along_m=10000.0,
                 "n_samples_sim": rc_sim.n_samples}
         if window != "hann":  # keyed only when it deviates from the historical
             meta["window"] = window     # default, so pre-existing caches with
-        diag, arrs = run_level(rid, scene, bed_cfg(rc_sim, spacing), meta,   # hann stay valid
-                               runs_dir, oversample, force)
+        if surf_rough:                  # hann stay valid
+            meta["surf_rough"] = [SURF_ROUGH_SIGMA_M, SURF_ROUGH_CL_M]
+        diag, arrs = run_level(rid, scene, bed_cfg(rc_sim, spacing, surf_rough),
+                               meta, runs_dir, oversample, force)
+        firn_res = None
+        if fctx is not None:
+            sp_f = firn_facet_spacing(lam, r_min, fctx["core"])
+            if min_spacing:
+                sp_f = max(sp_f, min_spacing)
+            chunks = firn_strip_scenes(base, ct_firn, pz)
+            media_f, ifaces_f = firn.firn_stack(fctx["depths"], fctx["eps"],
+                                                ATT_DB_PER_KM)
+            fcfg = SimConfig(mode="coherent", split_sides=False, radar=rc_sim,
+                             facets=FacetConfig(spacing=sp_f), media=media_f,
+                             interfaces=ifaces_f)
+            fmeta = {"season": season, "frame_id": frame_id,
+                     "spec": level["spec"], "kind": f"firn{firn_n}_h1eff",
+                     "core": fctx["file"], "method": FIRN_EFF_METHOD,
+                     "n_traces": n, "along_m": along_m,
+                     "spacing_m": round(sp_f, 4), "ct_firn_m": ct_firn,
+                     "dt_sim_ns": round(rc_sim.dt * 1e9, 5),
+                     "t0_us": round(rc_sim.t0 * 1e6, 5),
+                     "n_samples_sim": rc_sim.n_samples,
+                     "att_db_per_km": ATT_DB_PER_KM,
+                     "depths_hash": round(float(fctx["depths"].sum()), 4),
+                     "eps_sum": round(float(np.sum(fctx["eps"])), 6)}
+            # firn rid deliberately excludes _srough: the firn strip run does
+            # not depend on the wide run's surface roughness (its own surface
+            # layer is excluded from the sum), so the cache is shared.
+            fdiag, farrs = run_firn_level(
+                f"level_{level['spec']}_firn{firn_n}", chunks, fcfg, fmeta,
+                runs_dir, oversample, force)
+            firn_res = {"diag": fdiag, "arrs": farrs, "spacing": sp_f}
         lpa_err = rocb._lpa_nadir_error(spacing, r_min, 2 * np.pi / lam,
                                         fresnel_normal(1.0, EPS_ICE))
         pl_res_m = C / (2.0 * params["waveform"]["bandwidth_Hz"])   # range res
@@ -622,7 +1050,8 @@ def run(season, frame_id, levels=DEFAULT_LEVELS, n_traces=100, along_m=10000.0,
             "level": level, "diag": diag, "arrs": arrs, "rc_frame": rc_frame,
             "pz": pz, "agl": agl, "spacing": spacing, "ct": ct,
             "cap_bound": cap_bound, "lpa_err": lpa_err, "r_min": r_min,
-            "h_med": h_med, "pl_foot": pl_foot, "pl_res_m": pl_res_m}
+            "h_med": h_med, "pl_foot": pl_foot, "pl_res_m": pl_res_m,
+            "firn": firn_res}
 
     # ---- analysis: real-level surface gate + r^-2 surface scaling ----
     real_spec = next((L["spec"] for L in lvls if L["kind"] == "real"), None)
@@ -650,11 +1079,62 @@ def run(season, frame_id, levels=DEFAULT_LEVELS, n_traces=100, along_m=10000.0,
                         "expected_r2_db": round(exp_db, 2),
                         "deviation_db": round(meas_db - exp_db, 2)})
 
+    firn_doc = None
+    if fctx is not None:
+        firn_doc = _firn_analysis(fctx, results, frame, fsub, sinfo, j0)
+
     metrics = _metrics(gate, scaling, results, params, win_note)
     config = _config(season, frame_id, levels, n_traces, along_m, ct_cap,
                      results, params, sinfo, trace_spacing, oversample, window)
     notes = _notes(season, frame_id, results, params, along_m, n, gate,
                    scaling, oversample, window, win_note)
+    if firn_doc is not None:
+        metrics["firn_comparison"] = _firn_metric(firn_doc, firn_n, fctx,
+                                                  list(results))
+        config["firn"] = {
+            "n_layers": firn_n, "core": fctx["label"],
+            "core_file": f"tests/fixtures/firn/{fctx['file']}",
+            "region": fctx["region"], "proxy_note": fctx["proxy_note"],
+            "method": FIRN_EFF_METHOD, "ct_firn_m": ct_firn,
+            "depth_range_m": [1.0, round(fctx["core"].zmax, 2)],
+            "att_db_per_km": ATT_DB_PER_KM,
+            "eps_mean_depth_conversion": round(fctx["eps_mean"], 4),
+            "per_level": firn_doc["per_level"]}
+        config["firn_stack"] = {
+            "depth_m": [round(float(x), 3) for x in fctx["depths"]],
+            "eps_r": [round(float(x), 6) for x in fctx["eps"]],
+            "segment_abs_r_db": [round(float(20 * np.log10(max(x, 1e-30))), 3)
+                                 for x in fctx["r"]]}
+        notes += (
+            f" FIRN (--firn {firn_n}): effective-contrast layers from "
+            f"{fctx['label']} ({FIRN_EFF_METHOD}: each interface carries the "
+            f"segment-aggregate transfer-matrix |r| of the raw core density "
+            f"profile; point-sampled eps deprecated), conformal surface "
+            f"offsets 1-{fctx['core'].zmax:.1f} m, firn attenuation "
+            f"{ATT_DB_PER_KM:.0f} dB/km one-way, narrow +-{ct_firn:.0f} m "
+            f"strip field-summed with the surface+bed run (firn run's own "
+            f"surface layer excluded; approximate gamma-scaled seam recorded)."
+            + (f" CAVEAT: {fctx['proxy_note']}." if fctx["proxy_note"] else "")
+            + (f" N={firn_n} resolves band-integrated power but leaves a "
+               f"'picket-fence' profile shape (b26 ladder: r 0.907 at N=10 "
+               f"vs 0.963 plateau at N=20)." if firn_n <= 10 else ""))
+    if surf_rough:
+        config["surface_roughness"] = {
+            "sigma_m": SURF_ROUGH_SIGMA_M, "corr_length_m": SURF_ROUGH_CL_M,
+            "source": "C&S 2020 Fig. 11 mcords inversion at its 0 m clamp "
+                      "(tests/fixtures/firn/fig11*.csv): REPRESENTATIVE "
+                      "cm-scale snow-surface roughness the 32 m DEM lacks, "
+                      "not a site measurement",
+            "applies_to": "wide-run surface interface only (bed smooth; firn "
+                          "strip unchanged -- its surface layer is excluded "
+                          "from the field sum)"}
+        notes += (f" SURFACE ROUGHNESS ON (--surf-rough): sigma "
+                  f"{SURF_ROUGH_SIGMA_M * 100:.1f} cm, l "
+                  f"{SURF_ROUGH_CL_M:.1f} m (C&S 2020 Fig. 11 mcords 0 m "
+                  f"clamp, representative not site-measured) on the surface "
+                  f"interface via the Gerekos rough-facet response; "
+                  f"iteration-validated to improve the measured match on "
+                  f"both study frames.")
     doc = {"case": f"altitude_{frame_id}", "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -663,6 +1143,8 @@ def run(season, frame_id, levels=DEFAULT_LEVELS, n_traces=100, along_m=10000.0,
 
     figs = _figures(out, frame, fsub, sinfo, idx, s_sim, j0, results, order,
                     surf_pick, bot_pick, dt, t0f)
+    if firn_doc is not None:
+        figs.append(_firn_figure(out, results, order, fctx, firn_doc))
     if make_report:
         _report(out, config, metrics, notes, figs, results, order, params,
                 scaling)
@@ -803,14 +1285,14 @@ def _notes(season, frame_id, results, params, along_m, n, gate, scaling,
                     f"(expect {s['expected_r2_db']:+.1f}, dev "
                     f"{s['deviation_db']:+.1f})" for s in scaling)
         + ". Panels share a 'twtt relative to each panel's median surface "
-        f"return' axis so structure is comparable despite the raw-twtt offset "
-        f"between altitudes. HONESTY: (1) 32 m DEM posting -> the coherent "
-        f"product is statistical (speckle/envelope), not phase-deterministic; "
-        f"(2) the coherent LPA is specular-dominated at these facets, per-level "
-        f"nadir error recorded; (3) the measured frame is f-k SAR + multilooked "
-        f"while the sims are unfocused per-trace raw -- compare structure and "
-        f"relative levels, not resolution; (4) the sims carry no volume "
-        f"scatter, internal layers, or receiver noise floor"
+        "return' axis so structure is comparable despite the raw-twtt offset "
+        "between altitudes. HONESTY: (1) 32 m DEM posting -> the coherent "
+        "product is statistical (speckle/envelope), not phase-deterministic; "
+        "(2) the coherent LPA is specular-dominated at these facets, per-level "
+        "nadir error recorded; (3) the measured frame is f-k SAR + multilooked "
+        "while the sims are unfocused per-trace raw -- compare structure and "
+        "relative levels, not resolution; (4) the sims carry no volume "
+        "scatter, internal layers, or receiver noise floor"
         + ("; (5) MODELED-WINDOW APPROXIMATION in force -- see the "
            "window_approximation metric." if win_note else "."))
 
@@ -865,7 +1347,8 @@ def _figures(out, frame, fsub, sinfo, idx, s_sim, j0, results, order,
             tw = r["arrs"]["twtt"]
             nadir = r["arrs"]["nadir_twtt"]
             surf_med = _med(nadir[:, 0])
-            comb = _db(np.abs(r["arrs"]["field"].sum(-1)) ** 2)
+            E = r.get("E_comb", r["arrs"]["field"].sum(-1))  # +firn if run
+            comb = _db(np.abs(E) ** 2)
             rel_us = (tw - surf_med) * 1e6
             ext = [s_sim[0], s_sim[-1], rel_us[-1], rel_us[0]]
             fin = comb[np.isfinite(comb) & (comb > -290)]
@@ -905,7 +1388,8 @@ def _figures(out, frame, fsub, sinfo, idx, s_sim, j0, results, order,
     for c, spec in zip(colors, order):
         r = results[spec]
         tw = r["arrs"]["twtt"]
-        p = np.abs(r["arrs"]["field"][j0].sum(-1)) ** 2
+        E = r.get("E_comb", r["arrs"]["field"].sum(-1))
+        p = np.abs(E[j0]) ** 2
         t_s = surface_peak_twtt(p[None], tw,
                                 np.array([r["arrs"]["nadir_twtt"][j0, 0]]),
                                 r["rc_frame"].dt)[0]
@@ -965,7 +1449,7 @@ def _report(out, config, metrics, notes, figs, results, order, params, scaling):
         f"<td>{s['deviation_db']:+.2f}</td></tr>" for s in scaling)
     crows = "".join(
         f"<tr><th>{html.escape(str(k))}</th><td>{html.escape(json.dumps(v) if isinstance(v, (dict, list)) else str(v))}</td></tr>"
-        for k, v in config.items() if k != "level_table")
+        for k, v in config.items() if k not in ("level_table", "firn_stack"))
     figs_html = "".join(
         f"<h3>{html.escape(Path(f).stem)}</h3>"
         f"<img src='data:image/png;base64,{b64(f)}' alt='{Path(f).name}'>"
@@ -1007,11 +1491,21 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--min-spacing", type=float, default=None,
                     help="clamp per-level facet spacing up (test/speed knob)")
+    ap.add_argument("--firn", type=int, default=None, metavar="N",
+                    help="add N effective-contrast firn layers from the "
+                    "region-appropriate core (B26 Greenland / B25 Antarctic "
+                    "proxy); default off")
+    ap.add_argument("--ct-firn", type=float, default=CT_FIRN,
+                    help="firn-strip cross-track reach (m)")
+    ap.add_argument("--surf-rough", action="store_true",
+                    help="representative C&S Fig. 11 shallow-clamp sub-facet "
+                    "roughness on the surface interface (default smooth)")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     run(args.season, args.frame, levels=args.levels, n_traces=args.n_traces,
         along_m=args.along_m, ct_cap=args.ct_cap, out_root=args.out,
-        min_spacing=args.min_spacing, force=args.force)
+        min_spacing=args.min_spacing, force=args.force, firn_n=args.firn,
+        ct_firn=args.ct_firn, surf_rough=args.surf_rough)
 
 
 if __name__ == "__main__":

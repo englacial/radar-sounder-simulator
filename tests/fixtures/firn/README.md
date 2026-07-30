@@ -18,6 +18,20 @@ never referencing external paths at runtime).
   This is the density profile Culberg & Schroeder (2020) use for their 1-D
   layered dielectric model (their Section IV-C).
 
+- `BER11C95_25_density.tab` — B25 ice-core density profile (Berkner Island
+  summit, Antarctica, 79.6142 S, 45.7243 W, elevation 886 m; 1.139–178.213 m
+  depth at 3 mm sampling, gamma-ray attenuation densitometry). PANGAEA tab
+  format. Copied 2026-07-29 from the same read-only repo
+  (`~/Documents/clutter/data/`).
+  Citation: Gerland, Sebastian; Wilhelms, Frank (1999): Continuous density log
+  of icecore BER11C95_25. PANGAEA, https://doi.org/10.1594/PANGAEA.227732 —
+  License CC-BY-3.0. Related: Gerland et al. (1999), Annals of Glaciology 29,
+  https://doi.org/10.3189/172756499781821427.
+  USE NOTE: serves as a REPRESENTATIVE Antarctic firn proxy for frames that do
+  not pass a cored site (e.g. the 2012_Antarctica_DC8 altitude-comparison
+  frame, which is NOT at Berkner Island) — a plausible-firn stand-in, never a
+  site-specific truth.
+
 - `fig09a_digitized.csv` / `fig09b_digitized.csv` — digitized (WebPlotDigitizer,
   by the source repo's author) from Figure 9(a)/(b) of Culberg & Schroeder
   (2020): the ORANGE curves, i.e. the paper's *simulated* normalized reflection
