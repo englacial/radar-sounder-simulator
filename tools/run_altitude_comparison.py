@@ -1142,7 +1142,7 @@ def run(season, frame_id, levels=DEFAULT_LEVELS, n_traces=100, along_m=10000.0,
     (out / "run_config.json").write_text(json.dumps(config, indent=1) + "\n")
 
     figs = _figures(out, frame, fsub, sinfo, idx, s_sim, j0, results, order,
-                    surf_pick, bot_pick, dt, t0f)
+                    surf_pick, bot_pick, dt, t0f, firn_n=firn_n)
     if firn_doc is not None:
         figs.append(_firn_figure(out, results, order, fctx, firn_doc))
     if make_report:
@@ -1301,7 +1301,10 @@ def _notes(season, frame_id, results, params, along_m, n, gate, scaling,
 # figures
 # ========================================================================
 def _figures(out, frame, fsub, sinfo, idx, s_sim, j0, results, order,
-             surf_pick, bot_pick, dt, t0f):
+             surf_pick, bot_pick, dt, t0f, firn_n=None):
+    """Radargram panels + nadir overlay. When firn runs exist the sim panels
+    show the FIRN-ENABLED composite (E_comb: surface+bed field + firn internal
+    layers, no surface double count) and are labeled accordingly."""
     tw_full = frame.twtt.values
     meas_full = _db(np.asarray(fsub.Data.values, np.float64))
     bot_native = load_bottom_pick(fsub)
@@ -1359,7 +1362,8 @@ def _figures(out, frame, fsub, sinfo, idx, s_sim, j0, results, order,
                     label="sim surface nadir")
             ax.plot(s_sim, (nadir[:, 1] - surf_med) * 1e6, "r", lw=0.7,
                     label="sim bed nadir")
-            ax.set_title(f"{name}  (median AGL {r['h_med']:.0f} m, "
+            firn_tag = f" +firn N={firn_n}" if "E_comb" in r else ""
+            ax.set_title(f"{name}{firn_tag}  (median AGL {r['h_med']:.0f} m, "
                          f"spacing {r['spacing']:.1f} m)")
         fig.colorbar(im, ax=ax, shrink=0.9, pad=0.01, label="dB")
         ax.set_ylim(y_hi, y_lo)
@@ -1367,7 +1371,9 @@ def _figures(out, frame, fsub, sinfo, idx, s_sim, j0, results, order,
         ax.set_xlabel("along-track (km)")
     for c in range(0, len(panels), ncols):
         axs[c].set_ylabel("twtt below median surface return (us)")
-    fig.suptitle(f"{fsub.attrs.get('frame_id', '')}: coherent surface+bed vs "
+    sim_desc = (f"surface+firn(N={firn_n})+bed" if firn_n
+                else "surface+bed")
+    fig.suptitle(f"{fsub.attrs.get('frame_id', '')}: coherent {sim_desc} vs "
                  f"platform altitude (shared surface-referenced twtt)")
     fig.tight_layout()
     f1 = out / "radargrams.png"
@@ -1402,7 +1408,9 @@ def _figures(out, frame, fsub, sinfo, idx, s_sim, j0, results, order,
     ax.grid(alpha=0.3)
     ax.legend(fontsize=9)
     ax.set_title(f"{fsub.attrs.get('frame_id', '')}: nadir depth-power "
-                 f"(representative trace) vs altitude")
+                 f"(representative trace"
+                 + (f", {sim_desc} sims" if firn_n else "")
+                 + ") vs altitude")
     fig.tight_layout()
     fig.savefig(f2, dpi=140)
     plt.close(fig)

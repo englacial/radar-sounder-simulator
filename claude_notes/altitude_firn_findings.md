@@ -202,6 +202,17 @@ N=20 ones, so `--firn 10` re-assembles without simulation.
   verified for N=5/10/20/40.
 - ruff clean on all changed files.
 
+## Post-final fix (assembly-only)
+
+The radargram panels had ALWAYS composed the firn-enabled field (E_comb =
+surface+bed + firn internal layers) when firn runs existed, but the figure
+titles still said "coherent surface+bed" — misleading. Fixed the suptitle
+("coherent surface+firn(N=K)+bed ...") and per-panel "+firn N=K" tags (and a
+firn-aware nadir-overlay title); both frames' figures/reports regenerated
+purely from cache (every run [skip-exists], zero simulations), mirrors
+re-verified byte-identical, main verification report rebuilt. The no-firn
+figure text is unchanged.
+
 ## Honest caveats
 
 - **B25 is a proxy.** The 2012 frame does not pass a cored site; B25
