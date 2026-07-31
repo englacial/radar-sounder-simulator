@@ -133,7 +133,7 @@ def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
 
 @functools.lru_cache(maxsize=None)
 def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
-                 rough_terms=0):
+                 rough_terms=0, gamma_facet=False):
     """Jitted vmapped kernel for one static configuration; run-varying
     numbers (facet blocks, positions, reference ranges, k/gamma/t0/dt/c,
     pattern vector/params pv/pa/pb) are traced arguments, so value changes
@@ -147,18 +147,28 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
     n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
     gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
-    def one_trace(p, u, pv, rr, cb, nb, ab, e1b, e2b, phb, sig, lc, kf, gf,
-                  t0, dt, c, ga, gb):
+    def one_trace(p, u, pv, rr, cb, nb, ab, e1b, e2b, phb, gfb, sig, lc, kf,
+                  gf, t0, dt, c, ga, gb):
         def step(carry, blk):
             hist, dropped = carry
-            if rough_terms:
+            # per-facet gamma rides the blocked scan like the phasors do; the
+            # scalar path (gamma_facet=False) traces exactly the old program
+            fg = None
+            if rough_terms and gamma_facet:
+                fc, fn, fa, f1, f2, fph, fg = blk
+            elif rough_terms:
                 fc, fn, fa, f1, f2, fph = blk
-                contrib, r = rough_lpa_contributions(
-                    p, fc, fn, fa, f1, f2, kf, gf, sig, lc, fph, rough_terms,
-                    r_ref=rr)
+            elif gamma_facet:
+                fc, fn, fa, f1, f2, fg = blk
             else:
                 fc, fn, fa, f1, f2 = blk
-                contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gf,
+            gam = fg if gamma_facet else gf
+            if rough_terms:
+                contrib, r = rough_lpa_contributions(
+                    p, fc, fn, fa, f1, f2, kf, gam, sig, lc, fph, rough_terms,
+                    r_ref=rr)
+            else:
+                contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gam,
                                                r_ref=rr)
             if gfn is not None:
                 g = gfn((fc - p) / r[..., None], pv, ga, gb)
@@ -184,11 +194,12 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
             return (hist, dropped), None
 
         init = (jnp.zeros(n_seg, jnp.complex64), jnp.float32(0.0))
-        xs = (cb, nb, ab, e1b, e2b) + ((phb,) if rough_terms else ())
+        xs = ((cb, nb, ab, e1b, e2b) + ((phb,) if rough_terms else ())
+              + ((gfb,) if gamma_facet else ()))
         (hist, dropped), _ = jax.lax.scan(step, init, xs)
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 15))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 16))
 
 
 def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
@@ -203,6 +214,10 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     dropped float32 (T,) accumulating |contribution|**2 outside the window.
     ``interp_bins`` splits each contribution linearly between adjacent bins
     (module docstring); default False is bit-compatible with stage 2.
+    ``gamma``: scalar reflection coefficient, or an (n_facets,) per-facet
+    FIELD coefficient array (spatially varying reflectivity) broadcast like
+    the other facet arrays -- an array of a constant matches the scalar
+    bit-exactly.
     ``pattern``: None (isotropic) or an ``antenna.pattern_args`` tuple --
     per-facet fields then carry the g**2 two-way antenna weighting.
     ``roughness``: None (smooth, the default -- traces the pre-roughness
@@ -248,9 +263,24 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
         n_terms = 0
         phb = jnp.zeros((), jnp.complex64)  # unused (rough_terms == 0)
 
+    # gamma: scalar, or an (n_facets,) per-facet FIELD coefficient array that
+    # rides the blocked scan like the phasors (float32, the kernel precision:
+    # an array of a constant is bit-identical to the scalar path)
+    gamma_arr = np.asarray(gamma, np.float32)
+    gamma_facet = gamma_arr.ndim > 0
+    if gamma_facet:
+        if gamma_arr.shape != (n,):
+            raise ValueError(
+                f"per-facet gamma shape {gamma_arr.shape} != ({n},)")
+        gfb = jnp.asarray(np.pad(gamma_arr, (0, pad)).reshape(
+            n_blocks, block_size))
+        gamma = 0.0
+    else:
+        gfb = jnp.zeros((), jnp.float32)  # unused (gamma_facet == False)
+
     fn = _coherent_fn(split_sides, int(n_samples), bool(interp_bins), kind,
-                      int(n_terms))
-    hist, dropped = fn(pos, uct, pv, r_ref, cb, nb, ab, e1b, e2b, phb,
+                      int(n_terms), gamma_facet)
+    hist, dropped = fn(pos, uct, pv, r_ref, cb, nb, ab, e1b, e2b, phb, gfb,
                        np.float32(sigma), np.float32(lcorr),
                        np.float32(k), np.float32(gamma), np.float32(t0),
                        np.float32(dt), np.float32(c), pa, pb)

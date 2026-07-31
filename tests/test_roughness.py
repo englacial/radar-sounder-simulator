@@ -19,6 +19,16 @@ K_W = 2.0 * np.pi / LAM
 LX, LY = 4.0, 7.0  # paper Section 4.1 facet (in lam units)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _fresh_jax_caches():
+    """The f64 precision referees below are order-sensitive: a rough-branch
+    kernel compiled earlier in the session (default f32) leaves a jitted
+    internal trace that faddeeva/d_phi then hit even under enable_x64,
+    degrading them to f32 accuracy (measured 4e-8 vs the 1e-11 gates).
+    Clearing jax caches makes this module order-independent."""
+    jax.clear_caches()
+
+
 def _geometries():
     """(A0, B0, K) for nadir, oblique in-plane, and off-principal-axis."""
     return [gk.facet_coeffs(np.radians(th), np.radians(ph), K_W)

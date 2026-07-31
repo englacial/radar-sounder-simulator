@@ -212,7 +212,7 @@ def _joint_consts(crossed, pad_to, z_platform):
 def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                   pattern="isotropic", refraction="sequential",
                   joint_newton=6, joint_backtrack=4, rough_terms=0,
-                  rough_cross=False):
+                  rough_cross=False, gamma_facet=False):
     """Build (once per static configuration) the jitted vmapped kernel.
 
     Everything numeric that can vary between runs is a traced argument:
@@ -333,10 +333,18 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
 
         def step(carry, blk):
             hist, dropped = carry
-            if rough_terms:
+            # per-facet gamma rides the blocked scan like the phasors do; the
+            # scalar path (gamma_facet=False) traces exactly the old program
+            fg = None
+            if rough_terms and gamma_facet:
+                fc, fn, fa, f1, f2, fph, fg = blk
+            elif rough_terms:
                 fc, fn, fa, f1, f2, fph = blk
+            elif gamma_facet:
+                fc, fn, fa, f1, f2, fg = blk
             else:
                 fc, fn, fa, f1, f2 = blk
+            gam = fg if gamma_facet else gamma
             q = fc.astype(jnp.float64)
             path_fn = path if refraction == "sequential" else path_joint
             (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c0,
@@ -371,7 +379,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                               * (kj / np.pi))
                 s2 = jnp.sinc(jnp.sum(rhat * f2.astype(jnp.float64), -1)
                               * (kj / np.pi))
-                amp = ((kj / TWO_PI) * gamma * cos_t * fa * s1 * s2 * spread
+                amp = ((kj / TWO_PI) * gam * cos_t * fa * s1 * s2 * spread
                        * att_f)
                 if rough_terms:
                     f1d, f2d = f1.astype(jnp.float64), f2.astype(jnp.float64)
@@ -388,7 +396,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                     # fa = 0 but the incoherent term has no area factor
                     amp = (amp * mean_attenuation(sig_t, kk)
                            + jnp.where(fa > 0,
-                                       (kj / TWO_PI) * gamma * cos_t * spread
+                                       (kj / TWO_PI) * gam * cos_t * spread
                                        * att_f * jnp.sqrt(dp) * fph, 0.0))
                 contrib = (1j * amp * jnp.exp(-2j * k0 * opl)).astype(
                     jnp.complex64)
@@ -429,7 +437,12 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     the interfaces above it (top-down). ``eps_leg``/``att_leg``: per-leg medium
     permittivity and one-way attenuation (dB/km), len == len(crossed) + 1.
     ``gamma``/``k0`` are the target reflection coefficient and vacuum
-    wavenumber (coherent mode only). ``pattern``: None (isotropic) or an
+    wavenumber (coherent mode only). ``gamma`` may be a scalar or an
+    (n_facets,) per-facet FIELD coefficient array (e.g. a spatially varying
+    bed reflectivity); the array rides the blocked scan like the roughness
+    phasors (float64 -- an array of a constant is bit-identical to the
+    scalar), and requires coherent mode (the incoherent path books no target
+    reflectivity by convention). ``pattern``: None (isotropic) or an
     ``antenna.pattern_args`` tuple -- contributions then carry the two-way
     antenna gain at the air-leg departure direction (g**2 field / g**4 power).
 
@@ -462,6 +475,10 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     joint = refraction == "joint"
     if (roughness is not None or crossed_sigma is not None) and not coherent:
         raise ValueError("roughness requires coherent mode")
+    gamma_arr = np.asarray(gamma, np.float64)
+    gamma_facet = gamma_arr.ndim > 0
+    if gamma_facet and not coherent:
+        raise ValueError("per-facet gamma requires coherent mode")
     eps = np.asarray(eps_leg, np.float64)
     n_leg = np.sqrt(eps)
     att = np.asarray(att_leg, np.float64)
@@ -499,6 +516,14 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     else:
         sig_t = l_t = 0.0
         n_terms = 0
+    if gamma_facet:
+        if gamma_arr.shape != (n,):
+            raise ValueError(
+                f"per-facet gamma shape {gamma_arr.shape} != ({n},)")
+        # float64 NumPy, converted under the x64 scope below (like positions)
+        # so an array of a constant matches the scalar path bit-exactly
+        blk = blk + (np.pad(gamma_arr, (0, pad)).reshape(
+            n_blocks, block_size),)
     # Positions stay float64 NumPy: converted under the x64 scope below, so
     # the platform coordinates (the largest magnitudes) are not truncated.
     uct = np.asarray(u_ct, np.float64)
@@ -511,11 +536,11 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     fn = _refracted_fn(coherent, split_sides, int(n_samples),
                        None if joint else len(crossed), kind, refraction,
                        int(joint_newton), int(joint_backtrack), int(n_terms),
-                       crossed_sigma is not None)
+                       crossed_sigma is not None, gamma_facet)
     with jax.enable_x64():
         hist, dropped = fn(pos, uct, pv, blk, consts, n_leg, eps, att,
                            np.float64(t0), np.float64(dt), np.float64(c),
-                           np.float64(gamma),
+                           np.float64(0.0 if gamma_facet else gamma),
                            np.float64(0.0 if k0 is None else k0), pa, pb,
                            np.float64(sig_t), np.float64(l_t), sig_c)
         hist, dropped = np.asarray(hist), np.asarray(dropped)
