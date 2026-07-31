@@ -132,6 +132,54 @@ def test_effective_contrast_run_config():
         rb.firn_cfg(rc, 10.67, depths, eps=eps[:-1])
 
 
+def test_peak_placement_config():
+    """Config-level cover of peak-centered placement (no simulation): the
+    depths must be genuine peaks of the coherent reflectivity envelope inside
+    the stack extent, separated and gap-repaired; the contrast construction is
+    unchanged and must be anchored at z_top so the COVERED EXTENT (and hence
+    the aggregated reflectivity) matches the uniform stack it is benchmarked
+    against."""
+    lam = RadarConfig(dt=4.1667e-9, n_samples=64, t0=0.0, f0=195e6).wavelength
+    core = rb.B26_CORE
+    zc, dens = core.contrast_density(lam, rb.rfi.RES_FIRN_M)
+    for n in rb.PEAK_RUNS:
+        d, prom, sep = rb.peak_depths(n, lam)
+        assert d.shape == prom.shape == (n,)
+        assert np.all(np.diff(d) > 0) and (prom > 0).all()
+        # inside the stack extent, min-separated, no pathological gap
+        assert core.z_top <= d[0] and d[-1] <= core.zmax
+        assert np.diff(d).min() >= sep - 1e-9
+        edges = np.concatenate([[core.z_top], d, [core.zmax]])
+        assert np.diff(edges).max() <= 1.5 * (core.zmax - core.z_top) / n * 1.05
+        # every chosen depth is a local maximum of the envelope
+        for x in d:
+            i = int(np.argmin(np.abs(zc - x)))
+            w = slice(max(i - 3, 0), i + 4)
+            assert dens[i] >= dens[w].max() - 1e-12
+
+        eps, r = rb.effective_contrast_eps(d, lam, top=core.z_top)
+        assert eps.shape == (n + 1,) and np.isfinite(eps).all()
+        assert (eps > 1.0).all() and (eps < 3.3).all()
+        assert eps[0] == core.point_eps(float(d[0]))   # firn0 anchor unchanged
+        ne = np.sqrt(eps)
+        gam = ((ne[:-1] - ne[1:]) / (ne[:-1] + ne[1:])) ** 2
+        assert np.abs(gam - r ** 2).max() < 1e-15
+        # the covered extent is the uniform stack's, so the totals are close
+        r_u = core.segment_reflectivity(core.equal_depths(n), lam)
+        assert abs(10 * np.log10((r ** 2).sum() / (r_u ** 2).sum())) < 3.0
+
+    # top= anchors only the FIRST segment edge; uniform stacks are unaffected
+    du = core.equal_depths(20)
+    assert np.array_equal(core.segment_reflectivity(du, lam),
+                          core.segment_reflectivity(du, lam, top=core.z_top))
+    # ... and the peaks runs are their own cache keys
+    keys = rb.run_keys({"layer_counts": (), "random_runs": (), "rough_runs": (),
+                        "eff_runs": rb.PEAK_RUNS, "peak_runs": rb.PEAK_RUNS})
+    assert keys == ["wide_surface_bed"] + [
+        f"firn_N{n}_h1eff" for n in rb.PEAK_RUNS] + [
+        f"firn_N{n}_h1eff_peaks" for n in rb.PEAK_RUNS]
+
+
 def test_firn_media_attenuate():
     """Every firn medium AND the substrate must carry the same one-way
     attenuation as the wide run's ice medium (the old zero-attenuation firn

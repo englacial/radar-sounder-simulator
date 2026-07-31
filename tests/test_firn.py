@@ -86,6 +86,53 @@ def test_effective_contrast_b25(b25):
     assert (20.0 * np.log10(r[depths > 120.0]) < -40.0).all()
 
 
+def test_contrast_density_is_phase_aware(b26):
+    """The envelope is the COHERENT aggregate, so a smooth density ramp (large
+    |d eps/dz|, no Bragg-scale structure) must not register as a horizon."""
+    z, dens = b26.contrast_density(LAM, 4.418)
+    assert z.shape == dens.shape and np.isfinite(dens).all()
+    assert (dens >= 0).all() and dens.max() > 0
+    # a synthetic pure ramp: strong gradient everywhere, no coherent return
+    class _Ramp(FirnCore):
+        def __init__(self):
+            self.z_top, self.zmax = 1.0, 100.0
+            self.z_raw = np.arange(0.0, 100.0, 0.001)
+            self.rho_raw = 300.0 + 5.0 * self.z_raw
+    _, ramp = _Ramp().contrast_density(LAM, 4.418)
+    assert ramp.max() < 0.02 * dens.max()
+
+
+def test_peak_depths(b26):
+    for n in (5, 10, 20):
+        d, prom, sep = b26.peak_depths(n, LAM, 4.418)
+        assert d.shape == prom.shape == (n,)
+        assert (np.diff(d) >= sep - 1e-9).all()      # min separation honored
+        assert b26.z_top <= d[0] and d[-1] <= b26.zmax
+        edges = np.concatenate([[b26.z_top], d, [b26.zmax]])
+        assert np.diff(edges).max() <= 1.5 * (b26.zmax - b26.z_top) / n * 1.05
+    # Peak placement centers each segment on a horizon instead of cutting
+    # through it, so the in-phase strata stay together and the TOTAL captured
+    # reflectivity rises (the median segment is unchanged -- it is the strong
+    # segments that get stronger).
+    d, _, _ = b26.peak_depths(10, LAM, 4.418)
+    r_p = b26.segment_reflectivity(d, LAM, top=b26.z_top)
+    r_u = b26.segment_reflectivity(b26.equal_depths(10), LAM)
+    assert (r_p ** 2).sum() > 1.3 * (r_u ** 2).sum()
+
+
+def test_segment_top_anchor(b26):
+    """top= moves only the first segment edge; it is a no-op when depths[0]
+    already is the anchor (so uniform stacks are bit-identical)."""
+    du = b26.equal_depths(10)
+    assert np.array_equal(b26.segment_reflectivity(du, LAM),
+                          b26.segment_reflectivity(du, LAM, top=b26.z_top))
+    d = np.array([6.0, 20.0, 50.0, 90.0])
+    r0 = b26.segment_reflectivity(d, LAM)
+    r1 = b26.segment_reflectivity(d, LAM, top=b26.z_top)
+    assert r0[0] != r1[0] and np.array_equal(r0[1:], r1[1:])
+    assert r1[0] > r0[0]                     # the wider top segment gathers more
+
+
 def test_firn_stack(b26):
     depths = b26.equal_depths(5)
     eps, _ = b26.effective_contrast_eps(depths, LAM)

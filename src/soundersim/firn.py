@@ -88,17 +88,97 @@ class FirnCore:
         effective-contrast construction reads the raw profile."""
         return self.z_raw, np.sqrt(eps_kovacs(self.rho_raw))
 
-    def segment_reflectivity(self, depths, lam, complex_r=False):
+    def contrast_density(self, lam, window_m):
+        """(depth, density): the COHERENT reflectivity envelope of the raw
+        profile -- |sum of the Born reflection phasors| in a sliding window of
+        ``window_m`` (use the in-firn range resolution, so the peaks are the
+        bright horizons the radar can actually resolve).
+
+        This is the same coherent quantity segment_reflectivity() aggregates,
+        so its peaks are where a model interface realizes the largest |r|. A
+        phase-blind proxy such as |d eps/dz| is NOT equivalent: it peaks
+        wherever the density trend is steep, including thick smooth-gradient
+        zones whose strata cancel at the Bragg wavenumber (lam/2n ~ 0.47 m)
+        and which therefore reflect almost nothing at 195 MHz."""
+        z, n = self.raw_index()
+        dz = float(np.median(np.diff(z)))
+        phi = np.concatenate([[0.0],
+                              np.cumsum(2 * np.pi / lam * n[:-1] * np.diff(z))])
+        r = (n[:-1] - n[1:]) / (n[:-1] + n[1:])
+        w = int(round(window_m / dz)) | 1
+        return z[:-1], np.abs(np.convolve(r * np.exp(2j * phi[:-1]),
+                                          np.ones(w), "same"))
+
+    def peak_depths(self, n, lam, window_m, min_sep=None, gap_mult=1.5):
+        """(depths, prominences, min_sep_m): the ``n`` most prominent peaks of
+        contrast_density() inside [z_top, zmax] -- peak-centered placement.
+
+        Two guards keep the set usable as a layer stack. ``min_sep`` (default
+        min(window_m, 0.6*span/n) -- the radar cannot resolve interfaces closer
+        than a range cell, and the tighter bound keeps n peaks feasible)
+        prevents clustering; then, while any gap in the covered extent exceeds
+        ``gap_mult`` x the uniform spacing, the least prominent selected peak
+        is swapped for the most prominent unselected one inside that gap
+        (swapped-in peaks are pinned so the repair cannot oscillate). Without
+        the gap repair a purely prominence-ranked set abandons the weakly
+        contrasted deep firn: at n=10 it leaves a 30 m hole below 63 m and
+        collapses 41 m of profile onto one interface, which drives the
+        synthetic eps above solid ice."""
+        from scipy.signal import find_peaks
+
+        z, dens = self.contrast_density(lam, window_m)
+        dz = float(np.median(np.diff(z)))
+        m = (z >= self.z_top) & (z <= self.zmax)
+        z, dens = z[m], dens[m]
+        span = self.zmax - self.z_top
+        sep = float(min(window_m, 0.6 * span / n) if min_sep is None
+                    else min_sep)
+        while True:
+            idx, props = find_peaks(dens, distance=max(1, round(sep / dz)),
+                                    prominence=0)
+            if len(idx) >= n or sep < 0.2:
+                break
+            sep /= 2.0
+        zp, pr = z[idx], props["prominences"]     # peak depths + prominences
+        order = list(np.argsort(pr)[::-1])
+        sel, pool, pinned = order[:n], order[n:], set()
+        gmax = gap_mult * span / n
+        for _ in range(3 * n):
+            edges = np.concatenate([[self.z_top], np.sort(zp[sel]),
+                                    [self.zmax]])
+            gaps = np.diff(edges)
+            j = int(np.argmax(gaps))
+            if gaps[j] <= gmax:
+                break
+            cand = [k for k in pool if edges[j] < zp[k] < edges[j + 1]
+                    and all(abs(zp[k] - zp[s]) >= sep for s in sel)]
+            drop = [k for k in sel if k not in pinned]
+            if not cand or not drop:
+                break
+            best, weakest = cand[0], min(drop, key=lambda k: pr[k])
+            sel.remove(weakest), pool.append(weakest)
+            sel.append(best), pool.remove(best), pinned.add(best)
+            pool.sort(key=lambda k: -pr[k])
+        o = np.argsort(zp[sel])
+        return np.asarray(zp[sel])[o], np.asarray(pr[sel])[o], sep
+
+    def segment_reflectivity(self, depths, lam, complex_r=False, top=None):
         """|r| (or complex r, referenced to the SEGMENT TOP) of the raw
         full-resolution profile aggregated by transfer matrix over each
         layer's SEGMENT -- segment j spans the midpoints either side of
-        depths[j] (the first starts at depths[0], the last ends at the core
-        end). The profile ABOVE depths[0] is what the air-firn surface
-        interface already represents and is not covered."""
+        depths[j] (the first starts at ``top``, default depths[0]; the last
+        ends at the core end). The profile ABOVE that first edge is what the
+        air-firn surface interface already represents and is not covered.
+
+        ``top`` matters only for non-uniform placements, where depths[0] is not
+        z_top: passing top=z_top keeps the covered extent (and hence the total
+        aggregated reflectivity) identical to the uniform stack's, which is
+        what makes the two placements comparable."""
         z, n = self.raw_index()
         dz = float(np.median(np.diff(z)))
         d = np.asarray(depths, np.float64)
-        bnd = np.concatenate([[d[0]], (d[:-1] + d[1:]) / 2.0, [z[-1]]])
+        bnd = np.concatenate([[d[0] if top is None else float(top)],
+                              (d[:-1] + d[1:]) / 2.0, [z[-1]]])
         out = []
         for a, b in zip(bnd[:-1], bnd[1:]):
             s, e = int(np.searchsorted(z, a)), int(np.searchsorted(z, b))
@@ -108,7 +188,7 @@ class FirnCore:
             out.append(rj if complex_r else abs(rj))
         return np.array(out)
 
-    def effective_contrast_eps(self, depths, lam):
+    def effective_contrast_eps(self, depths, lam, top=None):
         """(eps[len(depths)+1], |r|[len(depths)]): synthetic permittivities
         for firn0..firn_{N-1} + substrate whose PLAIN Fresnel interface
         contrasts equal segment_reflectivity().
@@ -118,7 +198,7 @@ class FirnCore:
         n_{j+1} = n_j (1 +- r_j)/(1 -+ r_j) with the sign taken to land
         closest to the point-sampled Kovacs trend, which keeps the sequence
         bounded around it instead of drifting."""
-        r = self.segment_reflectivity(depths, lam)
+        r = self.segment_reflectivity(depths, lam, top=top)
         trend = np.array([self.point_eps(d) for d in depths]
                          + [self.point_eps(float(depths[-1]) + 1.0)])
         n_tr = np.sqrt(trend)

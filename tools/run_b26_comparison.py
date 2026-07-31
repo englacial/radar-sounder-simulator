@@ -172,6 +172,16 @@ ROUGH_RUNS = ((40, "mcords"), (40, "ar"))
 # depth profile should climb while the layer spacing (119.7/N m) is coarser
 # than the ~4.4 m in-firn range cell and plateau once it is finer (N ~ 27).
 EFF_RUNS = (5, 10, 20, 40)
+# PEAK-CENTERED placement of the same effective-contrast stack: instead of N
+# uniform depths, the N most prominent peaks of the core's coherent
+# reflectivity envelope (FirnCore.peak_depths) -- i.e. the interfaces sit on
+# the bright horizons the radar resolves rather than on an arbitrary lattice.
+# Benchmarked at the two N that bracket the uniform ladder's plateau: N=10,
+# where uniform is still a picket fence (corr 0.907), and N=20, where uniform
+# already beats the 4.4 m range cell (corr 0.963) and placement should stop
+# mattering.
+PEAK_RUNS = (10, 20)
+PEAK_METHOD = "coherent_envelope_peaks_v1"
 EFF_METHOD = "tmm_segment_aggregate_v1"
 ROUGH_COST_FACTOR = 1.05      # rough/smooth simulate() wall ratio: MEASURED
 # 1.017 on a 2-trace N=40 real crop (85.1 s -> 86.5 s steady, 44469 facets);
@@ -505,19 +515,28 @@ def layer_roughness(depths, source):
 B26_CORE = firn.FirnCore(rfi.FIXDIR / "ngt37C95.2_density.tab")
 
 
-def segment_reflectivity(depths, lam, complex_r=False):
+def segment_reflectivity(depths, lam, complex_r=False, top=None):
     """B26 segment-aggregate TMM reflectivity (FirnCore.segment_reflectivity
-    on the raw 1 mm fixture; the profile ABOVE depths[0] is what the air-firn
-    surface interface already represents -- its aggregate |r| of -13.7 dB
-    would demand a spurious eps ~3.9 super-ice reflector at 4 m)."""
-    return B26_CORE.segment_reflectivity(depths, lam, complex_r)
+    on the raw 1 mm fixture; the profile ABOVE the first segment edge is what
+    the air-firn surface interface already represents -- its aggregate |r| of
+    -13.7 dB would demand a spurious eps ~3.9 super-ice reflector at 4 m)."""
+    return B26_CORE.segment_reflectivity(depths, lam, complex_r, top)
 
 
-def effective_contrast_eps(depths, lam):
+def effective_contrast_eps(depths, lam, top=None):
     """H1 synthetic permittivities for the B26 core
     (FirnCore.effective_contrast_eps: plain Fresnel contrasts reproduce
     segment_reflectivity, firn0 point-sampled, sign tracks the Kovacs trend)."""
-    return B26_CORE.effective_contrast_eps(depths, lam)
+    return B26_CORE.effective_contrast_eps(depths, lam, top)
+
+
+def peak_depths(n, lam):
+    """(depths, prominences, min_sep): peak-centered placement of n interfaces
+    on the B26 core -- the most prominent peaks of the coherent reflectivity
+    envelope in a sliding in-firn RANGE CELL, i.e. the bright horizons the
+    radar resolves (FirnCore.peak_depths; window = the hann-broadened in-firn
+    range resolution, rfi.RES_FIRN_M = 4.42 m)."""
+    return B26_CORE.peak_depths(n, lam, rfi.RES_FIRN_M)
 
 
 def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
@@ -750,6 +769,8 @@ def pilot_and_budget(fsub, cfg_dict, rc_sim, spacing, out):
                                               * ROUGH_COST_FACTOR)
         for n in cfg_dict.get("eff_runs", ()):  # same cost as the smooth run
             proj[f"firn_N{n}_h1eff"] = rate_firn * work * _padwork(n)
+        for n in cfg_dict.get("peak_runs", ()):     # placement is free
+            proj[f"firn_N{n}_h1eff_peaks"] = rate_firn * work * _padwork(n)
         proj["compile_pad_est"] = compile_pad
         proj["total"] = sum(proj.values())
         return proj
@@ -821,6 +842,31 @@ def profile_vs_depth(power, twtt, t_surf, dt, smooth_m=5.0):
     return depth, db
 
 
+def band_levels_meanp(power2d, twtt, surf_guess, dt, edges=BAND_EDGES_M,
+                      extra=EXTRA_BANDS):
+    """Band levels as MEAN LINEAR POWER over the band AND over all traces --
+    the symmetric estimator of the H2 recompute (claude_notes/
+    b26_gap_hypotheses.md). Same depth axis, 5 m power boxcar and per-trace
+    own-surface-peak normalization as band_levels(); only the band statistic
+    changes. The median-of-dB at a single trace that band_levels() reports sits
+    in the interference nulls of a sparse simulated echo train (~+3 dB for the
+    sims, ~+0.6 dB for the smooth measured profiles), so the two estimators
+    are reported side by side."""
+    acc = {}
+    for t in range(power2d.shape[0]):
+        p = np.asarray(power2d[t], np.float64)
+        t_s = surface_peak_twtt(p[None], twtt, np.array([surf_guess[t]]), dt)[0]
+        if not np.isfinite(t_s):
+            continue
+        d, db = profile_vs_depth(p, twtt, t_s, dt)
+        lin = 10.0 ** (db / 10.0)
+        for lo, hi in list(zip(edges[:-1], edges[1:])) + list(extra):
+            m = (d >= lo) & (d < hi)
+            acc.setdefault(f"{lo:.0f}-{hi:.0f}m", []).append(
+                float(lin[m].mean()) if m.any() else np.nan)
+    return {k: float(10.0 * np.log10(np.nanmean(v))) for k, v in acc.items()}
+
+
 def band_levels(depth, db, edges=BAND_EDGES_M, extra=EXTRA_BANDS):
     out = {}
     for lo, hi in list(zip(edges[:-1], edges[1:])) + list(extra):
@@ -860,7 +906,9 @@ def run_keys(cfg_dict):
             + [f"firn_N{n}_s{s}" for n, s in cfg_dict.get("random_runs", ())]
             + [f"firn_N{n}_rough_{src}"
                for n, src in cfg_dict.get("rough_runs", ())]
-            + [f"firn_N{n}_h1eff" for n in cfg_dict.get("eff_runs", ())])
+            + [f"firn_N{n}_h1eff" for n in cfg_dict.get("eff_runs", ())]
+            + [f"firn_N{n}_h1eff_peaks"
+               for n in cfg_dict.get("peak_runs", ())])
 
 
 # ========================================================================
@@ -869,7 +917,8 @@ def run_keys(cfg_dict):
 def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             along_m=ALONG_M, layer_counts=LAYER_COUNTS,
             random_runs=RANDOM_RUNS, rough_runs=ROUGH_RUNS, eff_runs=EFF_RUNS,
-            spacing=None, do_pilot=True, force=False, report=True, only=None):
+            peak_runs=PEAK_RUNS, spacing=None, do_pilot=True, force=False,
+            report=True, only=None):
     out = Path(out_root or OUT_DEFAULT)
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
@@ -882,7 +931,8 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                 "along_m": along_m, "layer_counts": tuple(layer_counts),
                 "random_runs": tuple(tuple(r) for r in random_runs),
                 "rough_runs": tuple(tuple(r) for r in rough_runs),
-                "eff_runs": tuple(int(n) for n in eff_runs)}
+                "eff_runs": tuple(int(n) for n in eff_runs),
+                "peak_runs": tuple(int(n) for n in peak_runs)}
     only = None if only is None else set(only)
     if only is not None and not only <= set(run_keys(cfg_dict)):
         # before ANY simulation: a typo'd key must not cost a run first
@@ -988,6 +1038,45 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                     "the Kovacs trend. Same equal-placement geometry as "
                     f"firn_N{n}; everything else identical."}
         run_list.append((f"firn_N{n}_h1eff", d, None, eps_eff))
+    peak_spec = {}
+    for n in cfg_dict.get("peak_runs", ()):
+        d, prom, sep = peak_depths(n, rc_sim.wavelength)
+        # top=z_top: the covered extent (and so the total aggregated
+        # reflectivity) matches the uniform stack's, which is what makes the
+        # placement comparison fair -- see the FirnCore.segment_reflectivity
+        # docstring and claude_notes/b26_comparison_findings.md.
+        eps_pk, r_pk = effective_contrast_eps(d, rc_sim.wavelength,
+                                              top=B26_CORE.z_top)
+        edges = np.concatenate([[B26_CORE.z_top], d, [rfi.ZMAX]])
+        peak_spec[f"firn_N{n}_h1eff_peaks"] = {
+            "method": PEAK_METHOD, "n_layers": int(n),
+            "placement": "peaks of the coherent reflectivity envelope of the "
+                         "RAW 1 mm core in a sliding in-firn range cell "
+                         f"({rfi.RES_FIRN_M:.3f} m), ranked by prominence, "
+                         f"min separation {sep:.3f} m, gaps repaired to <= "
+                         f"1.5x the uniform spacing; segment top edge anchored "
+                         f"at z_top = {B26_CORE.z_top:.1f} m so the covered "
+                         f"extent equals the uniform stack's",
+            "window_m": round(float(rfi.RES_FIRN_M), 4),
+            "min_separation_m": round(float(sep), 4),
+            "depth_m": [round(float(x), 3) for x in d],
+            "prominence": [float(f"{x:.4g}") for x in prom],
+            "gap_m": [round(float(x), 3) for x in np.diff(edges)],
+            "segment_abs_r_db": [round(float(20 * np.log10(max(x, 1e-30))), 3)
+                                 for x in r_pk],
+            "eps_r": [round(float(x), 6) for x in eps_pk],
+            "eps_range": [round(float(eps_pk.min()), 4),
+                          round(float(eps_pk.max()), 4)],
+            "uniform_reference": f"firn_N{n}_h1eff",
+            "note": "PEAK-CENTERED variant of the H1 effective-contrast stack:"
+                    " identical contrast construction and everything else, "
+                    "only the interface DEPTHS differ (bright horizons instead "
+                    "of a uniform lattice). Segment aggregation is NOT "
+                    "boundary-invariant -- merely shifting the uniform N=10 "
+                    "segment edges moves the total sum|r|^2 by up to 2.5 dB -- "
+                    "so a 1-2 dB band-level difference vs the uniform run is "
+                    "expected and is not a construction error."}
+        run_list.append((f"firn_N{n}_h1eff_peaks", d, None, eps_pk))
     assert [k for k, *_ in run_list] == run_keys(cfg_dict)[1:]
     firn_runs = {}
     for key, depths, rough, eps_eff in run_list:
@@ -997,6 +1086,8 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                           round(float(rough[1].sum()), 4)]}
         if eps_eff is not None:
             rmeta["eps"] = [EFF_METHOD, round(float(np.sum(eps_eff)), 6)]
+        if key.endswith("_h1eff_peaks"):
+            rmeta["placement"] = PEAK_METHOD
         diag, arrs = run_sim(
             key, chunks, firn_cfg(rc_sim, spacing, depths, rough, eps_eff),
             {**meta_common, "ct": cfg_dict["ct_firn"], "kind": key,
@@ -1102,6 +1193,18 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         t_s = surface_peak_twtt(p[None], tw, np.array([surf_pick[j0]]), dt)[0]
         prof[name] = profile_vs_depth(p, tw, t_s, dt)
     bands = {k: band_levels(d, db) for k, (d, db) in prof.items()}
+    # second estimator: mean power over the band AND over every trace
+    bands_mp = {k: band_levels_meanp(np.abs(E) ** 2, tw, surf_pick, dt)
+                for k, E in totals.items()}
+    bands_mp["measured"] = band_levels_meanp(
+        np.asarray(fsub.Data.values, np.float64), tw_full,
+        np.asarray(fsub.Surface.values, np.float64),
+        float(tw_full[1] - tw_full[0]))
+    if qlook is not None:
+        bands_mp["measured_qlook"] = band_levels_meanp(
+            np.asarray(qsub.Data.values, np.float64), qlook["twtt"],
+            np.asarray(qsub.Surface.values, np.float64),
+            float(qlook["twtt"][1] - qlook["twtt"][0]))
 
     # Correlations against BOTH measured products; each reference also scores
     # the other measured product (the qlook-vs-standard row).
@@ -1252,6 +1355,36 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             "deltas of these runs vs the measured products are in "
             "band_delta_vs_measured / profile_correlation like any other "
             "run. " + rec}
+    if peak_spec:
+        pairs = {k: v["uniform_reference"] for k, v in peak_spec.items()
+                 if v["uniform_reference"] in bands}
+        def _row(k):
+            return {"corr_standard": corr.get(k), "corr_qlook": corr_q.get(k),
+                    **{f"median@j0_{b}": round(bands[k][b], 2)
+                       for b in gap_bands},
+                    **{f"meanP_all_{b}": round(bands_mp[k][b], 2)
+                       for b in gap_bands}}
+        metrics["placement_comparison"] = {
+            "value": max((corr.get(p, float("nan")) - corr.get(u, float("nan"))
+                          for p, u in pairs.items()), default=float("nan")),
+            "threshold": None, "pass": True, "op": "record",
+            "pairs": pairs,
+            "peaks": {k: _row(k) for k in pairs},
+            "uniform": {v: _row(v) for v in pairs.values()},
+            "corr_gain_standard": {k: round(corr[k] - corr[u], 4)
+                                   for k, u in pairs.items()
+                                   if k in corr and u in corr},
+            "corr_gain_qlook": {k: round(corr_q[k] - corr_q[u], 4)
+                                for k, u in pairs.items()
+                                if k in corr_q and u in corr_q},
+            "note": "PEAK-CENTERED vs UNIFORM placement of the same "
+            "effective-contrast stack at the same N: profile correlation "
+            "against both measured products and band levels under BOTH "
+            "estimators (median of the 5 m-smoothed dB profile at the "
+            "closest-approach trace, and mean linear power over the band and "
+            "all traces). value = the largest correlation gain "
+            "(peaks minus uniform, vs CSARP_standard); positive = peak "
+            "placement reproduces the measured depth profile better. " + rec}
     metrics["run_provenance"] = {
         "value": len(stale), "threshold": None, "pass": True, "op": "record",
         "only": sorted(only) if only else None, "provenance": prov,
@@ -1289,10 +1422,14 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                          f"{cfg_dict.get('random_runs', ())}; rough runs "
                          f"(n, source): {cfg_dict.get('rough_runs', ())}; "
                          f"effective-contrast (H1) runs (n): "
-                         f"{cfg_dict.get('eff_runs', ())}",
+                         f"{cfg_dict.get('eff_runs', ())}; "
+                         f"peak-centered placement (n): "
+                         f"{cfg_dict.get('peak_runs', ())}",
         "roughness_runs": rough_spec,
         "effective_contrast_runs": eff_spec,
+        "peak_placement_runs": peak_spec,
         "band_levels_db_rel_surface": bands,
+        "band_levels_meanp_db_rel_surface": bands_mp,
         "band_delta_db_sim_minus_measured": deltas,
         "profile_correlation_r": corr,
         "profile_correlation_r_qlook": corr_q,
@@ -1385,6 +1522,28 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
             "so the N-ladder tests profile SHAPE: correlation should plateau "
             "once the layer spacing beats the ~4.4 m in-firn range cell "
             "(N ~ 27).")
+    knote = ""
+    if peak_spec:
+        pc = metrics["placement_comparison"]
+        knote = (
+            " PEAK-CENTERED PLACEMENT: the same effective-contrast stacks with "
+            "the interfaces moved from a uniform lattice onto the N most "
+            "prominent peaks of the core's COHERENT reflectivity envelope (the "
+            "Born reflection phasors of the raw 1 mm profile summed in a "
+            f"sliding {rfi.RES_FIRN_M:.2f} m in-firn range cell) -- i.e. onto "
+            "the bright horizons the radar can resolve, with a min separation "
+            "and a max-gap repair. " + "; ".join(
+                f"{k}: {v['n_layers']} peaks over "
+                f"{v['depth_m'][0]:.1f}-{v['depth_m'][-1]:.1f} m, gaps "
+                f"{min(v['gap_m']):.1f}-{max(v['gap_m']):.1f} m, eps "
+                f"{v['eps_range'][0]:.2f}-{v['eps_range'][1]:.2f}"
+                for k, v in peak_spec.items())
+            + f". Correlation gain over the uniform run of the same N: "
+            f"{pc['corr_gain_standard']} (vs CSARP_standard), "
+            f"{pc['corr_gain_qlook']} (vs qlook). NOTE segment aggregation is "
+            "NOT boundary-invariant (shifting the uniform N=10 segment edges "
+            "alone moves the total sum|r|^2 by up to 2.5 dB), so band-level "
+            "differences of 1-2 dB between placements are expected.")
     pnote = ""
     if stale:
         pnote = (
@@ -1399,7 +1558,7 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
     notes = _notes(cfg_dict, params, spacing, lpa_err, le, bed_med, in_med,
                    off_s, off_b, dt, seam, sinfo, bed_depth_bm, bed_depth_pick,
                    wall_actual, budget_log, waux,
-                   qnote + rnote + enote + pnote)
+                   qnote + rnote + enote + knote + pnote)
     doc = {"case": "b26_comparison", "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -1526,7 +1685,8 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
     names = ["surface+bed"] + [
         k for k in sorted(firn_runs)
         if ("_s" not in k or k.endswith("_s0"))
-        and (not k.endswith("_h1eff") or k in eff_show)]
+        and (not k.endswith("_h1eff") or k in eff_show)
+        and not k.endswith("_h1eff_peaks")]   # own placement_radargrams figure
     sims_db = {k: _db(np.abs(totals[k]) ** 2) for k in names}
     vs = np.percentile(np.concatenate(
         [v[np.isfinite(v) & (v > -290)] for v in sims_db.values()]), 99.5)
@@ -1612,6 +1772,8 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
     eff_styles = {5: ("#e8837a", 1.2, "--"), 10: ("#d4544a", 1.3, "--"),
                   20: ("#a81f18", 1.5, "-"), 40: ("darkred", 1.8, "-"),
                   80: ("#3d0000", 1.8, "-")}
+    # peak-centered placement of the same stacks: a teal ramp (same N ordering)
+    peak_styles = {10: ("#3fa38a", 1.4, "--"), 20: ("#0b6e4f", 1.7, "-")}
     labels = {"measured": "measured (CSARP_standard, focused)",
               "measured_qlook": "measured (CSARP_qlook, unfocused)"}
     rand_labeled = False
@@ -1623,7 +1785,12 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
             rand_labeled = True
             ax.plot(d[m], db[m], color="C4", lw=0.9, alpha=0.8, label=lbl)
             continue
-        if name.endswith("_h1eff"):    # synthetic effective-contrast eps (H1)
+        if name.endswith("_h1eff_peaks"):        # peak-centered placement
+            base = name[:-len("_h1eff_peaks")]
+            c, lw, ls = peak_styles.get(int(base.split("_N")[1]),
+                                        ("#0b6e4f", 1.6, "-"))
+            lbl = f"{base} eff-contrast peaks (H1p)"
+        elif name.endswith("_h1eff"):  # synthetic effective-contrast eps (H1)
             base = name[:-len("_h1eff")]
             c, lw, ls = eff_styles.get(int(base.split("_N")[1]),
                                        ("darkred", 1.5, "-"))
@@ -1650,7 +1817,110 @@ def _figures(out, fsub, sinfo, idx, tw, tw_full, totals, meas, surf_pick,
     fig.tight_layout()
     fig.savefig(f3, dpi=140)
     plt.close(fig)
-    return [f1, f2, f3]
+
+    figs = [f1, f2, f3]
+    pk = sorted(k for k in totals if k.endswith("_h1eff_peaks"))
+    if pk:
+        figs += _placement_figures(
+            out, pk, prof, totals, meas_panels, s_sim, tw_us, tw, surf_pick,
+            bot_pick, off_s, off_b, sinfo)
+    return figs
+
+
+def _placement_figures(out, pk_keys, prof, totals, meas_panels, s_sim, tw_us,
+                       tw, surf_pick, bot_pick, off_s, off_b, sinfo):
+    """The two placement deliverables: uniform vs peak-centered effective
+    contrast, as depth profiles and as near-surface (firn-zone) radargrams."""
+    uni = [k.replace("_h1eff_peaks", "_h1eff") for k in pk_keys]
+    order = ([m for m in ("measured", "measured_qlook") if m in prof]
+             + [k for k in uni if k in prof] + list(pk_keys))
+    sty = {"measured": ("k", 1.8, "-", "measured (CSARP_standard, focused)"),
+           "measured_qlook": ("0.45", 1.8, "--",
+                              "measured (CSARP_qlook, unfocused)")}
+    for i, (u, p) in enumerate(zip(uni, pk_keys)):
+        n = u.split("_N")[1].split("_")[0]
+        sty[u] = (("#d4544a", "darkred")[i % 2], 1.5, "-",
+                  f"N={n} uniform (eff-contrast)")
+        sty[p] = (("#3fa38a", "#0b6e4f")[i % 2], 1.6, "--",
+                  f"N={n} peak-centered (eff-contrast)")
+
+    f4 = out / "placement_profiles.png"
+    fig, ax = plt.subplots(figsize=(9, 6.2))
+    for name in order:
+        d, db = prof[name]
+        m = (d >= -5) & (d <= PROFILE_MAX_M)
+        c, lw, ls, lbl = sty[name]
+        ax.plot(d[m], db[m], color=c, lw=lw, ls=ls, label=lbl)
+    ax.axvline(rfi.ZMAX, color="k", ls=":", lw=1.2)
+    ax.text(rfi.ZMAX + 1.5, -72, f"B26 core ends ({rfi.ZMAX:.1f} m)",
+            fontsize=8, rotation=90, va="bottom")
+    ax.set_xlim(-5, PROFILE_MAX_M)
+    ax.set_ylim(-75, 3)
+    ax.set_xlabel("depth below surface peak (m; c/sqrt(eps_mean))")
+    ax.set_ylabel("power (dB rel own surface peak, 5 m smoothed)")
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=9)
+    ax.set_title("Layer PLACEMENT: uniform vs peak-centered effective "
+                 f"contrast\n{FRAME_ID} nadir depth-power at the B26 closest "
+                 f"approach ({sinfo['closest_m']:.0f} m from borehole)")
+    fig.tight_layout()
+    fig.savefig(f4, dpi=140)
+    plt.close(fig)
+
+    # near-surface (firn-zone) radargrams, same conventions as figure 2
+    f5 = out / "placement_radargrams.png"
+    names = [k for k in uni if k in totals] + list(pk_keys)
+    sims_db = {k: _db(np.abs(totals[k]) ** 2) for k in names}
+    vs = np.percentile(np.concatenate(
+        [v[np.isfinite(v) & (v > -290)] for v in sims_db.values()]), 99.5)
+    t_srf = float(np.nanmedian(surf_pick)) * 1e6
+    t_lo, t_hi, dyn = t_srf - 0.4, t_srf + 2.4, 60.0
+    ext_s = [s_sim[0], s_sim[-1], tw_us[-1], tw_us[0]]
+    n_panels = len(meas_panels) + len(names)
+    ncols = 2 if n_panels <= 4 else 3
+    nrows = -(-n_panels // ncols)
+    fig, axs = plt.subplots(nrows, ncols, figsize=(8 * ncols, 5.5 * nrows),
+                            sharex=True, sharey=True)
+    axs = np.atleast_1d(axs).ravel()
+    for num, (ax, mp) in enumerate(zip(axs, meas_panels), start=1):
+        twp = mp["twtt"]
+        b_lo = max(0, int(np.searchsorted(twp, t_lo * 1e-6)) - 1)
+        b_hi = min(len(twp), int(np.searchsorted(twp, t_hi * 1e-6)) + 1)
+        im = ax.imshow(mp["db"][:, b_lo:b_hi].T, aspect="auto", cmap="gray",
+                       extent=[mp["s"][0], mp["s"][-1], twp[b_hi - 1] * 1e6,
+                               twp[b_lo] * 1e6],
+                       vmin=mp["vmax"] - dyn, vmax=mp["vmax"])
+        fig.colorbar(im, ax=ax, shrink=0.9, pad=0.01, label="dB")
+        ax.plot(mp["s"], mp["surf"] * 1e6, "c", lw=0.7, label="Surface pick")
+        ax.axvline(0.0, color="y", ls="--", lw=1.0, label="B26 core")
+        ax.set_title(f"{num}. {mp['label']}")
+    for num, (ax, name) in enumerate(zip(axs[len(meas_panels):], names),
+                                     start=len(meas_panels) + 1):
+        im = ax.imshow(sims_db[name].T, aspect="auto", extent=ext_s,
+                       cmap="gray", vmin=vs - dyn, vmax=vs)
+        fig.colorbar(im, ax=ax, shrink=0.9, pad=0.01, label="dB")
+        ax.plot(s_sim, (surf_pick + off_s) * 1e6, "c", lw=0.6,
+                label="Surface pick + offset")
+        ax.axvline(0.0, color="y", ls="--", lw=1.0)
+        n = name.split("_N")[1].split("_")[0]
+        kind = "peak-centered" if name.endswith("_peaks") else "uniform"
+        ax.set_title(f"{num}. simulated: N={n} {kind}  ({name})")
+    for ax in axs[n_panels:]:
+        ax.set_visible(False)
+    for ax in axs:
+        ax.set_ylim(t_hi, t_lo)
+        if ax.get_visible() and ax.has_data():
+            ax.legend(loc="center right", fontsize=7)
+            ax.set_xlabel("along-track from B26 (km)")
+    for ax in axs[::ncols]:
+        ax.set_ylabel("twtt (us)")
+    fig.suptitle(f"{FRAME_ID} at B26: firn zone (upper ~"
+                 f"{(2.4e-6 - 0.2e-6) * C / (2 * np.sqrt(rfi.EPS_MEAN)):.0f} m)"
+                 f" -- uniform vs peak-centered layer placement")
+    fig.tight_layout()
+    fig.savefig(f5, dpi=140)
+    plt.close(fig)
+    return [f4, f5]
 
 
 def _bot_native(fsub):
@@ -1689,11 +1959,19 @@ def _report(out, config, metrics, notes, figs, params):
         crows.append(f"<tr><th>{k}</th><td>{html.escape(json.dumps(config[k]))}"
                      f"</td></tr>")
     bands = config["band_levels_db_rel_surface"]
+    bands_mp = config.get("band_levels_meanp_db_rel_surface", {})
     bhdr = "".join(f"<th>{b}</th>" for b in next(iter(bands.values())))
-    brows = "".join(
-        f"<tr><th>{html.escape(k)}</th>"
-        + "".join(f"<td>{v:.1f}</td>" for v in bands[k].values()) + "</tr>"
-        for k in bands)
+
+    def _brows(tbl):
+        return "".join(
+            f"<tr><th>{html.escape(k)}</th>"
+            + "".join(f"<td>{v:.1f}</td>" for v in tbl[k].values()) + "</tr>"
+            for k in tbl)
+
+    brows = _brows(bands)
+    brows_mp = (f"<h3>mean power over the band AND all traces</h3>"
+                f"<table><tr><th>profile</th>{bhdr}</tr>"
+                f"{_brows(bands_mp)}</table>") if bands_mp else ""
     # correlation / band-delta table against BOTH measured products
     cs, cq = config["profile_correlation_r"], config["profile_correlation_r_qlook"]
     dl = config["band_delta_db_sim_minus_measured"]
@@ -1728,7 +2006,9 @@ def _report(out, config, metrics, notes, figs, params):
 <table><tr><th>metric</th><th>value</th><th>criterion</th><th>note</th></tr>
 {''.join(mrows)}</table>
 <h2>Nadir band levels (dB rel own surface peak, closest-approach trace)</h2>
+<h3>median of the 5 m-smoothed dB profile at the closest trace</h3>
 <table><tr><th>profile</th>{bhdr}</tr>{brows}</table>
+{brows_mp}
 <h2>Profile correlation and band deltas vs BOTH measured products</h2>
 <p>r = Pearson correlation of the dB depth profile (5-{PROFILE_MAX_M:.0f} m);
 the delta columns are profile level minus that measured product's level (dB;
@@ -1750,7 +2030,8 @@ like-for-like target for the unfocused sims.</p>
 
 
 SCENE_KEYS = ("n_traces", "ct_wide", "ct_firn", "along_m")
-RUNSET_KEYS = ("layer_counts", "random_runs", "rough_runs", "eff_runs")
+RUNSET_KEYS = ("layer_counts", "random_runs", "rough_runs", "eff_runs",
+               "peak_runs")
 
 
 def _recorded_cfg(out, runsets=False):

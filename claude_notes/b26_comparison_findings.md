@@ -293,3 +293,101 @@ Findings:
 Model state after this arc: shape r = 0.96, deep band exact, mid band
 -5.4 dB (realization deficit). Started the week at r = 0.68 (surface+bed
 only) and a 17 dB unexplained gap.
+
+## Peak-centered layer placement (2026-07-31): NEGATIVE for shape, and it kills the sparse-median artifact
+
+Question: with N too small to tile the core, does putting the interfaces on
+the bright horizons beat a uniform lattice? Two runs, `--only`
+(`firn_N10_h1eff_peaks` 329 s, `firn_N20_h1eff_peaks` 1308 s), everything
+except the interface DEPTHS identical to the uniform h1eff runs.
+
+### Placement algorithm
+
+Contrast density = the **coherent** reflectivity envelope: the Born reflection
+phasors of the raw 1 mm profile, `r_j exp(2i*phi_j)`, summed in a sliding
+in-firn range cell (4.418 m), magnitude taken (`FirnCore.contrast_density`).
+Chosen over the phase-blind `|d eps/dz|` because it is the same quantity the
+segments actually carry: a thick smooth-gradient zone has a large gradient but
+its strata cancel at the Bragg wavenumber (0.47 m) and it reflects nothing at
+195 MHz. `FirnCore.peak_depths` then takes the N most prominent peaks with
+(a) min separation `min(range cell, 0.6*span/N)` = 4.42 m at N=10, 3.56 m at
+N=20, and (b) a max-gap repair: while any gap exceeds 1.5x the uniform
+spacing, swap the weakest selected peak for the strongest one inside that gap
+(swapped-in peaks pinned, so the repair cannot oscillate).
+
+The gap repair is NOT cosmetic. Pure prominence ranking abandons the weakly
+contrasted deep firn: at N=10 it left a 30 m hole below 63 m, collapsed 41 m
+of profile onto one interface at 93 m, and drove the synthetic eps to 3.47
+(above solid ice). Repaired: eps 1.854-3.212 at N=10, 1.697-3.240 at N=20.
+
+Chosen depths (m): N=10 `6.2 11.1 25.5 36.3 44.2 57.0 69.2 81.2 93.4 102.5`;
+N=20 adds `1.5 10.1 13.9 21.3 31.3 50.9 63.4 67.2 74.4 85.1 109.2 117.8`.
+Segment top edge anchored at z_top = 1.0 m (`segment_reflectivity(top=)`) so
+the COVERED EXTENT matches the uniform stack's -- without it the peaks stack
+simply drops the 1-6.2 m region and the comparison is unfair.
+
+### 1-D gate: the "conservation" premise is false, and it matters
+
+Segment aggregation is **not** boundary-invariant. Shifting the uniform N=10
+segment edges alone -- same interface depths, same everything -- moves the
+total `sum|r|^2` over 2.5 dB (-22.49 / -20.03 / -21.41 / -22.24 / -21.22 dB at
+edge offsets 0 / 0.1 / 0.25 / 0.4 / 0.5 x spacing). The aggregate is a
+COHERENT sum, so where you cut relative to an in-phase horizon changes it.
+Peak-centering cuts between horizons instead of through them and therefore
+captures more: N=10 total -19.85 dB vs uniform -22.49 dB (+2.6 dB).
+
+So a 1-2 dB band-level difference between placements is expected, not a bug.
+Coherent pulse-weighted 1-D band levels (dB rel surface):
+
+| stack | 20-70 m | 80-120 m | sum abs(r)^2 | shape r vs full-res |
+|---|---|---|---|---|
+| full-res 1 mm | -17.37 | -24.27 | - | 1.000 |
+| uniform N10 | -19.15 | -24.12 | -22.49 | 0.484 |
+| peaks N10 | -20.02 | -23.79 | -20.74 | 0.540 |
+| uniform N20 | -18.71 | -25.03 | -20.12 | 0.774 |
+| peaks N20 | -18.90 | -23.50 | -19.25 | 0.689 |
+
+Peaks-minus-uniform: -0.87 / +0.34 dB at N=10, -0.20 / +1.53 dB at N=20 --
+inside the intrinsic boundary sensitivity. 1-D SHAPE prediction: peaks better
+at N=10 (0.540 vs 0.484), worse at N=20 (0.689 vs 0.774).
+
+### 3-D result
+
+| run | corr std | corr qlook | med@j0 20-70 | med@j0 80-120 | meanP 20-70 | meanP 80-120 |
+|---|---|---|---|---|---|---|
+| measured std | 1.000 | 0.995 | -20.17 | -36.19 | -18.06 | -31.75 |
+| measured qlook | 0.995 | 1.000 | -20.51 | -35.30 | -18.40 | -32.12 |
+| N10 uniform | 0.9069 | 0.9096 | -30.55 | -43.81 | -25.06 | -31.46 |
+| **N10 peaks** | 0.8994 | 0.9028 | -27.15 | -42.97 | -25.61 | -31.75 |
+| N20 uniform | **0.9627** | **0.9652** | -27.55 | -38.78 | -24.59 | -32.95 |
+| **N20 peaks** | 0.9564 | 0.9590 | -26.62 | -37.23 | -24.32 | -30.72 |
+
+Correlation gain (peaks minus uniform): **-0.0075 / -0.0067** at N=10,
+**-0.0064 / -0.0062** at N=20 (standard / qlook).
+
+Findings:
+- **The N=10 prediction is NOT confirmed.** Peak placement does not improve
+  the depth-profile correlation at either N; it is marginally (0.006-0.008)
+  worse at both. The 1-D gate's shape prediction (better at N=10) did not
+  survive into 3-D either.
+- **The N=20 prediction IS confirmed**: nothing material changes once uniform
+  already beats the range cell (corr -0.006, fair mid-band +0.27 dB). The one
+  real change is the deep band, +2.2 dB, which moves it from 0.8 dB below
+  measured to 1.0 dB above -- no better, just differently wrong.
+- **Peak placement does kill the sparse-median artifact.** The median-metric
+  minus mean-power gap at N=10 collapses from 5.49 dB (uniform) to 1.54 dB
+  (peaks), and the median-metric mid-band gains +3.40 dB, with essentially NO
+  change in actual power (fair mid-band -25.06 -> -25.61). Spreading the same
+  reflectivity onto horizon-centred depths fills the interference nulls that
+  the uniform comb generates. This is the H2 mechanism seen from the other
+  side, and it is a good reason to keep reporting the mean-power estimator.
+- **Why the null result is physical**: the B26 firn reflectivity is a
+  near-continuum (the C&S plateau), not a sparse set of bright horizons. A
+  uniform tiling represents a continuum better than a top-N peak selection,
+  which necessarily leaves wide segments whose reflectivity is collapsed onto
+  a point. Peak placement would be expected to pay off for a genuinely sparse
+  stratigraphy (isolated melt layers / ice lenses), not for polar firn.
+
+**Standard is unchanged: uniform equal placement at N=20.** Deliverables:
+`outputs/b26_comparison/placement_profiles.png` (6-curve depth profile) and
+`placement_radargrams.png` (firn-zone sections, 2 measured + 4 sim panels).
