@@ -83,3 +83,16 @@ the dark column at 442 m; sim bed arcs are visibly smoother than measured
 (BedMachine 500 m texture caveat, expected). `decomposition.png`: orange
 (surface-borne) carries the mid-column at all altitudes; green (bed-borne)
 switches on at the first off-nadir bed arrival and owns the bed window.
+
+## Full 50 km run (2026-07-31)
+
+All 15 chunks green, 260 s total simulation (36 s/chunk low, 11 mid, 4
+high), reaches surface 2.5/6.4/6.9 km. Mid-column mean power rel own
+surface peak (meas/sim dB): low -54.6/-72.2, mid -35.5/-45.0, high
+-34.8/-44.0 -- sims reproduce the altitude effect (high-low +28.2 dB sim
+vs +19.8 measured; mid ~ high in both). Decomposition: surface-borne at
+all altitudes; bed-borne is confined to the bed window, where sim bed
+arcs reproduce the measured 1-5 km hyperbola trains (s~55-65 km) though
+visibly smoother (BedMachine 500 m posting). The measured-over-sim
+mid-column residual (~9-18 dB, largest at the low pass) is englacial
+scattering excluded by design in this surface+bed study.
