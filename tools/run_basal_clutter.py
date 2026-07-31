@@ -21,7 +21,9 @@ reversed; nav roll NEGATED because the kernel derives the along-track axis
 from trace order, so reversed nav flips u_at and roll must flip with it);
 per-pass surface registration fitted (leading-edge gate; never shared);
 BedMachine's 500 m posting means simulated basal clutter is systematically
-smoother/weaker in fine texture than measured (recorded, not tuned away);
+smoother/weaker in fine texture than measured (recorded, not tuned away;
+--picked-bed corrects the NADIR bed onto the anchor radar picks while
+keeping BedMachine's cross-track relief -- see PICKED_BED_NOTE);
 params from each pass's own cached param frame; identical 20.202 ns lattice
 across passes (shared surface-referenced fast-time comparison).
 
@@ -33,6 +35,7 @@ track so the 50 km segment projects ~linearly from the 10 km pilot.
 Run:  uv run python tools/run_basal_clutter.py                # 10 km pilot
       uv run python tools/run_basal_clutter.py --segment full # 50 km (STOP:
       report pilot timings first; full run only on explicit go-ahead)
+      uv run python tools/run_basal_clutter.py --segment full --picked-bed
 """
 
 import argparse
@@ -52,6 +55,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
 from pyproj import Transformer  # noqa: E402
+from scipy import ndimage  # noqa: E402
+from scipy.spatial import cKDTree  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -176,6 +181,162 @@ def derive_reach(h_max, dbs_max, d_min):
 
 
 # ========================================================================
+# picked-bed correction (--picked-bed): radar bed picks as an along-track
+# residual on BedMachine
+# ========================================================================
+# ONE reference pass supplies the picks for ALL THREE simulations: per-pass
+# beds would make the three scenes different and confound the altitude
+# comparison with a scene change. The reference is the LOW pass
+# (20161105_05_005-007, 442 m AGL) because its picks are the cleanest of the
+# triplet -- scout registration table: 2.45 m surface-pick scatter (sigma)
+# vs 10.80 / 10.92 m for mid / high, p5..p95 spread 7.7 m vs ~30 m -- and at
+# 442 m the bed echo sits ~20 dB above the mid-column clutter (measured
+# midcol/bed-peak -36.7 dB) whereas at altitude off-nadir arrivals crowd the
+# bed to within a few dB (-17.7 / -16.1 dB), so the high passes' picks are
+# both noisier and more likely to have followed a clutter arc. It is also
+# the anchor line's own flight, i.e. the axis everything is registered to.
+REF_PASS = "low"
+REF_FRAMES = ("20161105_05_005", "20161105_05_006", "20161105_05_007")
+ROUGH_WIN_M = 5000.0        # scout's along-track bed-roughness detrend window
+PBED_TAG = "_pbed"          # output/cache suffix; BedMachine runs stay cached
+PICKED_BED_NOTE = (
+    "bed = BedMachine + resid(s), resid(s) = picked_bed(s) - BedMachine at "
+    "nadir(s) on the anchor along-track axis, picks from the LOW pass only "
+    "(20161105_05_005-007) and applied IDENTICALLY to all three passes. The "
+    "nadir bed therefore matches the radar picks exactly while BedMachine's "
+    "CROSS-TRACK structure -- the relief that actually drives off-nadir "
+    "clutter -- is preserved; extending the 1-D picks cross-track as a "
+    "constant would have erased it. Pick gaps fall back to zero residual "
+    "(pure BedMachine). Caveat: the residual is constant along the "
+    "cross-track normal, so along-track pick detail is replicated as "
+    "cross-track ridges out to +-ct (an unavoidable consequence of "
+    "correcting a 2-D DEM with a 1-D profile); the fast-time grid, reaches "
+    "and facet spacings are left at their BedMachine-run values so the two "
+    "runs are directly comparable.")
+
+
+def case_tag(picked_bed):
+    return PBED_TAG if picked_bed else ""
+
+
+def ref_bed_picks():
+    """Radar-picked bed elevation along the anchor line (the reference LOW
+    pass), on the anchor along-track axis (EPSG:3031, s=0 at _005 trace 0).
+
+    Elevation convention is the one the tool's registration fits already use
+    (run_altitude_comparison): ellipsoidal ice surface = Elevation -
+    c*Surface/2, ice thickness = (Bottom - Surface)*c/(2*sqrt(EPS_ICE)), bed
+    = surface - thickness, with the same rac.EPS_ICE and the same
+    WGS84-ellipsoidal datum as the REMA + BedMachine scene stack (no geoid
+    term), so the residual against BedMachine is datum-consistent. Pick gaps
+    stay NaN."""
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    xs, ys, beds = [], [], []
+    for fid in REF_FRAMES:
+        frame = _retry(f"ref frame {fid}", lambda f=fid: load_frame(SEASON, f))
+        lat, lon = rac._lonlat(frame)
+        surf = np.asarray(frame.Surface.values, np.float64)
+        elev = np.asarray(frame.Elevation.values, np.float64)
+        bot = _retry(f"ref picks {fid}", lambda f=frame: load_bottom_pick(f))
+        x, y = tr.transform(lon, lat)
+        xs.append(x)
+        ys.append(y)
+        beds.append(elev - surf * C / 2.0
+                    - (bot - surf) * C / (2.0 * np.sqrt(rac.EPS_ICE)))
+    x, y = np.concatenate(xs), np.concatenate(ys)
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(x), np.diff(y)))])
+    bed = np.concatenate(beds)
+    return {"pass": REF_PASS, "frames": list(REF_FRAMES), "x": x, "y": y,
+            "s": s, "bed": bed, "eps_ice": rac.EPS_ICE,
+            "n": int(len(s)), "line_len_km": round(float(s[-1]) / 1e3, 2),
+            "gap_frac_line": round(float((~np.isfinite(bed)).mean()), 5)}
+
+
+def project_to_track(px, py, tx, ty, s_ref):
+    """Along-track coordinate of map points (px, py) on the polyline sampled
+    at (tx, ty) with along-track coordinate s_ref: nearest sample plus its
+    tangential offset (exact for a straight track; the anchor line is smooth
+    at its 14.85 m posting)."""
+    ux, uy = np.gradient(tx), np.gradient(ty)
+    nrm = np.hypot(ux, uy)
+    ux, uy = ux / nrm, uy / nrm
+    _, i = cKDTree(np.column_stack([tx, ty])).query(
+        np.column_stack([np.asarray(px), np.asarray(py)]))
+    return s_ref[i] + (px - tx[i]) * ux[i] + (py - ty[i]) * uy[i]
+
+
+def roughness_rms(s, z, win_m=ROUGH_WIN_M):
+    """rms of z about a running mean of width win_m -- the scout's along-track
+    bed roughness metric (BedMachine 33.3 m vs radar picks 60.5 m over the
+    50 km segment). NaNs are linearly interpolated first."""
+    ok = np.isfinite(z)
+    z = np.interp(s, s[ok], z[ok])
+    n = max(3, int(round(win_m / float(np.median(np.diff(s))))))
+    return float(np.sqrt(np.mean(
+        (z - ndimage.uniform_filter1d(z, n, mode="nearest")) ** 2)))
+
+
+def sample_dem(dem, transform, px, py):
+    """Bilinear sample of a map-referenced grid at (px, py), edge-clamped."""
+    cols, rows = (~transform) * (np.asarray(px), np.asarray(py))
+    return ndimage.map_coordinates(np.asarray(dem, np.float64),
+                                   [rows - 0.5, cols - 0.5], order=1,
+                                   mode="nearest")
+
+
+def apply_picked_bed(base, ref):
+    """Rewrite the base scene's bed DEM in place as BedMachine + the anchor
+    -line pick residual (PICKED_BED_NOTE). Returns the recorded stats."""
+    dem, bed = base.dems[0], np.asarray(base.dems[1], np.float64)
+    tr = Transformer.from_crs("EPSG:3031", base.crs, always_xy=True)
+    rx, ry = tr.transform(ref["x"], ref["y"])
+    ny, nx = bed.shape
+    xa, ya = base.transform * (0.0, 0.0)
+    xb, yb = base.transform * (float(nx), float(ny))
+    keep = ((rx >= min(xa, xb)) & (rx <= max(xa, xb))
+            & (ry >= min(ya, yb)) & (ry <= max(ya, yb)))
+    kk = np.where(keep)[0]
+    if len(kk) < 100 or not (np.diff(kk) == 1).all():
+        raise RuntimeError("picked-bed: anchor picks do not cover the scene "
+                           "contiguously")
+    rx, ry, s_ref = rx[kk], ry[kk], ref["s"][kk]
+    pick = ref["bed"][kk]
+    bm = sample_dem(bed, base.transform, rx, ry)
+    gap = ~np.isfinite(pick)
+    resid = np.where(gap, 0.0, pick - bm)
+
+    cols, rows = np.meshgrid(np.arange(nx) + 0.5, np.arange(ny) + 0.5)
+    px, py = base.transform * (cols.ravel(), rows.ravel())
+    s_pix = project_to_track(px, py, rx, ry, s_ref)
+    bed_new = bed + np.interp(s_pix, s_ref, resid).reshape(bed.shape)
+    clamp = float((bed_new > dem - 0.1).mean())
+    base.dems[1] = np.minimum(bed_new, dem - 0.1).astype(np.float32)
+    base.params["bed_correction"] = PICKED_BED_NOTE
+
+    # stats over the simulated traces' own along-track span
+    tr4 = Transformer.from_crs("EPSG:4326", base.crs, always_xy=True)
+    nx_, ny_ = tr4.transform(base.nav_llh[:, 1], base.nav_llh[:, 0])
+    s_nav = project_to_track(nx_, ny_, rx, ry, s_ref)
+    seg = (s_ref >= s_nav.min()) & (s_ref <= s_nav.max())
+    r_seg = resid[seg]
+    return {"reference_pass": ref["pass"], "reference_frames": ref["frames"],
+            "eps_ice": ref["eps_ice"],
+            "anchor_s_km": [round(float(s_nav.min()) / 1e3, 2),
+                            round(float(s_nav.max()) / 1e3, 2)],
+            "n_picks_segment": int(seg.sum()),
+            "gap_frac_segment": round(float(gap[seg].mean()), 5),
+            "residual_rms_m": round(float(np.sqrt(np.mean(r_seg ** 2))), 1),
+            "residual_mean_m": round(float(r_seg.mean()), 1),
+            "residual_absmax_m": round(float(np.abs(r_seg).max()), 1),
+            "bed_roughness_rms_m": {
+                "bedmachine": round(roughness_rms(s_ref[seg], bm[seg]), 1),
+                "picked": round(roughness_rms(s_ref[seg], pick[seg]), 1),
+                "scout_reference": {"bedmachine": 33.3, "radar_picks": 60.5}},
+            "bed_clamp_frac_after": round(clamp, 6),
+            "note": PICKED_BED_NOTE}
+
+
+# ========================================================================
 # per-pass preparation
 # ========================================================================
 def _retry(what, fn, tries=3, delay_s=20.0):
@@ -211,9 +372,10 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
     return rc_sim, rc_frame, b0
 
 
-def prep_pass(key, segment, n_traces):
+def prep_pass(key, segment, n_traces, ref=None):
     """Slice (+reverse) the pass's frames onto the common window, derive the
-    reach and grids, and build the base scene (REMA + BedMachine, cached)."""
+    reach and grids, and build the base scene (REMA + BedMachine, cached).
+    ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene."""
     spec = PASSES[key]
     parts = spec[segment]
     fsubs, bots, tw_ref = [], [], None
@@ -274,6 +436,10 @@ def prep_pass(key, segment, n_traces):
 
     base, aux = _retry(f"base_scene {key}",
                        lambda: rac.base_scene(fsub, n_traces, reach["ct_m"]))
+    # Picked bed: the fast-time grid, reach and facet spacing above stay at
+    # their BedMachine values (derived from each pass's OWN picks) so the two
+    # runs share one lattice and are directly comparable.
+    aux["picked_bed"] = apply_picked_bed(base, ref) if ref else None
     idx = aux["idx"]
     lat, lon = rac._lonlat(fsub)
     tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
@@ -286,6 +452,7 @@ def prep_pass(key, segment, n_traces):
             "lam": lam, "spacing": spacing, "reach": reach, "rc_sim": rc_sim,
             "rc_frame": rc_frame, "b0": b0, "base": base, "aux": aux,
             "idx": idx, "s_m": s, "agl": agl, "r_min": r_min,
+            "picked_bed": bool(ref),
             "h_med": float(np.nanmedian(agl)), "thick_med": thick_med,
             "tw_m": tw_ref}
 
@@ -357,10 +524,12 @@ def simulate_pass(p, runs_dir, att, surf_rough, force):
     wall, facets, dropped = 0.0, [], []
     for ci, rows in enumerate(chunks):
         scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"])
-        rid = (f"{p['key']}_{p['segment']}_c{ci:02d}"
+        rid = (f"{p['key']}_{p['segment']}{case_tag(p['picked_bed'])}"
+               f"_c{ci:02d}"
                + ("_srough" if surf_rough else "")
                + (f"_att{att:g}" if att != rac.ATT_DB_PER_KM else ""))
         meta = {"season": SEASON, "pass": p["key"], "segment": p["segment"],
+                "picked_bed": p["picked_bed"],
                 "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
                 "reversed": p["rev"], "chunk": ci, "n_chunks": len(chunks),
                 "rows": [int(rows[0]), int(rows[-1])], "n_traces_total": n,
@@ -626,17 +795,34 @@ def fig_decomposition(out, preps, analyses):
 # main
 # ========================================================================
 def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
-        surf_rough=True, out_root=None, force=False, make_report=True):
+        surf_rough=True, out_root=None, force=False, make_report=True,
+        picked_bed=False):
     n_traces = n_traces or (N_TRACES_PILOT if segment == "pilot"
                             else N_TRACES_FULL)
-    out = Path(out_root or OUT_DEFAULT) / segment
+    tag = case_tag(picked_bed)
+    out = Path(out_root or OUT_DEFAULT) / (segment + tag)
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
-    case = f"{CASE_PREFIX}_{segment}"
+    case = f"{CASE_PREFIX}_{segment}{tag}"
+    ref = None
+    if picked_bed:
+        ref = ref_bed_picks()
+        print(f"picked bed: reference pass {ref['pass']} "
+              f"({'/'.join(ref['frames'])}), {ref['n']} picks over "
+              f"{ref['line_len_km']} km, line gap frac "
+              f"{ref['gap_frac_line']:.4f}", flush=True)
     preps, sims, analyses = {}, {}, {}
     for key in ORDER:
-        print(f"== {key} ({segment}) ==", flush=True)
-        p = prep_pass(key, segment, n_traces)
+        print(f"== {key} ({segment}{tag}) ==", flush=True)
+        p = prep_pass(key, segment, n_traces, ref=ref)
+        if p["aux"]["picked_bed"]:
+            pb = p["aux"]["picked_bed"]
+            print(f"  picked bed: residual rms {pb['residual_rms_m']} m "
+                  f"(mean {pb['residual_mean_m']}, |max| "
+                  f"{pb['residual_absmax_m']}), gaps "
+                  f"{pb['gap_frac_segment']:.4f}; along-track bed roughness "
+                  f"{pb['bed_roughness_rms_m']['bedmachine']} -> "
+                  f"{pb['bed_roughness_rms_m']['picked']} m rms", flush=True)
         print(f"  reach: surface {p['reach']['surface_reach_m']:.0f} m, bed "
               f"{p['reach']['bed_reach_m']:.0f} m -> ct "
               f"±{p['reach']['ct_m']:.0f} m; spacing {p['spacing']:.2f} m; "
@@ -703,8 +889,20 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "case": case, "segment": segment, "n_traces": n_traces,
         "att_db_per_km": att, "surf_rough": bool(surf_rough),
         "margin_us": MARGIN_US, "post_bed_window_us": POST_BED_US,
-        "chunk_m": CHUNK_M,
+        "chunk_m": CHUNK_M, "picked_bed": bool(picked_bed),
         "passes": {}, "measured_caveats": MEASURED_CAVEATS}
+    if picked_bed:
+        config["picked_bed_reference"] = {
+            k: ref[k] for k in ("pass", "frames", "eps_ice", "n",
+                                "line_len_km", "gap_frac_line")}
+        config["picked_bed_reference"]["why_low_pass"] = (
+            "cleanest bed of the triplet: scout registration sigma 2.45 m vs "
+            "10.80/10.92 m (mid/high) and measured mid-column/bed-peak "
+            "-36.7 dB vs -17.7/-16.1 dB, i.e. at 442 m the bed echo stands "
+            "~20 dB clear of the clutter the high passes' picks sit in; it "
+            "is also the anchor line's own flight. ONE reference pass is "
+            "applied identically to all three simulations -- never per-pass "
+            "beds.")
     for key in ORDER:
         p, s = preps[key], sims[key]
         config["passes"][key] = {
@@ -725,7 +923,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "window_modeled": p["window"], "window_note": p["win_note"],
             "dropped_power_fraction": s["dropped_power_fraction"],
             "surf_fill_frac": p["aux"]["surf_fill"],
-            "bed_clamp_frac": p["aux"]["clamp_frac"]}
+            "bed_clamp_frac": p["aux"]["clamp_frac"],
+            "picked_bed": p["aux"]["picked_bed"]}
     if segment == "pilot":
         config["full_projection"] = {
             k: {"wall_s_projected": round(sims[k]["wall_s"] * 5.0, 1),
@@ -749,7 +948,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         f"{MARGIN_US:.0f} us for both interfaces (bed reach includes Snell "
         "refraction); reversed high passes' roll negated; per-pass surface "
         "registration; BedMachine 500 m texture caveat applies. "
-        + MEASURED_CAVEATS)
+        + MEASURED_CAVEATS
+        + (" PICKED BED: " + PICKED_BED_NOTE if picked_bed else ""))
     doc = {"case": case, "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -823,12 +1023,18 @@ def main():
                     help="disable the representative sub-facet surface "
                     "roughness (default ON: off-nadir surface scattering is "
                     "central to this study)")
+    ap.add_argument("--picked-bed", action="store_true",
+                    help="use the radar-picked bed (LOW pass 20161105_05_"
+                    "005-007, applied identically to all three passes) as an "
+                    "along-track residual on BedMachine, preserving "
+                    "BedMachine's cross-track relief; outputs and cached "
+                    f"runs get the {PBED_TAG} suffix")
     ap.add_argument("--out", default=None)
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     run(segment=args.segment, n_traces=args.n_traces, att=args.att,
         surf_rough=not args.smooth_surface, out_root=args.out,
-        force=args.force)
+        force=args.force, picked_bed=args.picked_bed)
 
 
 if __name__ == "__main__":

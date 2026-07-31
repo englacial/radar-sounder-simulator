@@ -99,6 +99,147 @@ def test_bed_reach_refraction_limits():
     assert lo["ct_m"] < doc["ct_m"]
 
 
+def test_picked_bed_reference_is_the_low_pass():
+    """--picked-bed takes its picks from ONE reference pass -- the LOW pass
+    (cleanest bed of the triplet) -- applied to all three simulations, and
+    tags its outputs/cache keys so the BedMachine runs stay cached."""
+    assert rbc.REF_PASS == "low"
+    assert rbc.REF_FRAMES == ("20161105_05_005", "20161105_05_006",
+                              "20161105_05_007")
+    # every frame the low pass simulates is covered by the reference frames
+    for seg in ("pilot", "full"):
+        assert all(fid in rbc.REF_FRAMES
+                   for fid, _ in rbc.PASSES["low"][seg])
+    assert rbc.case_tag(True) == rbc.PBED_TAG == "_pbed"
+    assert rbc.case_tag(False) == ""
+    # offline reference: frame + bottom-pick caches exist for all ref frames
+    from soundersim.opr import CACHE_DIR
+    for fid in rbc.REF_FRAMES:
+        assert (CACHE_DIR /
+                f"frame_{rbc.SEASON}_{fid}_CSARP_standard.nc").exists()
+        assert (CACHE_DIR / f"layers_{rbc.SEASON}_{fid}_bottom.nc").exists()
+
+
+def test_project_to_track():
+    """Along-track projection: cross-track offsets do not change s, and the
+    tangential refinement recovers s between samples / past the end."""
+    s = np.arange(0.0, 1000.0, 10.0)
+    ang = np.deg2rad(35.0)
+    tx, ty = 1e5 + s * np.cos(ang), -2e5 + s * np.sin(ang)
+    # points pushed 3 km along the cross-track normal keep their s
+    nx, ny = -np.sin(ang), np.cos(ang)
+    got = rbc.project_to_track(tx + 3000.0 * nx, ty + 3000.0 * ny, tx, ty, s)
+    assert np.abs(got - s).max() < 1e-6
+    # between samples, and beyond the end (linear extrapolation)
+    mid = rbc.project_to_track(np.array([tx[0] + 7.0 * np.cos(ang)]),
+                               np.array([ty[0] + 7.0 * np.sin(ang)]),
+                               tx, ty, s)
+    assert abs(float(mid[0]) - 7.0) < 1e-6
+    beyond = rbc.project_to_track(np.array([tx[-1] + 50.0 * np.cos(ang)]),
+                                  np.array([ty[-1] + 50.0 * np.sin(ang)]),
+                                  tx, ty, s)
+    assert abs(float(beyond[0]) - (s[-1] + 50.0)) < 1e-6
+
+
+def test_roughness_rms():
+    """The scout's roughness metric: rms about a running mean of ROUGH_WIN_M.
+    Short-wavelength relief is measured (A/sqrt(2)); wavelengths much longer
+    than the window are detrended away."""
+    s = np.arange(0.0, 50000.0, 14.85)
+    assert abs(rbc.roughness_rms(s, 50.0 * np.sin(2 * np.pi * s / 300.0))
+               - 50.0 / np.sqrt(2.0)) < 1.0
+    assert rbc.roughness_rms(s, 50.0 * np.sin(2 * np.pi * s / 50000.0)) < 5.0
+    # NaN gaps are interpolated, not propagated
+    z = 50.0 * np.sin(2 * np.pi * s / 300.0)
+    z[10:14] = np.nan
+    assert np.isfinite(rbc.roughness_rms(s, z))
+
+
+def _toy_scene(pick_fn, gap=None):
+    """Synthetic MultilayerScene (EPSG:3031, 32 m) with a straight west-east
+    track, a sloping bed carrying a 1 km cross-track sinusoid, and a
+    reference pick profile -- no network, no simulation."""
+    from affine import Affine
+    from pyproj import Transformer
+
+    from soundersim.config import Medium
+    from soundersim.synthetic import MultilayerScene
+
+    x0, y0, n = -1.4e6, -5.0e5, 200
+    tf = Affine.translation(x0, y0) * Affine.scale(32.0, -32.0)
+    cols, rows = np.meshgrid(np.arange(n) + 0.5, np.arange(n) + 0.5)
+    X, Y = tf * (cols, rows)
+    bed = (-500.0 + 0.002 * (X - x0) + 40.0 * np.sin(
+        2 * np.pi * (Y - y0) / 1000.0)).astype(np.float32)
+    surf = (bed + 800.0).astype(np.float32)
+    yc = y0 - 32.0 * n / 2.0
+    sx = np.arange(x0 - 500.0, x0 + 32.0 * n + 500.0, 14.85)
+    sy = np.full_like(sx, yc)
+    s = sx - sx[0]
+    bed_track = -500.0 + 0.002 * (sx - x0) + 40.0 * np.sin(
+        2 * np.pi * (yc - y0) / 1000.0)
+    pick = bed_track + pick_fn(s)
+    if gap is not None:
+        pick[gap(s)] = np.nan
+    inv = Transformer.from_crs("EPSG:3031", "EPSG:4326", always_xy=True)
+    lon, lat = inv.transform(sx[::200], sy[::200])
+    nav = np.column_stack([lat, lon, np.full(len(lat), 1000.0)])
+    sc = MultilayerScene("toy", [surf, bed.copy()], tf, "EPSG:3031", nav,
+                         [Medium(name="air", eps_r=1.0),
+                          Medium(name="ice", eps_r=3.17),
+                          Medium(name="bed", eps_r=8.0)], {})
+    ref = {"pass": "low", "frames": list(rbc.REF_FRAMES), "eps_ice": 3.17,
+           "x": sx, "y": sy, "s": s, "bed": pick}
+    return sc, ref, bed, np.column_stack([sx, sy])
+
+
+def test_picked_bed_matches_picks_at_nadir_and_keeps_cross_track():
+    """The residual construction: the nadir line ends up ON the picks, while
+    BedMachine's cross-track structure is preserved exactly (the correction
+    is a function of along-track s only) -- NOT a constant cross-track
+    extension of the 1-D profile."""
+    def bump(s):
+        return 60.0 * np.sin(2 * np.pi * s / 900.0)
+
+    sc, ref, bed0, tpts = _toy_scene(bump)
+    stats = rbc.apply_picked_bed(sc, ref)
+    bed1 = np.asarray(sc.dems[1], np.float64)
+
+    # nadir: corrected bed == picks (bilinear sampling error only)
+    inside = ((tpts[:, 0] > sc.transform.c + 100.0)
+              & (tpts[:, 0] < sc.transform.c + 32.0 * 200 - 100.0))
+    got = rbc.sample_dem(bed1, sc.transform, tpts[inside, 0], tpts[inside, 1])
+    assert np.abs(got - ref["bed"][inside]).max() < 1.0
+    # cross-track: the added field depends on s (here x) only, so every
+    # column shifts rigidly and all cross-track relief survives untouched
+    d = bed1 - bed0
+    assert float(np.abs(d - d[:1, :]).max()) < 1e-3
+    assert float(np.abs(np.diff(bed1, axis=0)
+                        - np.diff(bed0, axis=0)).max()) < 1e-3
+    # a constant cross-track extension would have flattened it
+    assert np.ptp(bed1[:, 100]) > 50.0
+    assert stats["reference_pass"] == "low"
+    assert stats["gap_frac_segment"] == 0.0
+    assert abs(stats["residual_rms_m"] - 60.0 / np.sqrt(2.0)) < 1.0
+    assert abs(stats["residual_absmax_m"] - 60.0) < 1.0
+    assert stats["bed_roughness_rms_m"]["picked"] > \
+        stats["bed_roughness_rms_m"]["bedmachine"]
+
+
+def test_picked_bed_gaps_fall_back_to_bedmachine():
+    """Pick gaps take zero residual: those columns stay pure BedMachine."""
+    def flat(s):
+        return np.full_like(s, 25.0)
+
+    sc, ref, bed0, _ = _toy_scene(
+        flat, gap=lambda s: np.abs(s - s.mean()) < 900.0)
+    stats = rbc.apply_picked_bed(sc, ref)
+    d = np.asarray(sc.dems[1], np.float64) - bed0
+    assert abs(float(d.max()) - 25.0) < 0.5
+    assert abs(float(d.min())) < 0.5              # the gap band: no shift
+    assert 0.0 < stats["gap_frac_segment"] < 1.0
+
+
 def test_windows_and_chunking():
     """The fast-time window must extend past the clutter margin, and the
     chunking must make the 50 km segment ~5 pilot-sized chunks (linear

@@ -96,3 +96,52 @@ arcs reproduce the measured 1-5 km hyperbola trains (s~55-65 km) though
 visibly smoother (BedMachine 500 m posting). The measured-over-sim
 mid-column residual (~9-18 dB, largest at the low pass) is englacial
 scattering excluded by design in this surface+bed study.
+
+## Picked-bed 50 km run (`--picked-bed`, 2026-07-31)
+
+`outputs/basal_clutter/full_pbed/` (vs BedMachine `full/`). Bed =
+BedMachine + resid(s), resid(s) = picked_bed(s) - BedMachine at nadir(s) on
+the anchor along-track axis; picks from the LOW pass ONLY
+(20161105_05_005-007) applied identically to all three sims. Elevations use
+the tool's existing convention (surface = Elevation - c*Surface/2,
+thickness = (Bottom-Surface)*c/(2*sqrt(3.17)), WGS84-ellipsoidal like
+REMA/BedMachine). Nadir matches the picks exactly; BedMachine's cross-track
+relief is preserved (a constant cross-track extension of the 1-D profile
+would have erased it). Grid/reach/facet spacing unchanged from the
+BedMachine run, so the two are directly comparable.
+
+Residual over s=18-68 km: **81.3 m rms, +31.3 m mean, 216 m |max|, gap
+fraction 0.0000** (the +31 m mean is the scout's "BedMachine - radar bed
+= -30 m"). Along-track bed roughness (rms about a 5 km running mean):
+**28.5 -> 60.3 m** (scout: 33.3 BedMachine / 60.5 picks; our 28.5 is the
+32 m-grid-resampled BedMachine, slightly smoother than the scout's native
+sampling). 264.6 s sim wall (183/62/20 s), 15 chunks, clamp 0.
+
+| dB rel own surface peak | low | mid | high |
+|---|---|---|---|
+| sim mid-column (bedmachine -> picked) | -72.2 -> -71.3 | -45.0 -> -44.8 | -44.0 -> -43.7 |
+| sim bed window | -48.5 -> -50.4 | -47.0 -> -45.2 | -46.2 -> -44.9 |
+| measured bed window | -54.3 | -46.0 | -46.1 |
+| sim midcol/bed-peak (scout metric) | -56.6 -> -48.3 | -31.3 -> -18.7 | -28.6 -> -18.5 |
+| measured midcol/bed-peak | -28.6 | -4.6 | -3.0 |
+| **bed-borne** mid-column | -143.7 -> -141.1 | -126.0 -> -58.1 | -124.2 -> -61.4 |
+
+Altitude trend barely moves (high-low +28.2 -> +27.7 dB sim vs +19.8
+measured): the mid-column is still surface-borne at all three altitudes.
+The real change is at the BED: the bed-borne mid-column contribution jumps
+**+63 to +68 dB** at altitude (still 13-16 dB below the surface-borne
+term), the specular bed peak drops so the scout contrast metric closes
+8-13 dB of its ~25 dB gap to measured, and the low pass's 5.8 dB-hot bed
+window drops to 3.9 dB hot. Radargrams: the smooth BedMachine bed band is
+replaced by a dense field of overlapping hyperbolae across the whole
+segment, the bed envelope now follows the measured bed (by construction),
+and the post-bed tail matches measured within a few dB instead of falling
+10-20 dB short.
+
+**Caveat, do not tune this away.** The residual is constant along the
+cross-track normal, so along-track pick detail becomes cross-track RIDGES
+out to +-ct. That is the unavoidable consequence of correcting a 2-D DEM
+with a 1-D profile, and it makes the added bed roughness perfectly
+correlated cross-track (anisotropic). The +63 dB bed-borne mid-column jump
+and the arc density should therefore be read as an UPPER bound on what a
+truly 2-D bed of the same rms would give.
