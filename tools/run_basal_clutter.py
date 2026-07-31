@@ -36,6 +36,8 @@ Run:  uv run python tools/run_basal_clutter.py                # 10 km pilot
       uv run python tools/run_basal_clutter.py --segment full # 50 km (STOP:
       report pilot timings first; full run only on explicit go-ahead)
       uv run python tools/run_basal_clutter.py --segment full --picked-bed
+      uv run python tools/run_basal_clutter.py --segment full --picked-bed \
+          --gamma-from-rssnr   # + required-surface-SNR-driven bed gamma
 """
 
 import argparse
@@ -68,6 +70,7 @@ from soundersim.config import (AntennaConfig, DemInterface, FacetConfig,  # noqa
                                Medium, RadarConfig, RoughnessConfig, SimConfig,
                                WaveformConfig)
 from soundersim.opr import load_bottom_pick, load_frame  # noqa: E402
+from soundersim.physics import fresnel_normal  # noqa: E402
 
 C = 299792458.0
 SEASON = "2016_Antarctica_DC8"
@@ -215,8 +218,9 @@ PICKED_BED_NOTE = (
     "runs are directly comparable.")
 
 
-def case_tag(picked_bed):
-    return PBED_TAG if picked_bed else ""
+def case_tag(picked_bed, gamma_rssnr=False):
+    return ((PBED_TAG if picked_bed else "")
+            + (GRSSNR_TAG if gamma_rssnr else ""))
 
 
 def ref_bed_picks():
@@ -248,6 +252,7 @@ def ref_bed_picks():
     bed = np.concatenate(beds)
     return {"pass": REF_PASS, "frames": list(REF_FRAMES), "x": x, "y": y,
             "s": s, "bed": bed, "eps_ice": rac.EPS_ICE,
+            "frame_len": [int(len(b)) for b in beds],
             "n": int(len(s)), "line_len_km": round(float(s[-1]) / 1e3, 2),
             "gap_frac_line": round(float((~np.isfinite(bed)).mean()), 5)}
 
@@ -337,6 +342,221 @@ def apply_picked_bed(base, ref):
 
 
 # ========================================================================
+# RSSNR-driven bed reflectivity (--gamma-from-rssnr): required-surface-SNR
+# along the anchor line -> per-facet bed gamma
+# ========================================================================
+# Dataset + mapping: claude_notes/required_snr_dataset.md. The store's main
+# branch was mid-rebuild at scouting time, so the completed 5,646-frame
+# version is PINNED by snapshot id. RSSNR removes exactly the differential
+# geometric spreading the simulator re-applies (r_bed_eff = r_surf + H/n ==
+# the kernel's refracted nadir spreading), so the mapping
+#   |Gamma_bed|^2 dB = 2*A*H(s) - RSSNR(s) + K
+# double-counts nothing; H(s) from the DATASET's own twtts (self-consistent
+# with its RSSNR), A = the run's --att. K is MEDIAN-ANCHORED: the segment
+# median |Gamma|^2 equals the constant run's Fresnel ice->bed value, so the
+# dataset supplies along-track RELATIVE structure while the absolute level
+# stays continuous with the constant-gamma results (RSSNR is surface-
+# referenced and attenuation-inclusive, so a physical K would transfer the
+# attenuation/surface-model uncertainty straight into the bed level; the
+# K - K_phys diagnostic records that gap). ONE anchor-derived gamma field is
+# shared by all three passes (same reasons as the picked bed: per-pass fields
+# would confound the altitude comparison; the low pass's RSSNR is the
+# cleanest). The 1-D profile extends CROSS-TRACK AS A CONSTANT -- same caveat
+# class as the picked-bed residual.
+RSSNR_SNAPSHOT = "3YH47013745B2T5ZZR50"   # antarctica store, 2026-07-29
+RSSNR_STORE = {"bucket": "opr-radar-metrics", "prefix": "icechunk/antarctica",
+               "region": "us-west-2"}
+RSSNR_CACHE = OUT_DEFAULT / "rssnr_anchor.npz"
+GRSSNR_TAG = "_rssnr"
+RSSNR_GAMMA_NOTE = (
+    "bed reflectivity driven along-track by required_surface_snr_dB "
+    "(claude_notes/required_snr_dataset.md): |Gamma_bed|^2(s) dB = 2*A*H(s) "
+    "- RSSNR(s) + K on the anchor along-track axis, H from the dataset's own "
+    "surface/bed twtts, A = the run's --att, K median-anchored so the "
+    "segment-median |Gamma|^2 equals the constant Fresnel ice->bed value "
+    "(the dataset supplies RELATIVE structure; K - K_phys records the "
+    "absolute-chain gap). Samples are ~1.4 km apart (10 s decimation), "
+    "linearly interpolated along-track onto the bed grid and extended "
+    "cross-track as a constant (the picked-bed residual's caveat class). "
+    "Censored samples (qc fail / RSSNR NaN: bed too dim to pick) take the "
+    "segment's dimmest mapped value -- a brightness floor, not "
+    "missing-at-random. ONE anchor-derived field is shared by all three "
+    "passes.")
+
+
+def fetch_rssnr_anchor(cache_path=None):
+    """RSSNR per decimated trace along the anchor frames (REF_FRAMES), from
+    the pinned antarctica icechunk snapshot. Cache-first (RSSNR_CACHE);
+    live-fetches once and caches with provenance. Returns (arrays, prov)."""
+    cache = Path(cache_path or RSSNR_CACHE)
+    keys = ("lat", "lon", "rssnr", "qc", "stw", "btw")
+    if cache.exists():
+        z = np.load(cache)
+        prov = json.loads(str(z["provenance"]))
+        if prov.get("snapshot_id") != RSSNR_SNAPSHOT:
+            raise RuntimeError(
+                f"RSSNR cache {cache} pins snapshot "
+                f"{prov.get('snapshot_id')}, tool wants {RSSNR_SNAPSHOT}: "
+                "delete the cache to re-fetch")
+        prov["source"] = f"cache:{cache}"
+        return {k: np.asarray(z[k]) for k in keys}, prov
+    import icechunk
+    import zarr
+    storage = icechunk.s3_storage(anonymous=True, **RSSNR_STORE)
+    repo = icechunk.Repository.open(storage=storage)
+    root = zarr.open_group(
+        repo.readonly_session(snapshot_id=RSSNR_SNAPSHOT).store, mode="r")
+    fid = root["frame_id"][:].astype(str)
+    m = np.isin(fid, [f"Data_{f}" for f in REF_FRAMES])
+    if m.sum() < 50:
+        raise RuntimeError(f"pinned snapshot holds only {m.sum()} anchor "
+                           "traces")
+    d = {"lat": root["latitude"][m], "lon": root["longitude"][m],
+         "rssnr": root["required_surface_snr_dB"][m],
+         "qc": root["qc_pass"][m].astype(bool),
+         "stw": root["surface_twtt"][m], "btw": root["bed_twtt"][m]}
+    prov = {"snapshot_id": RSSNR_SNAPSHOT, "store": dict(RSSNR_STORE),
+            "frames": list(REF_FRAMES), "n_traces": int(m.sum()),
+            "fetched_utc": datetime.datetime.now(
+                datetime.timezone.utc).isoformat(),
+            "schema_note": "pre-2026-07-29 schema: qc_pass masks all "
+            "metrics; no censoring columns"}
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(cache, provenance=json.dumps(prov),
+             **{k: (v.astype(np.uint8) if v.dtype == bool else v)
+                for k, v in d.items()})
+    d["qc"] = d["qc"].astype(bool)
+    prov["source"] = "s3-live"
+    return d, prov
+
+
+def k_phys_db(eps_ice=None):
+    """Physical anchoring constant |Gamma_surf|^2_dB - T2_dB (the dataset's
+    surface reference and two-way transmission): what K would be if the
+    absolute chain (Fresnel surface, --att attenuation) were trusted."""
+    g = fresnel_normal(1.0, eps_ice or rac.EPS_ICE)
+    return float(20.0 * np.log10(abs(g)) - 20.0 * np.log10(1.0 - g * g))
+
+
+def segment_s_range(ref, segment):
+    """Anchor-axis s range (m) of the study segment, from the LOW pass's
+    trace slices (the axis's own frames)."""
+    off = dict(zip(ref["frames"],
+                   np.concatenate([[0], np.cumsum(ref["frame_len"])[:-1]])))
+    ss = []
+    for fid, (a, b) in PASSES["low"][segment]:
+        ss += [ref["s"][off[fid] + a], ref["s"][off[fid] + b - 1]]
+    return float(min(ss)), float(max(ss))
+
+
+def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi):
+    """Median-anchored |Gamma_bed|^2(s) profile (module-section comment).
+
+    Pure mapping math (unit-tested): G2 = 2*A*H - RSSNR + K with K set so
+    median(G2) over QC-passing segment samples equals the constant run's
+    Fresnel ice->bed power reflectivity. Censored samples (qc fail / NaN
+    RSSNR) get the segment's minimum mapped G2 -- their RSSNR is a FLOOR
+    (bed too dim to pick), never interpolated across. Returns the s-sorted
+    profile + recorded stats."""
+    s = np.asarray(s, np.float64)
+    rssnr = np.asarray(rssnr, np.float64)
+    thick_m = np.asarray(thick_m, np.float64)
+    ok = (np.asarray(qc, bool) & np.isfinite(rssnr) & np.isfinite(thick_m)
+          & (thick_m > 0))
+    seg = ok & (s >= seg_lo) & (s <= seg_hi)
+    if seg.sum() < 5:
+        raise RuntimeError(f"only {seg.sum()} usable RSSNR samples in the "
+                           "segment")
+    base = 2.0 * att_db_per_km * thick_m / 1e3 - rssnr        # G2 - K
+    g2_const = float(20.0 * np.log10(abs(
+        fresnel_normal(rac.EPS_ICE, rac.EPS_BED))))
+    k = g2_const - float(np.median(base[seg]))
+    g2 = base + k
+    floor = float(np.nanmin(g2[seg]))
+    g2 = np.where(ok, g2, floor)
+    o = np.argsort(s)
+    kp = k_phys_db()
+    gs = g2[seg]
+    return {"s": s[o], "g2_db": g2[o], "thick_m": thick_m[o],
+            "ok": ok[o], "k_db": round(k, 2), "k_phys_db": round(kp, 2),
+            "k_minus_kphys_db": round(k - kp, 2),
+            "g2_const_db": round(g2_const, 2),
+            "att_db_per_km": att_db_per_km,
+            "n_samples": int(len(s)), "n_censored": int((~ok).sum()),
+            "censored_floor_db": round(floor, 2),
+            "seg_s_km": [round(seg_lo / 1e3, 2), round(seg_hi / 1e3, 2)],
+            "n_seg": int(seg.sum()),
+            # G2 > 0 dB is unphysical reflectivity: the price of holding A
+            # fixed while median-anchoring on a dim-bed-dominated segment.
+            # K - K_phys / (2 * H_med) estimates the attenuation the
+            # anchoring absorbed (recorded, not tuned away).
+            "g2_pos_frac_seg": round(float((gs > 0).mean()), 3),
+            "implied_eff_att_db_per_km": round(
+                att_db_per_km + (k - kp)
+                / (2.0 * float(np.median(thick_m[seg])) / 1e3), 1),
+            "g2_seg_db": {kk: round(float(vv), 1) for kk, vv in
+                          [("min", gs.min()), ("p5", np.percentile(gs, 5)),
+                           ("med", np.median(gs)),
+                           ("p95", np.percentile(gs, 95)),
+                           ("max", gs.max())]},
+            "med_sample_spacing_m": round(float(np.median(np.diff(s[o]))), 0)}
+
+
+def build_rssnr_gamma(axis, segment, att):
+    """Fetch + map: the shared anchor G2(s) profile dict (rssnr_gamma_profile
+    output + fetch provenance), on the anchor along-track axis ``axis``
+    (ref_bed_picks)."""
+    d, prov = fetch_rssnr_anchor()
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    sx, sy = tr.transform(d["lon"], d["lat"])
+    s_smp = project_to_track(sx, sy, axis["x"], axis["y"], axis["s"])
+    thick = C / (2.0 * np.sqrt(axis["eps_ice"])) * (d["btw"] - d["stw"])
+    seg_lo, seg_hi = segment_s_range(axis, segment)
+    prof = rssnr_gamma_profile(s_smp, d["rssnr"], thick, d["qc"], att,
+                               seg_lo, seg_hi)
+    prof["provenance"] = prov
+    prof["note"] = RSSNR_GAMMA_NOTE
+    return prof
+
+
+def apply_rssnr_gamma(base, axis, gmap):
+    """Attach ``base.gamma_bed``: per-map-pixel signed FIELD reflection
+    coefficient -10^(G2(s_pix)/20) from the shared profile, constant along
+    the cross-track normal (apply_picked_bed's projection). Returns recorded
+    stats."""
+    bed = base.dems[1]
+    tr = Transformer.from_crs("EPSG:3031", base.crs, always_xy=True)
+    rx, ry = tr.transform(axis["x"], axis["y"])
+    ny, nx = bed.shape
+    xa, ya = base.transform * (0.0, 0.0)
+    xb, yb = base.transform * (float(nx), float(ny))
+    keep = ((rx >= min(xa, xb)) & (rx <= max(xa, xb))
+            & (ry >= min(ya, yb)) & (ry <= max(ya, yb)))
+    kk = np.where(keep)[0]
+    if len(kk) < 100:
+        raise RuntimeError("rssnr gamma: anchor axis does not cover the "
+                           "scene")
+    rx, ry, s_ref = rx[kk], ry[kk], axis["s"][kk]
+    cols, rows = np.meshgrid(np.arange(nx) + 0.5, np.arange(ny) + 0.5)
+    px, py = base.transform * (cols.ravel(), rows.ravel())
+    s_pix = project_to_track(px, py, rx, ry, s_ref)
+    g2 = np.interp(s_pix, gmap["s"], gmap["g2_db"])
+    base.gamma_bed = (-(10.0 ** (g2 / 20.0))).reshape(bed.shape).astype(
+        np.float32)
+    return {"k_db": gmap["k_db"], "k_phys_db": gmap["k_phys_db"],
+            "k_minus_kphys_db": gmap["k_minus_kphys_db"],
+            "g2_seg_db": gmap["g2_seg_db"],
+            "n_censored": gmap["n_censored"],
+            "grid_g2_db_range": [round(float(v), 1) for v in
+                                 (20.0 * np.log10(np.abs(
+                                     base.gamma_bed)).min(),
+                                  20.0 * np.log10(np.abs(
+                                      base.gamma_bed)).max())],
+            "snapshot_id": gmap["provenance"]["snapshot_id"],
+            "source": gmap["provenance"]["source"]}
+
+
+# ========================================================================
 # per-pass preparation
 # ========================================================================
 def _retry(what, fn, tries=3, delay_s=20.0):
@@ -372,10 +592,12 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
     return rc_sim, rc_frame, b0
 
 
-def prep_pass(key, segment, n_traces, ref=None):
+def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None):
     """Slice (+reverse) the pass's frames onto the common window, derive the
     reach and grids, and build the base scene (REMA + BedMachine, cached).
-    ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene."""
+    ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene;
+    ``gmap`` (build_rssnr_gamma, with ``axis`` = ref_bed_picks as the
+    along-track axis) attaches the RSSNR-driven bed gamma grid."""
     spec = PASSES[key]
     parts = spec[segment]
     fsubs, bots, tw_ref = [], [], None
@@ -440,6 +662,8 @@ def prep_pass(key, segment, n_traces, ref=None):
     # their BedMachine values (derived from each pass's OWN picks) so the two
     # runs share one lattice and are directly comparable.
     aux["picked_bed"] = apply_picked_bed(base, ref) if ref else None
+    aux["rssnr_gamma"] = (apply_rssnr_gamma(base, axis or ref, gmap)
+                          if gmap else None)
     idx = aux["idx"]
     lat, lon = rac._lonlat(fsub)
     tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
@@ -452,7 +676,7 @@ def prep_pass(key, segment, n_traces, ref=None):
             "lam": lam, "spacing": spacing, "reach": reach, "rc_sim": rc_sim,
             "rc_frame": rc_frame, "b0": b0, "base": base, "aux": aux,
             "idx": idx, "s_m": s, "agl": agl, "r_min": r_min,
-            "picked_bed": bool(ref),
+            "picked_bed": bool(ref), "gamma_rssnr": bool(gmap),
             "h_med": float(np.nanmedian(agl)), "thick_med": thick_med,
             "tw_m": tw_ref}
 
@@ -470,10 +694,12 @@ def chunk_rows(p):
     return [np.where(which == c)[0] for c in range(n_chunks)]
 
 
-def chunk_scene(base, rows, ct):
+def chunk_scene(base, rows, ct, gamma=False):
     """MultilayerScene for one chunk: DEM stack cropped to the chunk traces'
     bbox padded by ct + 100 m (every trace keeps full +-ct coverage in every
-    direction), nav/roll subset. The rac.crop_scene pattern + trace subset."""
+    direction), nav/roll subset. The rac.crop_scene pattern + trace subset.
+    ``gamma`` attaches the cropped RSSNR bed-gamma grid (scene.gamma_maps,
+    consumed by simulate's multilayer path)."""
     from affine import Affine
 
     from soundersim.synthetic import MultilayerScene
@@ -496,6 +722,10 @@ def chunk_scene(base, rows, ct):
                          base.crs, nav, base.media, dict(base.params))
     roll = getattr(base, "nav_roll", None)
     sc.nav_roll = None if roll is None else np.asarray(roll)[rows]
+    if gamma:
+        sc.gamma_maps = {"bed": (
+            np.ascontiguousarray(base.gamma_bed[r0:r1, c0:c1]),
+            sc.transform, sc.crs)}
     return sc
 
 
@@ -523,13 +753,20 @@ def simulate_pass(p, runs_dir, att, surf_rough, force):
     field = twtt = nadir = None
     wall, facets, dropped = 0.0, [], []
     for ci, rows in enumerate(chunks):
-        scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"])
-        rid = (f"{p['key']}_{p['segment']}{case_tag(p['picked_bed'])}"
+        scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"],
+                            gamma=p["gamma_rssnr"])
+        rid = (f"{p['key']}_{p['segment']}"
+               f"{case_tag(p['picked_bed'], p['gamma_rssnr'])}"
                f"_c{ci:02d}"
                + ("_srough" if surf_rough else "")
                + (f"_att{att:g}" if att != rac.ATT_DB_PER_KM else ""))
+        # gamma keys only when ON: constant-gamma metas stay byte-identical
+        # to pre-feature caches (run_level skip-exists keys on meta json)
         meta = {"season": SEASON, "pass": p["key"], "segment": p["segment"],
                 "picked_bed": p["picked_bed"],
+                **({"gamma_rssnr": True, "rssnr_snapshot": RSSNR_SNAPSHOT,
+                    "rssnr_k_db": p["aux"]["rssnr_gamma"]["k_db"]}
+                   if p["gamma_rssnr"] else {}),
                 "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
                 "reversed": p["rev"], "chunk": ci, "n_chunks": len(chunks),
                 "rows": [int(rows[0]), int(rows[-1])], "n_traces_total": n,
@@ -654,11 +891,14 @@ def analyze_pass(p, sim):
     m_sim = clutter_metrics(P, tw, dtf, t_s, t_b)
     spk = m_sim["_spk"]
     dec = {}
+    bedlayer_bed = None
     for name, Pl in (("surface", Ps), ("bed", Pb)):
         mid = _wmean(Pl, tw, dtf, t_s + MID_LO_US * 1e-6,
                      t_b - MID_HI_US * 1e-6)
         bed = _wmean(Pl, tw, dtf, t_b - BED_LO_US * 1e-6,
                      t_b + BED_HI_US * 1e-6)
+        if name == "bed":
+            bedlayer_bed = bed  # per-trace, for the RSSNR sanity correlation
         dec[name] = {"midcol_rel_surf_db": _med_db_rel(mid, spk),
                      "bed_rel_surf_db": _med_db_rel(bed, spk)}
     dmid = (dec["surface"]["midcol_rel_surf_db"]
@@ -687,7 +927,18 @@ def analyze_pass(p, sim):
     clean = {k: round(v, 2) for k, v in m_sim.items() if not k.startswith("_")}
     cleanm = {k: round(v, 2) for k, v in m_meas.items()
               if not k.startswith("_")}
+
+    def _prof_db(m):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r = 10.0 * np.log10(m["_bed"] / m["_spk"])
+        return np.where(np.isfinite(r), r, np.nan)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        blp = 10.0 * np.log10(bedlayer_bed / spk)
     return {"gate": gate, "sim": clean, "meas": cleanm,
+            "sim_bed_prof_db": _prof_db(m_sim),
+            "meas_bed_prof_db": _prof_db(m_meas),
+            "sim_bedlayer_prof_db": np.where(np.isfinite(blp), blp, np.nan),
             "decomposition": {k: {kk: round(vv, 2) for kk, vv in v.items()}
                               for k, v in dec.items()},
             "verdict": verdict, "floor_db": round(floor_db, 2),
@@ -695,6 +946,105 @@ def analyze_pass(p, sim):
             "bed_delay_med_us": round(float(np.nanmedian(
                 (p["bot"] - p["surf"]))) * 1e6, 2),
             "profs": profs, "P": P, "t_s": t_s, "meas_arr": meas}
+
+
+# ========================================================================
+# RSSNR-gamma acceptance analysis: bed-window brightness along-track
+# ========================================================================
+CORR_WIN_M = 1000.0    # profile smoothing scale (~ the RSSNR sampling)
+
+
+def _smooth_db(s, v, win_m=CORR_WIN_M):
+    """~win_m running mean of a per-trace dB profile (NaNs interpolated)."""
+    ok = np.isfinite(v)
+    if ok.sum() < 2:
+        return np.full_like(np.asarray(v, float), np.nan)
+    vi = np.interp(s, s[ok], v[ok])
+    n = max(1, int(round(win_m / max(float(np.median(np.diff(s))), 1e-6))))
+    return ndimage.uniform_filter1d(vi, n, mode="nearest")
+
+
+def _pearson(x, y):
+    ok = np.isfinite(x) & np.isfinite(y)
+    if ok.sum() < 3:
+        return float("nan")
+    return float(np.corrcoef(x[ok], y[ok])[0, 1])
+
+
+def bed_profile_correlations(p, a, a_const, gmap, axis):
+    """Acceptance metrics for one pass: along-track Pearson r of bed-window
+    power profiles (dB rel own surface peak, ~1 km smoothed, on the sim trace
+    grid). sim(RSSNR) vs the RSSNR-implied pattern is the by-construction
+    sanity check (geometry/speckle-limited); sim vs MEASURED -- for both
+    gamma models -- is the real test. Returns (stats, plot-series)."""
+    s_meas, s_sim = p["s_m"], p["s_m"][p["idx"]]
+    meas = np.interp(s_sim, s_meas,
+                     _smooth_db(s_meas, a["meas_bed_prof_db"]))
+    sim_r = _smooth_db(s_sim, a["sim_bed_prof_db"])
+    sim_c = _smooth_db(s_sim, a_const["sim_bed_prof_db"])
+    sim_rl = _smooth_db(s_sim, a["sim_bedlayer_prof_db"])  # bed-borne only
+    # implied pattern -RSSNR(s) + K (== G2 - 2AH), at the sim traces'
+    # anchor-axis position
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    px, py = tr.transform(p["base"].nav_llh[:, 1], p["base"].nav_llh[:, 0])
+    s_anchor = project_to_track(px, py, axis["x"], axis["y"], axis["s"])
+    implied = (np.interp(s_anchor, gmap["s"], gmap["g2_db"])
+               - 2.0 * gmap["att_db_per_km"]
+               * np.interp(s_anchor, gmap["s"], gmap["thick_m"]) / 1e3)
+    stats = {
+        "r_sim_rssnr_vs_implied": round(_pearson(sim_r, implied), 3),
+        "r_bedlayer_rssnr_vs_implied": round(_pearson(sim_rl, implied), 3),
+        "r_sim_rssnr_vs_measured": round(_pearson(sim_r, meas), 3),
+        "r_sim_const_vs_measured": round(_pearson(sim_c, meas), 3),
+        "r_implied_vs_measured": round(_pearson(implied, meas), 3),
+        "smooth_win_m": CORR_WIN_M,
+        "bed_rel_surf_med_db": {
+            "measured": round(float(np.nanmedian(meas)), 2),
+            "sim_const": round(float(np.nanmedian(sim_c)), 2),
+            "sim_rssnr": round(float(np.nanmedian(sim_r)), 2)}}
+    series = {"s_sim": s_sim, "measured": meas, "sim_const": sim_c,
+              "sim_rssnr": sim_r, "implied": implied}
+    return stats, series
+
+
+def fig_bed_brightness(out, preps, corr_series, corr_stats, segment):
+    """Per pass: bed-window power along-track (dB rel own surface peak,
+    ~1 km smoothed) -- measured vs constant-gamma sim vs RSSNR-gamma sim vs
+    the RSSNR-implied pattern (shape prediction, median-aligned to the RSSNR
+    sim)."""
+    s0 = S0_KM[segment]
+    fig, axs = plt.subplots(1, len(ORDER), figsize=(5.4 * len(ORDER), 4.6),
+                            sharey=True, squeeze=False)
+    for k, key in enumerate(ORDER):
+        ax = axs[0, k]
+        se, st = corr_series[key], corr_stats[key]
+        s_km = s0 + se["s_sim"] / 1e3
+        imp = se["implied"] + (np.nanmedian(se["sim_rssnr"])
+                               - np.nanmedian(se["implied"]))
+        ax.plot(s_km, se["measured"], color="black", lw=1.8, label="measured")
+        ax.plot(s_km, se["sim_const"], color="tab:blue", lw=1.3,
+                label="sim constant gamma")
+        ax.plot(s_km, se["sim_rssnr"], color="tab:red", lw=1.3,
+                label="sim RSSNR gamma")
+        ax.plot(s_km, imp, color="0.45", lw=1.0, ls="--",
+                label="RSSNR-implied (median-aligned)")
+        ax.set_title(
+            f"{key} ({preps[key]['h_med']:.0f} m AGL)  r(meas): const "
+            f"{st['r_sim_const_vs_measured']:+.2f} -> RSSNR "
+            f"{st['r_sim_rssnr_vs_measured']:+.2f}", fontsize=9)
+        ax.set_xlabel("anchor along-track s (km)")
+        ax.grid(alpha=0.3)
+        if k == 0:
+            ax.set_ylabel("bed window mean power, dB rel own surface peak")
+            ax.legend(fontsize=8, loc="lower left")
+    fig.suptitle("bed-window brightness along-track: measured vs sim "
+                 f"(constant vs RSSNR-driven bed gamma), {CORR_WIN_M:.0f} m "
+                 "smoothing")
+    fig.tight_layout()
+    fp = out / "bed_brightness.png"
+    fig.savefig(fp, dpi=130)
+    plt.close(fig)
+    return fp
 
 
 # ========================================================================
@@ -796,25 +1146,35 @@ def fig_decomposition(out, preps, analyses):
 # ========================================================================
 def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         surf_rough=True, out_root=None, force=False, make_report=True,
-        picked_bed=False):
+        picked_bed=False, gamma_rssnr=False):
     n_traces = n_traces or (N_TRACES_PILOT if segment == "pilot"
                             else N_TRACES_FULL)
-    tag = case_tag(picked_bed)
+    tag = case_tag(picked_bed, gamma_rssnr)
     out = Path(out_root or OUT_DEFAULT) / (segment + tag)
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
     case = f"{CASE_PREFIX}_{segment}{tag}"
-    ref = None
+    axis = ref_bed_picks() if (picked_bed or gamma_rssnr) else None
+    ref = axis if picked_bed else None
     if picked_bed:
-        ref = ref_bed_picks()
         print(f"picked bed: reference pass {ref['pass']} "
               f"({'/'.join(ref['frames'])}), {ref['n']} picks over "
               f"{ref['line_len_km']} km, line gap frac "
               f"{ref['gap_frac_line']:.4f}", flush=True)
+    gmap = None
+    if gamma_rssnr:
+        gmap = build_rssnr_gamma(axis, segment, att)
+        print(f"rssnr gamma: {gmap['n_samples']} samples "
+              f"({gmap['provenance']['source']}), snapshot {RSSNR_SNAPSHOT}, "
+              f"K {gmap['k_db']} dB (K - K_phys "
+              f"{gmap['k_minus_kphys_db']} dB), segment G2 "
+              f"[{gmap['g2_seg_db']['min']} .. {gmap['g2_seg_db']['max']}] "
+              f"dB (med {gmap['g2_seg_db']['med']}), censored "
+              f"{gmap['n_censored']}/{gmap['n_samples']}", flush=True)
     preps, sims, analyses = {}, {}, {}
     for key in ORDER:
         print(f"== {key} ({segment}{tag}) ==", flush=True)
-        p = prep_pass(key, segment, n_traces, ref=ref)
+        p = prep_pass(key, segment, n_traces, ref=ref, gmap=gmap, axis=axis)
         if p["aux"]["picked_bed"]:
             pb = p["aux"]["picked_bed"]
             print(f"  picked bed: residual rms {pb['residual_rms_m']} m "
@@ -830,6 +1190,30 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         preps[key] = p
         sims[key] = simulate_pass(p, runs_dir, att, surf_rough, force)
         analyses[key] = analyze_pass(p, sims[key])
+
+    # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
+    corr_stats = corr_series = None
+    if gamma_rssnr:
+        runs_const = (Path(out_root or OUT_DEFAULT)
+                      / (segment + case_tag(picked_bed)) / "runs")
+        corr_stats, corr_series = {}, {}
+        for key in ORDER:
+            print(f"== {key} constant-gamma companion (cache-first) ==",
+                  flush=True)
+            p_const = dict(preps[key])
+            p_const["gamma_rssnr"] = False
+            sim_c = simulate_pass(p_const, runs_const, att, surf_rough, False)
+            a_const = analyze_pass(preps[key], sim_c)
+            corr_stats[key], corr_series[key] = bed_profile_correlations(
+                preps[key], analyses[key], a_const, gmap, axis)
+            st = corr_stats[key]
+            print(f"  bed-brightness r vs measured: const "
+                  f"{st['r_sim_const_vs_measured']:+.3f} -> RSSNR "
+                  f"{st['r_sim_rssnr_vs_measured']:+.3f} (sanity vs implied: "
+                  f"total {st['r_sim_rssnr_vs_implied']:+.3f}, bed-layer "
+                  f"{st['r_bedlayer_rssnr_vs_implied']:+.3f}; "
+                  f"implied-vs-meas "
+                  f"{st['r_implied_vs_measured']:+.3f})", flush=True)
 
     # ---- metrics ----
     rec = "recorded only"
@@ -884,13 +1268,61 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "threshold": None, "op": "record", "pass": True,
         "per_pass_s": {k: round(sims[k]["wall_s"], 1) for k in ORDER},
         "note": rec}
+    if gamma_rssnr:
+        metrics["rssnr_gamma_mapping"] = {
+            "value": gmap["k_db"], "threshold": None, "op": "record",
+            "pass": True,
+            **{k: gmap[k] for k in
+               ("k_db", "k_phys_db", "k_minus_kphys_db", "g2_const_db",
+                "g2_seg_db", "n_samples", "n_seg", "n_censored",
+                "censored_floor_db", "seg_s_km", "med_sample_spacing_m",
+                "att_db_per_km", "g2_pos_frac_seg",
+                "implied_eff_att_db_per_km")},
+            "snapshot_id": RSSNR_SNAPSHOT,
+            "note": "median-anchored K (dB): |Gamma_bed|^2 = 2*A*H - RSSNR "
+            "+ K; K - K_phys is the absolute-chain gap the anchoring "
+            "absorbs (attenuation + surface-model uncertainty). " + rec}
+        metrics["bed_brightness_correlation"] = {
+            "value": round(float(np.mean(
+                [corr_stats[k]["r_sim_rssnr_vs_measured"]
+                 for k in ORDER])), 3),
+            "threshold": None, "op": "record", "pass": True,
+            "per_pass": corr_stats,
+            "note": "KEY DELIVERABLE (acceptance): along-track Pearson r of "
+            "the ~1 km-smoothed bed-window power profile (dB rel own "
+            "surface peak) between sim and MEASURED, RSSNR-driven vs "
+            "constant bed gamma (same picked-bed geometry). "
+            "r_bedlayer_rssnr_vs_implied is the by-construction sanity "
+            "check (bed-borne layer only -- geometry/speckle-limited); "
+            "r_sim_rssnr_vs_implied uses the TOTAL field, whose bed window "
+            "is surface-clutter-crowded at altitude (the study's own "
+            "finding), so it is expected to degrade low->mid->high; "
+            "r_implied_vs_measured is the data-only ceiling estimate. "
+            + rec}
 
     config = {
         "case": case, "segment": segment, "n_traces": n_traces,
         "att_db_per_km": att, "surf_rough": bool(surf_rough),
         "margin_us": MARGIN_US, "post_bed_window_us": POST_BED_US,
         "chunk_m": CHUNK_M, "picked_bed": bool(picked_bed),
+        "gamma_rssnr": bool(gamma_rssnr),
         "passes": {}, "measured_caveats": MEASURED_CAVEATS}
+    if gamma_rssnr:
+        config["rssnr_gamma"] = {
+            k: gmap[k] for k in
+            ("provenance", "k_db", "k_phys_db", "k_minus_kphys_db",
+             "g2_const_db", "g2_seg_db", "n_samples", "n_seg", "n_censored",
+             "censored_floor_db", "seg_s_km", "med_sample_spacing_m",
+             "att_db_per_km", "g2_pos_frac_seg",
+             "implied_eff_att_db_per_km", "note")}
+        config["rssnr_gamma"]["interpolation"] = (
+            "linear in anchor along-track s (np.interp, edge-clamped), "
+            "cross-track constant; H(x) from the DATASET's surface/bed "
+            "twtts (self-consistent with its RSSNR), not the DEM")
+        config["rssnr_gamma"]["shared_field"] = (
+            "ONE anchor-derived gamma field applied identically to all "
+            "three passes (per-pass fields would confound the altitude "
+            "comparison)")
     if picked_bed:
         config["picked_bed_reference"] = {
             k: ref[k] for k in ("pass", "frames", "eps_ice", "n",
@@ -949,7 +1381,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "refraction); reversed high passes' roll negated; per-pass surface "
         "registration; BedMachine 500 m texture caveat applies. "
         + MEASURED_CAVEATS
-        + (" PICKED BED: " + PICKED_BED_NOTE if picked_bed else ""))
+        + (" PICKED BED: " + PICKED_BED_NOTE if picked_bed else "")
+        + (" RSSNR GAMMA: " + RSSNR_GAMMA_NOTE if gamma_rssnr else ""))
     doc = {"case": case, "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -958,6 +1391,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
 
     figs = [fig_radargrams(out, preps, analyses, segment),
             fig_decomposition(out, preps, analyses)]
+    if gamma_rssnr:
+        figs.insert(0, fig_bed_brightness(out, preps, corr_series,
+                                          corr_stats, segment))
     if make_report:
         _report(out, case, config, metrics, notes, figs)
     ver = VER_ROOT / case
@@ -1029,12 +1465,21 @@ def main():
                     "along-track residual on BedMachine, preserving "
                     "BedMachine's cross-track relief; outputs and cached "
                     f"runs get the {PBED_TAG} suffix")
+    ap.add_argument("--gamma-from-rssnr", action="store_true",
+                    help="drive the bed reflectivity along-track from the "
+                    "required-surface-SNR dataset (anchor line, pinned "
+                    f"icechunk snapshot {RSSNR_SNAPSHOT}): |Gamma|^2 = "
+                    "2*A*H - RSSNR + K, median-anchored K, one shared field "
+                    "for all passes; adds the acceptance analysis vs the "
+                    "constant-gamma companion run; outputs/caches get the "
+                    f"{GRSSNR_TAG} suffix")
     ap.add_argument("--out", default=None)
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     run(segment=args.segment, n_traces=args.n_traces, att=args.att,
         surf_rough=not args.smooth_surface, out_root=args.out,
-        force=args.force, picked_bed=args.picked_bed)
+        force=args.force, picked_bed=args.picked_bed,
+        gamma_rssnr=args.gamma_from_rssnr)
 
 
 if __name__ == "__main__":

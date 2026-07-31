@@ -111,6 +111,35 @@ def _antenna_pattern(rc, scene, track):
     return pattern_args(ant, track.u_at, track.u_ct, roll)
 
 
+def _gamma_map_values(gm, facets, frame):
+    """Per-facet FIELD reflection coefficients from a map-referenced grid.
+
+    ``gm`` is ``(grid, transform, crs)`` -- a 2-D array of signed field
+    coefficients on an affine grid (any CRS). Facet centers are converted
+    local frame -> llh -> map CRS and the grid is sampled bilinearly
+    (edge-clamped). Scenes attach these as ``scene.gamma_maps`` = {interface
+    name: (grid, transform, crs)} (the ``nav_roll`` pattern); consumed by the
+    multilayer coherent path only.
+    """
+    from pyproj import Transformer
+
+    grid, transform, crs = gm
+    grid = np.asarray(grid, np.float64)
+    llh = frame.local_to_llh(facets.centers)
+    x, y = Transformer.from_crs("EPSG:4326", crs, always_xy=True).transform(
+        llh[:, 1], llh[:, 0])
+    cols, rows = (~transform) * (np.asarray(x), np.asarray(y))
+    r = np.clip(rows - 0.5, 0.0, grid.shape[0] - 1.0)
+    c = np.clip(cols - 0.5, 0.0, grid.shape[1] - 1.0)
+    r0 = np.clip(np.floor(r).astype(int), 0, grid.shape[0] - 2)
+    c0 = np.clip(np.floor(c).astype(int), 0, grid.shape[1] - 2)
+    fr, fc = r - r0, c - c0
+    return (grid[r0, c0] * (1 - fr) * (1 - fc)
+            + grid[r0, c0 + 1] * (1 - fr) * fc
+            + grid[r0 + 1, c0] * fr * (1 - fc)
+            + grid[r0 + 1, c0 + 1] * fr * fc)
+
+
 def _roughness_args(iface, facets, k_local, seed):
     """Kernel roughness tuple for one interface, or None when smooth.
 
@@ -268,9 +297,22 @@ def _simulate_multilayer(scene, sim_config):
     sig_all = np.array([(ic.roughness.sigma_m if ic.roughness else 0.0)
                         for ic in ifaces])
 
+    # Per-facet reflectivity maps (scene.gamma_maps: {interface name ->
+    # (grid, transform, crs)}, see _gamma_map_values). Coherent only: the
+    # incoherent path books no target reflectivity by convention.
+    gmaps = getattr(scene, "gamma_maps", None) or {}
+    if gmaps:
+        if not coherent:
+            raise ValueError("scene.gamma_maps requires coherent mode")
+        unknown = set(gmaps) - set(layered.names)
+        if unknown:
+            raise ValueError(f"gamma_maps for unknown interfaces: {unknown}")
+
     outs, drops = [], []
     for j, target in enumerate(layered.interfaces):
         gamma_j = fresnel_normal(eps[j], eps[j + 1])
+        if layered.names[j] in gmaps:
+            gamma_j = _gamma_map_values(gmaps[layered.names[j]], target, frame)
         rough = (_roughness_args(ifaces[j], layered.interfaces[j],
                                  k0 * np.sqrt(eps[j]),
                                  (sim_config.roughness_seed, j))

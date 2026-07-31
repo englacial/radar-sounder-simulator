@@ -145,3 +145,76 @@ with a 1-D profile, and it makes the added bed roughness perfectly
 correlated cross-track (anisotropic). The +63 dB bed-borne mid-column jump
 and the arc density should therefore be read as an UPPER bound on what a
 truly 2-D bed of the same rms would give.
+
+## RSSNR-driven bed reflectivity (`--picked-bed --gamma-from-rssnr`, 2026-07-31)
+
+Full 50 km with the bed reflectivity driven along-track by the
+required-surface-SNR dataset (claude_notes/required_snr_dataset.md; pinned
+icechunk snapshot `3YH47013745B2T5ZZR50`, 111 anchor-line samples at ~1.37 km,
+0 censored, cache `outputs/basal_clutter/rssnr_anchor.npz`). Mapping
+|Gamma_bed|^2(s) dB = 2*A*H(s) − RSSNR(s) + K, H from the dataset's own
+twtts, A = 15 (the run's --att), K **median-anchored** so the segment median
+equals the constant Fresnel −12.9 dB. ONE field shared by all three passes,
+linear along-track interpolation, cross-track constant (picked-bed caveat
+class). Per-facet gamma rides the kernels' blocked scan (commit 7d6292a);
+`scene.gamma_maps` plumbing through simulate(). Outputs:
+`outputs/basal_clutter/full_pbed_rssnr/` (bed_brightness.png + radargrams +
+decomposition + report). Wall 253.5 s (178.7/54.6/20.1), all 15 chunks fresh;
+constant-gamma companion pure cache hits.
+
+### Mapping stats
+
+* **K = +11.39 dB**, K_phys = −10.32, **K − K_phys = +21.71 dB**. With
+  segment-median H = 641 m this implies an **effective one-way attenuation of
+  30.8 dB/km** — independently reproducing run_cross_season's calibrated
+  effective 31 dB/km on a different West Antarctic line. Strong evidence the
+  median anchoring is absorbing exactly the attenuation the b26 value (15)
+  under-books, i.e. the anchoring choice was right.
+* Segment G2 (dB): min −32.5 / p5 −29.8 / med −12.9 (by construction) /
+  p95 +11.7 / max +15.9 — a **~48 dB along-track dynamic range**. 18.9% of
+  segment samples map above 0 dB (unphysical reflectivity): the price of
+  holding A = 15 fixed; with A ≈ 31 the whole profile would shift down ~+2AH
+  and the brights would land near physical values. Recorded, not tuned away.
+
+### Acceptance: bed-window brightness along-track (1 km smoothed, Pearson r)
+
+| pass | sim const vs meas | **sim RSSNR vs meas** | sanity: bed-layer vs implied | implied vs meas (ceiling) |
+|---|---|---|---|---|
+| low  | −0.15 | **+0.76** | +0.91 | +0.87 |
+| mid  | −0.01 | **+0.84** | +0.88 | +0.85 |
+| high | +0.14 | **+0.79** | +0.88 | +0.80 |
+
+**Acceptance criterion met, decisively.** The constant-gamma runs carry
+essentially zero along-track bed-brightness information (r −0.15..+0.14: with
+gamma constant, the sim profile is geometry-only). The RSSNR-driven runs reach
+r = 0.76–0.84 against the measured bed window — close to the data-only
+ceiling (implied-vs-measured 0.80–0.87), i.e. the simulator transports nearly
+all the information the RSSNR profile contains through the full coherent
+chain (refraction, per-facet gamma, picked-bed relief, waveform, SAR-free
+windows). The by-construction sanity (bed-borne layer vs implied) is 0.88–0.91
+— the residual from 1.0 is geometry + speckle + the 1.4 km sampling, and the
+total-field sanity equals it (bed window stays bed-borne-dominated at all
+three altitudes given the ±35 dB gamma range).
+
+### Honest caveats
+
+* The RSSNR sim **overshoots the measured highs by ~5–10 dB** at the bright
+  end (s > 60 km, the G2 > 0 dB zone) on all passes — consistent with the
+  fixed-A error growing away from the median thickness and with the measured
+  bed window compressing toward its clutter/noise floor. Median levels are
+  close (e.g. low: meas −53.9 vs sim −49.8 dB rel surface).
+* RSSNR is surface-referenced: measured surface-power variability leaks into
+  the field with opposite sign. Not separable at this stage.
+* Sampling is ~1.4 km; sub-km bed-brightness texture is not driven, and the
+  bright/dim transitions are linear-in-dB ramps between samples.
+* The pilot-segment numbers (10 km, ~7 independent samples) were noisy and
+  even sign-flipped (low: +0.19 const vs −0.16 RSSNR) — correlations at that
+  scale are not meaningful; the 50 km numbers above are the deliverable.
+
+Mechanically: `--gamma-from-rssnr` composes with `--picked-bed`
+(`_pbed_rssnr` cache/output suffix; constant-gamma metas byte-identical to
+pre-feature caches). Config records snapshot id, fetch provenance, K,
+K−K_phys, censoring policy (floor, not missing-at-random), interpolation and
+sharing choices. Tests: tests/test_rssnr_gamma.py (mapping round-trip,
+censoring floor, snapshot-pin cache rejection, gamma_maps plumbing
+bit-identity); suite 264 unit green.
