@@ -48,6 +48,7 @@ import json
 import shutil
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import matplotlib
@@ -129,6 +130,20 @@ PASSES = {
 }
 ORDER = ["low", "mid", "high"]
 S0_KM = {"pilot": 30.0, "full": 18.0}   # anchor s at segment start (display)
+
+# Synthetic stratospheric pass (--add-30km): the LOW pass's line geometry and
+# picks re-flown as a SMOOTH trajectory at constant SYN30_MSL_M ellipsoidal
+# height (rac platform_z 'msl' convention: 'MSL' is implemented as constant
+# ellipsoidal height -- recorded), roll = 0, same shared 2016 system params
+# (identical fc/B/window/dt across the triplet; the 10 us bed waveform is
+# what the tool simulates everywhere). No measured data exists: it renders
+# as a PREDICTION panel.
+SYN30_KEY = "syn30km"
+SYN30_MSL_M = 30000.0
+PASSES[SYN30_KEY] = {
+    "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
+    "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
+    "synthetic_msl_m": SYN30_MSL_M}
 
 MEASURED_CAVEATS = (
     "Measured references are CSARP_standard. Scout pitfalls recorded: the "
@@ -218,9 +233,10 @@ PICKED_BED_NOTE = (
     "runs are directly comparable.")
 
 
-def case_tag(picked_bed, gamma_rssnr=False):
+def case_tag(picked_bed, gamma_rssnr=False, proc=False):
     return ((PBED_TAG if picked_bed else "")
-            + (GRSSNR_TAG if gamma_rssnr else ""))
+            + (GRSSNR_TAG if gamma_rssnr else "")
+            + (PROC_TAG if proc else ""))
 
 
 def ref_bed_picks():
@@ -557,6 +573,186 @@ def apply_rssnr_gamma(base, axis, gmap):
 
 
 # ========================================================================
+# CSARP_standard-matching processing (--processing standard)
+# ========================================================================
+# THE REAL CHAIN (recorded provenance): motion-compensated f-k migration,
+# sigma_x = 2.5 m SLC, start_eps 3.15 -- read from THIS season's own
+# param_csarp/param_sar structs (scout table, hand-verified ft_wind
+# hanning); then delay-and-sum channel combine and incoherent look
+# averaging rline_rng [-5..5] = 11 looks with dline 6 -> ~14.85 m posting,
+# ~25 m EFFECTIVE along-track resolution (the M24-verified CReSIS standard
+# convention; 11/6 were verified on 2017/2019 P3 param structs and stated
+# for 2016 by the coordinator -- the 2016 combine struct records only
+# method=standard, so 11/6 is a RECORDED ASSUMPTION here, not a 2016
+# param read).
+#
+# OUR CHAIN (as close as the compute-feasible along-track sampling allows):
+# simulate at the PRODUCT posting (~14.85 m -- sim traces land on the
+# measured columns), first-order nadir motion compensation to a smoothed
+# reference track (field *= exp(+2jk dz); the real chain is motion
+# compensated, our focuser is straight-track), then
+# soundersim.processing.focused_sar (straight-track time-domain
+# backprojection == f-k in its validity domain, hann aperture taper) with
+# the ALIAS-LIMITED aperture at the pass's median optical bed range:
+# theta = asin(lam/(4*ds)) is the largest unaliased Doppler half-angle at
+# posting ds, giving ~1.44*ds ~ 21 m hann azimuth resolution -- close to
+# the product's ~25 m effective POST-LOOK resolution (its 2.5 m SLC
+# resolution would need 2.5 m posting: ~40x the compute). Then
+# N_LOOKS_SIM-look stride-1 incoherent averaging (posting preserved; the
+# product's dline-6 decimation is a no-op at matched posting).
+#
+# RECORDED GAPS (an honest list, not silent guesses):
+#  g1 SLC resolution 2.5 m unreachable -> matched at the ~25 m effective
+#     post-look level instead;
+#  g2 fewer independent looks (~2-3 vs the product's ~6-11): speckle
+#     contrast up to ~2x the product's;
+#  g3 focusing is through AIR only (processing.py scope): in-ice migration
+#     is absent -- bed arcs carry a residual quadratic phase (~1 rad at the
+#     aperture edge at altitude, hann-tapered); the real chain migrates
+#     with start_eps 3.15;
+#  g4 motion compensation is first-order nadir-vertical only (dz to a
+#     smoothed track); the real chain compensates full 3-D motion + channel
+#     phase. Cross-track wander enters at second order (~dy^2/2r: mm);
+#  g5 the surface range is inside the bed-range-sized aperture cone ->
+#     specular near-surface Doppler mildly aliased (worst on the low pass,
+#     theta_surf/theta_alias ~ 3.6; the guard warning is caught+recorded);
+#  g6 delay-and-sum channel combine is already inside the sim's array
+#     pattern (M22); no per-channel processing to combine.
+PROC_TAG = "_proc"
+N_LOOKS_SIM = 3
+CHUNK_M_PROC = 3000.0    # fine-posting chunks: ~200 traces/chunk (memory)
+REAL_CHAIN_2016 = {
+    "product": "CSARP_standard",
+    "sar": "motion-compensated f-k migration, sigma_x 2.5 m SLC, start_eps "
+           "3.15 (2016 param_csarp/param_sar, scout-verified)",
+    "combine": "delay-and-sum channels; rline_rng [-5..5] = 11 looks, "
+               "dline 6 -> 14.85 m posting, ~25 m effective along-track "
+               "resolution (M24 CReSIS-standard convention; 11/6 not "
+               "directly read from the 2016 structs -- recorded assumption)",
+    "window": "ft_wind hanning (scout hand-verified)"}
+
+
+def alias_limited_aperture(lam, spacing_m, r_ref_m):
+    """(aperture_m, half_angle_deg): the largest synthetic aperture at range
+    ``r_ref_m`` whose Doppler stays unaliased at along-track sampling
+    ``spacing_m`` -- sin(theta) = lam/(4*ds) (the lambda/4 criterion), L =
+    2 r tan(theta). Azimuth resolution at that limit equals the posting
+    (1.44x with the hann taper)."""
+    st = min(lam / (4.0 * spacing_m), 1.0)
+    theta = float(np.arcsin(st))
+    return 2.0 * r_ref_m * np.tan(theta), float(np.degrees(theta))
+
+
+def _proc_ds(F2, twtt, s, lam):
+    """Minimal coherent Dataset wrapper for soundersim.processing: field
+    (slow_time, twtt) + straight-track positions x = along-track arc length
+    (the focuser uses inter-trace distances only)."""
+    T = F2.shape[0]
+    z = np.zeros(T)
+    return xr.Dataset(
+        {"field": (("slow_time", "twtt"), F2),
+         "power": (("slow_time", "twtt"), np.abs(F2) ** 2)},
+        coords={"slow_time": ("slow_time", np.arange(T, dtype=float)),
+                "twtt": ("twtt", twtt),
+                "x": ("slow_time", np.asarray(s, float)),
+                "y": ("slow_time", z), "z": ("slow_time", z)},
+        attrs={"mode": "coherent", "wavelength": float(lam),
+               "processing": "[]"})
+
+
+def straightness_stats(x, y, z_smooth_resid, win_n):
+    """Straight-track check over sliding aperture-length windows: p95/max
+    horizontal deviation from the window chord, plus the residual vertical
+    deviation AFTER the first-order mocomp (what the focuser cannot see)."""
+    n = len(x)
+    win_n = max(2, min(int(win_n), n - 1))
+    dev = []
+    for a in range(0, n - win_n, max(1, win_n // 2)):
+        b = a + win_n
+        ux, uy = x[b] - x[a], y[b] - y[a]
+        nrm = np.hypot(ux, uy)
+        if nrm == 0:
+            continue
+        dev.append(np.max(np.abs(
+            (x[a:b] - x[a]) * (-uy / nrm) + (y[a:b] - y[a]) * (ux / nrm))))
+    dev = np.asarray(dev) if dev else np.zeros(1)
+    return {"horiz_chord_dev_p95_m": round(float(np.percentile(dev, 95)), 2),
+            "horiz_chord_dev_max_m": round(float(dev.max()), 2),
+            "vert_resid_rms_m": round(float(np.sqrt(np.mean(
+                z_smooth_resid ** 2))), 3)}
+
+
+def process_standard(p, sim):
+    """Apply the CSARP_standard-matching chain (section comment) to the
+    assembled per-layer fields. Returns dict(P, Ps, Pb, twtt, chain)."""
+    from soundersim import processing as proc
+
+    F = sim["field"]                       # (T, nb, 2) complex64
+    twtt = sim["twtt"]
+    lam = p["lam"]
+    s_sim = p["s_m"][p["idx"]]
+    spacing = float(np.median(np.diff(s_sim)))
+    r_bed = float(C * np.nanmedian(p["bot"][p["idx"]]) / 2.0)  # optical range
+    L, theta_deg = alias_limited_aperture(lam, spacing, r_bed)
+    r_surf = float(C * np.nanmedian(p["surf"][p["idx"]]) / 2.0)
+
+    # first-order nadir mocomp: dz to a ~2-aperture smoothed reference track
+    z = np.asarray(p["base"].nav_llh[:, 2], np.float64)
+    w = max(3, int(round(2.0 * L / spacing)))
+    dz = z - ndimage.uniform_filter1d(z, w, mode="nearest")
+    k0 = 2.0 * np.pi / lam
+    ph = np.exp(2j * k0 * dz).astype(np.complex64)[:, None]
+
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    px, py = tr.transform(p["base"].nav_llh[:, 1], p["base"].nav_llh[:, 0])
+    straight = straightness_stats(np.asarray(px), np.asarray(py), dz,
+                                  round(L / spacing))
+
+    layers = []
+    with warnings.catch_warnings(record=True) as wlist:
+        warnings.simplefilter("always")
+        for li in range(F.shape[-1]):
+            ds = _proc_ds(F[..., li] * ph, twtt, s_sim, lam)
+            layers.append(proc.focused_sar(ds, aperture_m=L, window="hann")
+                          .field.values)
+    caught = sorted({str(w.message)[:200] for w in wlist})
+    Fs, Fb = layers
+
+    def look(P):
+        return ndimage.uniform_filter1d(P, N_LOOKS_SIM, axis=0,
+                                        mode="nearest")
+
+    P = look(np.abs(Fs + Fb) ** 2)
+    Ps, Pb = look(np.abs(Fs) ** 2), look(np.abs(Fb) ** 2)
+    chain = {
+        "real_chain": REAL_CHAIN_2016,
+        "sim_posting_m": round(spacing, 3),
+        "aperture_m": round(L, 1), "half_angle_deg": round(theta_deg, 3),
+        "aperture_traces": int(round(L / spacing)) + 1,
+        "azimuth_res_hann_m": round(1.44 * spacing, 1),
+        "surface_alias_ratio": round(
+            np.degrees(np.arctan((L / 2.0) / r_surf)) / theta_deg, 2),
+        "n_looks_sim": N_LOOKS_SIM,
+        "look_span_m": round(N_LOOKS_SIM * spacing, 1),
+        "mocomp": {"kind": "first-order nadir (dz to smoothed track), "
+                           "field *= exp(+2jk dz)",
+                   "dz_rms_m": round(float(np.sqrt(np.mean(dz ** 2))), 3),
+                   "smooth_win_m": round(w * spacing, 0)},
+        "straight_track_check": straight,
+        "focuser_warnings": caught,
+        "gaps": "g1 SLC 2.5 m res unreachable (matched at ~25 m post-look "
+                "level); g2 ~2-3 vs ~6-11 independent looks (speckle "
+                "contrast up to ~2x); g3 air-only focusing (no in-ice "
+                "migration, real chain start_eps 3.15); g4 first-order "
+                "vertical mocomp only; g5 near-surface Doppler mildly "
+                "aliased inside the bed-range aperture (see "
+                "surface_alias_ratio); g6 channel combine inside the sim "
+                "array pattern",
+    }
+    return {"P": P, "Ps": Ps, "Pb": Pb, "twtt": twtt, "chain": chain}
+
+
+# ========================================================================
 # per-pass preparation
 # ========================================================================
 def _retry(what, fn, tries=3, delay_s=20.0):
@@ -568,6 +764,37 @@ def _retry(what, fn, tries=3, delay_s=20.0):
                 raise
             print(f"  [retry {i + 1}/{tries - 1}] {what}: {e}", flush=True)
             time.sleep(delay_s * (i + 1))
+
+
+def synth_altitude_fsub(fsub, bot_sub, alt_m):
+    """Rewrite a real pass's sliced frames as a SYNTHETIC smooth pass at
+    constant ``alt_m`` ellipsoidal height: platform Elevation constant,
+    Roll = 0 (smooth trajectory), surface twtt recomputed from the real
+    surface ELEVATION (Elevation - c*Surface/2), and the bed pick's delay
+    BELOW the surface preserved. Line geometry, picks and system params stay
+    the real ones; the measured Data is geometrically meaningless for the
+    synthetic pass and must not be compared. Returns (fsub, bot, note)."""
+    surf = np.asarray(fsub.Surface.values, np.float64)
+    elev = np.asarray(fsub.Elevation.values, np.float64)
+    z_surf = elev - surf * C / 2.0
+    new_surf = 2.0 * (alt_m - z_surf) / C
+    if not (new_surf > 0).all():
+        raise ValueError(f"synthetic altitude {alt_m} m is not above the "
+                         "surface everywhere")
+    new_bot = new_surf + (bot_sub - surf)
+    fsub = fsub.assign(
+        Elevation=xr.zeros_like(fsub.Elevation) + alt_m,
+        Surface=xr.zeros_like(fsub.Surface) + new_surf,
+        Roll=xr.zeros_like(fsub.Roll))
+    note = {"synthetic_msl_m": alt_m,
+            "convention": "constant ELLIPSOIDAL height (rac platform_z "
+            "'msl' convention), roll = 0 smooth trajectory; surface/bed "
+            "twtts recomputed from the real surface elevation and the real "
+            "bed delay below surface; carrier pass: low (anchor line), "
+            "shared 2016 system params (identical fc/B/window/dt across "
+            "the triplet); measured Data untouched but MEANINGLESS here",
+            "agl_med_m": round(float(np.nanmedian(alt_m - z_surf)), 0)}
+    return fsub, new_bot, note
 
 
 def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
@@ -592,12 +819,17 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
     return rc_sim, rc_frame, b0
 
 
-def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None):
+def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
+              fine_posting=False):
     """Slice (+reverse) the pass's frames onto the common window, derive the
     reach and grids, and build the base scene (REMA + BedMachine, cached).
     ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene;
     ``gmap`` (build_rssnr_gamma, with ``axis`` = ref_bed_picks as the
-    along-track axis) attaches the RSSNR-driven bed gamma grid."""
+    along-track axis) attaches the RSSNR-driven bed gamma grid.
+    ``fine_posting`` (--processing standard) simulates EVERY measured trace
+    (~14.85 m, the product posting: sim columns land on the measured
+    columns). A ``synthetic_msl_m`` pass spec rewrites the geometry via
+    synth_altitude_fsub."""
     spec = PASSES[key]
     parts = spec[segment]
     fsubs, bots, tw_ref = [], [], None
@@ -627,6 +859,12 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None):
         roll_note = ("pass flown backwards: slices reversed and nav roll "
                      "NEGATED (roll rotates about the nav-order along-track "
                      "axis, which reversal flips)")
+    synth_note = None
+    if spec.get("synthetic_msl_m"):
+        fsub, bot_sub, synth_note = synth_altitude_fsub(
+            fsub, bot_sub, spec["synthetic_msl_m"])
+    if fine_posting:
+        n_traces = int(fsub.sizes["slow_time"])
 
     params = rac.mcords_params(SEASON, spec["param_frame"])
     wf = params["waveform"]
@@ -677,6 +915,7 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None):
             "rc_frame": rc_frame, "b0": b0, "base": base, "aux": aux,
             "idx": idx, "s_m": s, "agl": agl, "r_min": r_min,
             "picked_bed": bool(ref), "gamma_rssnr": bool(gmap),
+            "proc": bool(fine_posting), "synthetic": synth_note,
             "h_med": float(np.nanmedian(agl)), "thick_med": thick_med,
             "tw_m": tw_ref}
 
@@ -685,10 +924,13 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None):
 # chunked simulation (pilot = 1 chunk; 50 km segment = ~5 identical chunks)
 # ========================================================================
 def chunk_rows(p):
-    """Split the sim trace indices into ~CHUNK_M along-track chunks."""
+    """Split the sim trace indices into along-track chunks (~CHUNK_M, or
+    ~CHUNK_M_PROC at fine posting: ~200 traces/chunk bounds kernel memory,
+    and the shorter DEM windows cut wasted facet work)."""
     s_sel = p["s_m"][p["idx"]]
     track = float(s_sel[-1] - s_sel[0])
-    n_chunks = max(1, int(round(track / CHUNK_M)))
+    chunk_m = CHUNK_M_PROC if p.get("proc") else CHUNK_M
+    n_chunks = max(1, int(round(track / chunk_m)))
     edges = s_sel[0] + track * np.arange(1, n_chunks) / n_chunks
     which = np.searchsorted(edges, s_sel)
     return [np.where(which == c)[0] for c in range(n_chunks)]
@@ -756,7 +998,7 @@ def simulate_pass(p, runs_dir, att, surf_rough, force):
         scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"],
                             gamma=p["gamma_rssnr"])
         rid = (f"{p['key']}_{p['segment']}"
-               f"{case_tag(p['picked_bed'], p['gamma_rssnr'])}"
+               f"{case_tag(p['picked_bed'], p['gamma_rssnr'], p['proc'])}"
                f"_c{ci:02d}"
                + ("_srough" if surf_rough else "")
                + (f"_att{att:g}" if att != rac.ATT_DB_PER_KM else ""))
@@ -872,13 +1114,19 @@ def rel_mean_profile(P, twtt, dt, t_ref, norm, lo_us=-1.5, hi_us=14.5):
     return rel_us, 10.0 * np.log10(np.maximum(prof, 1e-30))
 
 
-def analyze_pass(p, sim):
+def analyze_pass(p, sim, proc=None):
     """Per-pass sim-vs-measured clutter metrics + per-interface (surface- vs
-    bed-borne) decomposition + profiles for the figures."""
+    bed-borne) decomposition + profiles for the figures. ``proc``
+    (process_standard output) analyzes the PROCESSED powers on the same
+    lattice; a synthetic pass (p['synthetic']) skips every measured-side
+    quantity (no measured data exists at that geometry)."""
     tw, dtf = sim["twtt"], p["rc_frame"].dt
-    F = sim["field"]
-    P = np.abs(F.sum(-1)) ** 2
-    Ps, Pb = np.abs(F[..., 0]) ** 2, np.abs(F[..., 1]) ** 2
+    if proc is not None:
+        P, Ps, Pb = proc["P"], proc["Ps"], proc["Pb"]
+    else:
+        F = sim["field"]
+        P = np.abs(F.sum(-1)) ** 2
+        Ps, Pb = np.abs(F[..., 0]) ** 2, np.abs(F[..., 1]) ** 2
     surf_pick = p["surf"][p["idx"]]
 
     # per-pass surface registration (scout pitfall 5: never shared)
@@ -906,42 +1154,48 @@ def analyze_pass(p, sim):
     verdict = ("surface-borne" if dmid > 3.0 else
                "bed-borne" if dmid < -3.0 else "mixed")
 
-    # measured: ALL traces of the segment, windows on its OWN picks
-    meas = np.asarray(p["fsub"].Data.values, np.float64)
-    tw_m, dt_m = p["tw_m"], p["dt"]
-    m_meas = clutter_metrics(meas, tw_m, dt_m, p["surf"], p["bot"])
-    n_m = meas.shape[0]
-    floor = _wmean(meas, tw_m, dt_m,
-                   np.full(n_m, tw_m[-1] - FLOOR_TAIL_LO_US * 1e-6),
-                   np.full(n_m, tw_m[-1] - FLOOR_TAIL_HI_US * 1e-6))
-    floor_db = _med_db_rel(floor, m_meas["_spk"])
-    noise_limited = bool(m_meas["midcol_rel_surf_db"] - floor_db < 3.0)
-
     profs = {
         "sim_total": rel_mean_profile(P, tw, dtf, t_s, spk),
         "sim_surface": rel_mean_profile(Ps, tw, dtf, t_s, spk),
         "sim_bed": rel_mean_profile(Pb, tw, dtf, t_s, spk),
-        "measured": rel_mean_profile(meas, tw_m, dt_m, p["surf"],
-                                     m_meas["_spk"]),
     }
     clean = {k: round(v, 2) for k, v in m_sim.items() if not k.startswith("_")}
-    cleanm = {k: round(v, 2) for k, v in m_meas.items()
-              if not k.startswith("_")}
 
     def _prof_db(m):
         with np.errstate(divide="ignore", invalid="ignore"):
             r = 10.0 * np.log10(m["_bed"] / m["_spk"])
         return np.where(np.isfinite(r), r, np.nan)
 
+    if p.get("synthetic"):
+        # no measured data exists at the synthetic geometry
+        meas = m_meas = cleanm = floor_db = noise_limited = None
+        meas_prof = None
+    else:
+        # measured: ALL traces of the segment, windows on its OWN picks
+        meas = np.asarray(p["fsub"].Data.values, np.float64)
+        tw_m, dt_m = p["tw_m"], p["dt"]
+        m_meas = clutter_metrics(meas, tw_m, dt_m, p["surf"], p["bot"])
+        n_m = meas.shape[0]
+        floor = _wmean(meas, tw_m, dt_m,
+                       np.full(n_m, tw_m[-1] - FLOOR_TAIL_LO_US * 1e-6),
+                       np.full(n_m, tw_m[-1] - FLOOR_TAIL_HI_US * 1e-6))
+        floor_db = round(_med_db_rel(floor, m_meas["_spk"]), 2)
+        noise_limited = bool(m_meas["midcol_rel_surf_db"] - floor_db < 3.0)
+        profs["measured"] = rel_mean_profile(meas, tw_m, dt_m, p["surf"],
+                                             m_meas["_spk"])
+        cleanm = {k: round(v, 2) for k, v in m_meas.items()
+                  if not k.startswith("_")}
+        meas_prof = _prof_db(m_meas)
+
     with np.errstate(divide="ignore", invalid="ignore"):
         blp = 10.0 * np.log10(bedlayer_bed / spk)
     return {"gate": gate, "sim": clean, "meas": cleanm,
             "sim_bed_prof_db": _prof_db(m_sim),
-            "meas_bed_prof_db": _prof_db(m_meas),
+            "meas_bed_prof_db": meas_prof,
             "sim_bedlayer_prof_db": np.where(np.isfinite(blp), blp, np.nan),
             "decomposition": {k: {kk: round(vv, 2) for kk, vv in v.items()}
                               for k, v in dec.items()},
-            "verdict": verdict, "floor_db": round(floor_db, 2),
+            "verdict": verdict, "floor_db": floor_db,
             "meas_noise_limited": noise_limited,
             "bed_delay_med_us": round(float(np.nanmedian(
                 (p["bot"] - p["surf"]))) * 1e6, 2),
@@ -1007,15 +1261,19 @@ def bed_profile_correlations(p, a, a_const, gmap, axis):
     return stats, series
 
 
-def fig_bed_brightness(out, preps, corr_series, corr_stats, segment):
-    """Per pass: bed-window power along-track (dB rel own surface peak,
-    ~1 km smoothed) -- measured vs constant-gamma sim vs RSSNR-gamma sim vs
-    the RSSNR-implied pattern (shape prediction, median-aligned to the RSSNR
-    sim)."""
+def fig_bed_brightness(out, preps, corr_series, corr_stats, segment,
+                       syn=None):
+    """Per measured pass: bed-window power along-track (dB rel own surface
+    peak, ~1 km smoothed) -- measured vs constant-gamma sim vs RSSNR-gamma
+    sim vs the RSSNR-implied pattern (shape prediction, median-aligned to
+    the RSSNR sim). ``syn`` = (key, series) adds a PREDICTION panel
+    (simulated only -- no measured curve exists)."""
     s0 = S0_KM[segment]
-    fig, axs = plt.subplots(1, len(ORDER), figsize=(5.4 * len(ORDER), 4.6),
+    keys = list(corr_series)
+    ncol = len(keys) + (1 if syn else 0)
+    fig, axs = plt.subplots(1, ncol, figsize=(5.4 * ncol, 4.6),
                             sharey=True, squeeze=False)
-    for k, key in enumerate(ORDER):
+    for k, key in enumerate(keys):
         ax = axs[0, k]
         se, st = corr_series[key], corr_stats[key]
         s_km = s0 + se["s_sim"] / 1e3
@@ -1037,6 +1295,21 @@ def fig_bed_brightness(out, preps, corr_series, corr_stats, segment):
         if k == 0:
             ax.set_ylabel("bed window mean power, dB rel own surface peak")
             ax.legend(fontsize=8, loc="lower left")
+    if syn:
+        key, se = syn
+        ax = axs[0, len(keys)]
+        s_km = s0 + se["s_sim"] / 1e3
+        imp = se["implied"] + (np.nanmedian(se["sim_rssnr"])
+                               - np.nanmedian(se["implied"]))
+        ax.plot(s_km, se["sim_rssnr"], color="tab:red", lw=1.3,
+                label="sim RSSNR gamma (prediction)")
+        ax.plot(s_km, imp, color="0.45", lw=1.0, ls="--",
+                label="RSSNR-implied (median-aligned)")
+        ax.set_title(f"{key} ({preps[key]['h_med']:.0f} m AGL) -- "
+                     "PREDICTION (no measured)", fontsize=9)
+        ax.set_xlabel("anchor along-track s (km)")
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8, loc="lower left")
     fig.suptitle("bed-window brightness along-track: measured vs sim "
                  f"(constant vs RSSNR-driven bed gamma), {CORR_WIN_M:.0f} m "
                  "smoothing")
@@ -1051,29 +1324,38 @@ def fig_bed_brightness(out, preps, corr_series, corr_stats, segment):
 # figures (grayscale radargrams = sequential magnitude; profile series in
 # fixed categorical order with legend, one axis)
 # ========================================================================
-def fig_radargrams(out, preps, analyses, segment):
+def fig_radargrams(out, preps, analyses, segment, keys=None):
     """Measured (top) vs simulated (bottom) per pass, shared surface-
-    referenced twtt axis and one shared dB-rel-surface color scale."""
+    referenced twtt axis and one shared dB-rel-surface color scale. A
+    synthetic pass has no measured data: its top panel is a placeholder."""
+    keys = keys or ORDER
     y_lo, y_hi = -1.0, 13.5
     vmin, vmax = -90.0, 5.0
     s0 = S0_KM[segment]
-    fig, axs = plt.subplots(2, len(ORDER), figsize=(5.4 * len(ORDER), 8.8),
+    fig, axs = plt.subplots(2, len(keys), figsize=(5.4 * len(keys), 8.8),
                             sharey=True, squeeze=False)
-    for k, key in enumerate(ORDER):
+    for k, key in enumerate(keys):
         p, a = preps[key], analyses[key]
-        # measured: dB rel per-pass median surface peak
-        ref_m = 10.0 * np.log10(max(np.nanmedian(
-            _wpeak(a["meas_arr"], p["tw_m"], p["dt"], p["surf"],
-                   SURF_WIN_US)), 1e-300))
-        surf_med = float(np.nanmedian(p["surf"]))
-        rel = (p["tw_m"] - surf_med) * 1e6
-        m = (rel >= y_lo) & (rel <= y_hi)
-        s_km = s0 + p["s_m"] / 1e3
         ax = axs[0, k]
-        ax.imshow(_db(a["meas_arr"])[:, m].T - ref_m, aspect="auto",
-                  cmap="gray", vmin=vmin, vmax=vmax,
-                  extent=[s_km[0], s_km[-1], rel[m][-1], rel[m][0]])
-        ax.set_title(f"{key} measured ({p['h_med']:.0f} m AGL)", fontsize=10)
+        if a["meas_arr"] is None:
+            ax.set_axis_off()
+            ax.text(0.5, 0.5, f"no measured data\n({key}: simulated "
+                    "prediction only)", ha="center", va="center",
+                    fontsize=11, transform=ax.transAxes)
+        else:
+            # measured: dB rel per-pass median surface peak
+            ref_m = 10.0 * np.log10(max(np.nanmedian(
+                _wpeak(a["meas_arr"], p["tw_m"], p["dt"], p["surf"],
+                       SURF_WIN_US)), 1e-300))
+            surf_med = float(np.nanmedian(p["surf"]))
+            rel = (p["tw_m"] - surf_med) * 1e6
+            m = (rel >= y_lo) & (rel <= y_hi)
+            s_km = s0 + p["s_m"] / 1e3
+            ax.imshow(_db(a["meas_arr"])[:, m].T - ref_m, aspect="auto",
+                      cmap="gray", vmin=vmin, vmax=vmax,
+                      extent=[s_km[0], s_km[-1], rel[m][-1], rel[m][0]])
+            ax.set_title(f"{key} measured ({p['h_med']:.0f} m AGL)",
+                         fontsize=10)
         # sim: dB rel per-pass median simulated surface peak
         twtt_s = p["rc_frame"].t0 + np.arange(
             p["rc_frame"].n_samples) * p["rc_frame"].dt
@@ -1102,7 +1384,7 @@ def fig_radargrams(out, preps, analyses, segment):
     return fp
 
 
-def fig_decomposition(out, preps, analyses):
+def fig_decomposition(out, preps, analyses, keys=None):
     """Per pass: measured vs sim total vs the sim's per-interface split
     (surface-borne vs bed-borne) mean-power profiles below the surface."""
     series = [("measured", "measured", dict(color="black", lw=1.8)),
@@ -1111,13 +1393,15 @@ def fig_decomposition(out, preps, analyses):
                dict(color="tab:orange", lw=1.2, ls="--")),
               ("sim_bed", "sim bed-borne",
                dict(color="tab:green", lw=1.2, ls="-."))]
-    fig, axs = plt.subplots(1, len(ORDER), figsize=(5.2 * len(ORDER), 4.8),
+    keys = keys or ORDER
+    fig, axs = plt.subplots(1, len(keys), figsize=(5.2 * len(keys), 4.8),
                             sharey=True, squeeze=False)
-    for k, key in enumerate(ORDER):
+    for k, key in enumerate(keys):
         ax = axs[0, k]
         a = analyses[key]
         for pk, label, st in series:
-            ax.plot(*a["profs"][pk], label=label, **st)
+            if pk in a["profs"]:
+                ax.plot(*a["profs"][pk], label=label, **st)
         tb = a["bed_delay_med_us"]
         ax.axvspan(1.0, tb - MID_HI_US, color="tab:blue", alpha=0.06,
                    label="mid-column window" if k == 0 else None)
@@ -1146,10 +1430,13 @@ def fig_decomposition(out, preps, analyses):
 # ========================================================================
 def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         surf_rough=True, out_root=None, force=False, make_report=True,
-        picked_bed=False, gamma_rssnr=False):
+        picked_bed=False, gamma_rssnr=False, processing="none",
+        add_30km=False):
+    proc = processing == "standard"
+    order = ORDER + ([SYN30_KEY] if add_30km else [])
     n_traces = n_traces or (N_TRACES_PILOT if segment == "pilot"
                             else N_TRACES_FULL)
-    tag = case_tag(picked_bed, gamma_rssnr)
+    tag = case_tag(picked_bed, gamma_rssnr, proc)
     out = Path(out_root or OUT_DEFAULT) / (segment + tag)
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
@@ -1171,10 +1458,15 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"[{gmap['g2_seg_db']['min']} .. {gmap['g2_seg_db']['max']}] "
               f"dB (med {gmap['g2_seg_db']['med']}), censored "
               f"{gmap['n_censored']}/{gmap['n_samples']}", flush=True)
-    preps, sims, analyses = {}, {}, {}
-    for key in ORDER:
+    preps, sims, analyses, procs = {}, {}, {}, {}
+    for key in order:
         print(f"== {key} ({segment}{tag}) ==", flush=True)
-        p = prep_pass(key, segment, n_traces, ref=ref, gmap=gmap, axis=axis)
+        p = prep_pass(key, segment, n_traces, ref=ref, gmap=gmap, axis=axis,
+                      fine_posting=proc)
+        if p["synthetic"]:
+            print(f"  SYNTHETIC pass: {p['synthetic']['synthetic_msl_m']:.0f}"
+                  f" m constant ellipsoidal height, roll 0, AGL med "
+                  f"{p['synthetic']['agl_med_m']:.0f} m", flush=True)
         if p["aux"]["picked_bed"]:
             pb = p["aux"]["picked_bed"]
             print(f"  picked bed: residual rms {pb['residual_rms_m']} m "
@@ -1186,16 +1478,26 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         print(f"  reach: surface {p['reach']['surface_reach_m']:.0f} m, bed "
               f"{p['reach']['bed_reach_m']:.0f} m -> ct "
               f"±{p['reach']['ct_m']:.0f} m; spacing {p['spacing']:.2f} m; "
+              f"n_traces {len(p['idx'])}; "
               f"n_samples_sim {p['rc_sim'].n_samples}", flush=True)
         preps[key] = p
         sims[key] = simulate_pass(p, runs_dir, att, surf_rough, force)
-        analyses[key] = analyze_pass(p, sims[key])
+        if proc:
+            procs[key] = process_standard(p, sims[key])
+            ch = procs[key]["chain"]
+            print(f"  processed: aperture {ch['aperture_m']:.0f} m "
+                  f"({ch['aperture_traces']} traces, half-angle "
+                  f"{ch['half_angle_deg']:.2f} deg), {ch['n_looks_sim']} "
+                  f"looks, mocomp dz rms {ch['mocomp']['dz_rms_m']} m",
+                  flush=True)
+        analyses[key] = analyze_pass(p, sims[key], proc=procs.get(key))
 
     # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
     corr_stats = corr_series = None
     if gamma_rssnr:
         runs_const = (Path(out_root or OUT_DEFAULT)
-                      / (segment + case_tag(picked_bed)) / "runs")
+                      / (segment + case_tag(picked_bed, False, proc))
+                      / "runs")
         corr_stats, corr_series = {}, {}
         for key in ORDER:
             print(f"== {key} constant-gamma companion (cache-first) ==",
@@ -1203,7 +1505,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             p_const = dict(preps[key])
             p_const["gamma_rssnr"] = False
             sim_c = simulate_pass(p_const, runs_const, att, surf_rough, False)
-            a_const = analyze_pass(preps[key], sim_c)
+            proc_c = process_standard(preps[key], sim_c) if proc else None
+            a_const = analyze_pass(preps[key], sim_c, proc=proc_c)
             corr_stats[key], corr_series[key] = bed_profile_correlations(
                 preps[key], analyses[key], a_const, gmap, axis)
             st = corr_stats[key]
@@ -1218,7 +1521,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     # ---- metrics ----
     rec = "recorded only"
     metrics = {}
-    for key in ORDER:
+    for key in order:
         p, a, s = preps[key], analyses[key], sims[key]
         g = a["gate"]
         metrics[f"surface_alignment_{key}"] = {
@@ -1266,8 +1569,30 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     metrics["simulation_wall_s"] = {
         "value": round(sum(s["wall_s"] for s in sims.values()), 1),
         "threshold": None, "op": "record", "pass": True,
-        "per_pass_s": {k: round(sims[k]["wall_s"], 1) for k in ORDER},
+        "per_pass_s": {k: round(sims[k]["wall_s"], 1) for k in order},
         "note": rec}
+    if add_30km:
+        a30 = analyses[SYN30_KEY]
+        d30 = a30["decomposition"]
+        bed_over_clutter = round(d30["bed"]["bed_rel_surf_db"]
+                                 - d30["surface"]["bed_rel_surf_db"], 2)
+        metrics["syn30km_bed_visibility"] = {
+            "value": bed_over_clutter, "threshold": None, "op": "record",
+            "pass": True,
+            "bed_over_surface_clutter_in_bed_window_db": bed_over_clutter,
+            "bedpeak_over_midcol_db": round(
+                -a30["sim"]["scout_midcol_over_bedpeak_db"], 2),
+            "bed_rel_surf_db": a30["sim"]["bed_rel_surf_db"],
+            "midcol_rel_surf_db": a30["sim"]["midcol_rel_surf_db"],
+            "decomposition_db": d30, "midcol_verdict": a30["verdict"],
+            "agl_med_m": round(preps[SYN30_KEY]["h_med"], 0),
+            "note": "KEY DELIVERABLE (30 km prediction, clutter-limited "
+            "analysis -- no receiver-noise model): bed-borne minus "
+            "surface-borne power in the BED window (median dB; > 0 means "
+            "the bed beats the surface clutter arriving at the same "
+            "delay), plus bed peak over mid-column clutter (the scout "
+            "contrast metric, sign-flipped). Best-model config: picked "
+            "bed + RSSNR gamma. " + rec}
     if gamma_rssnr:
         metrics["rssnr_gamma_mapping"] = {
             "value": gmap["k_db"], "threshold": None, "op": "record",
@@ -1335,7 +1660,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "is also the anchor line's own flight. ONE reference pass is "
             "applied identically to all three simulations -- never per-pass "
             "beds.")
-    for key in ORDER:
+    for key in order:
         p, s = preps[key], sims[key]
         config["passes"][key] = {
             "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
@@ -1356,7 +1681,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "dropped_power_fraction": s["dropped_power_fraction"],
             "surf_fill_frac": p["aux"]["surf_fill"],
             "bed_clamp_frac": p["aux"]["clamp_frac"],
-            "picked_bed": p["aux"]["picked_bed"]}
+            "picked_bed": p["aux"]["picked_bed"],
+            "synthetic": p["synthetic"]}
+        if proc:
+            config["passes"][key]["processing"] = procs[key]["chain"]
     if segment == "pilot":
         config["full_projection"] = {
             k: {"wall_s_projected": round(sims[k]["wall_s"] * 5.0, 1),
@@ -1382,18 +1710,43 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "registration; BedMachine 500 m texture caveat applies. "
         + MEASURED_CAVEATS
         + (" PICKED BED: " + PICKED_BED_NOTE if picked_bed else "")
-        + (" RSSNR GAMMA: " + RSSNR_GAMMA_NOTE if gamma_rssnr else ""))
+        + (" RSSNR GAMMA: " + RSSNR_GAMMA_NOTE if gamma_rssnr else "")
+        + (" PROCESSING: CSARP_standard-matching chain applied identically "
+           "to every simulated pass (measured panels are already the "
+           "standard product); the real chain, our chain and the recorded "
+           "gap list g1-g6 are in each pass's config 'processing' block."
+           if proc else "")
+        + (f" 30 KM: synthetic smooth pass at {SYN30_MSL_M:.0f} m constant "
+           "ellipsoidal height on the same line (prediction only -- no "
+           "measured data)." if add_30km else ""))
     doc = {"case": case, "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
     (out / "metrics.json").write_text(json.dumps(doc, indent=1) + "\n")
     (out / "run_config.json").write_text(json.dumps(config, indent=1) + "\n")
 
-    figs = [fig_radargrams(out, preps, analyses, segment),
-            fig_decomposition(out, preps, analyses)]
+    figs = [fig_radargrams(out, preps, analyses, segment, keys=order),
+            fig_decomposition(out, preps, analyses, keys=order)]
     if gamma_rssnr:
+        syn = None
+        if add_30km:
+            p30, a30 = preps[SYN30_KEY], analyses[SYN30_KEY]
+            s30 = p30["s_m"][p30["idx"]]
+            tr = Transformer.from_crs("EPSG:4326", "EPSG:3031",
+                                      always_xy=True)
+            px, py = tr.transform(p30["base"].nav_llh[:, 1],
+                                  p30["base"].nav_llh[:, 0])
+            s_anchor = project_to_track(px, py, axis["x"], axis["y"],
+                                        axis["s"])
+            syn = (SYN30_KEY, {
+                "s_sim": s30,
+                "sim_rssnr": _smooth_db(s30, a30["sim_bed_prof_db"]),
+                "implied": (np.interp(s_anchor, gmap["s"], gmap["g2_db"])
+                            - 2.0 * gmap["att_db_per_km"]
+                            * np.interp(s_anchor, gmap["s"],
+                                        gmap["thick_m"]) / 1e3)})
         figs.insert(0, fig_bed_brightness(out, preps, corr_series,
-                                          corr_stats, segment))
+                                          corr_stats, segment, syn=syn))
     if make_report:
         _report(out, case, config, metrics, notes, figs)
     ver = VER_ROOT / case
@@ -1402,9 +1755,11 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     for f in figs:
         shutil.copy2(f, ver / f.name)
     print("clutter (midcol rel surf, meas/sim dB): " + " | ".join(
-        f"{k}: {analyses[k]['meas']['midcol_rel_surf_db']:+.1f}/"
-        f"{analyses[k]['sim']['midcol_rel_surf_db']:+.1f} "
-        f"[{analyses[k]['verdict']}]" for k in ORDER), flush=True)
+        (f"{k}: "
+         + (f"{analyses[k]['meas']['midcol_rel_surf_db']:+.1f}"
+            if analyses[k]["meas"] else "----")
+         + f"/{analyses[k]['sim']['midcol_rel_surf_db']:+.1f} "
+         f"[{analyses[k]['verdict']}]") for k in order), flush=True)
     return metrics, config, out
 
 
@@ -1473,13 +1828,28 @@ def main():
                     "for all passes; adds the acceptance analysis vs the "
                     "constant-gamma companion run; outputs/caches get the "
                     f"{GRSSNR_TAG} suffix")
+    ap.add_argument("--processing", choices=["none", "standard"],
+                    default="none",
+                    help="'standard': simulate at the product posting "
+                    "(~14.85 m, every measured trace) and apply the "
+                    "CSARP_standard-matching chain (mocomp + straight-track "
+                    "focused SAR at the alias-limited aperture + "
+                    f"{N_LOOKS_SIM}-look averaging) identically to every "
+                    "simulated pass; recorded real-chain/gap list in the "
+                    f"config; outputs/caches get the {PROC_TAG} suffix")
+    ap.add_argument("--add-30km", action="store_true",
+                    help="add a SYNTHETIC smooth pass at "
+                    f"{SYN30_MSL_M:.0f} m constant ellipsoidal height on "
+                    "the same line (same 2016 system params, roll 0): a "
+                    "prediction panel -- no measured data exists")
     ap.add_argument("--out", default=None)
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     run(segment=args.segment, n_traces=args.n_traces, att=args.att,
         surf_rough=not args.smooth_surface, out_root=args.out,
         force=args.force, picked_bed=args.picked_bed,
-        gamma_rssnr=args.gamma_from_rssnr)
+        gamma_rssnr=args.gamma_from_rssnr, processing=args.processing,
+        add_30km=args.add_30km)
 
 
 if __name__ == "__main__":

@@ -218,3 +218,90 @@ K−K_phys, censoring policy (floor, not missing-at-random), interpolation and
 sharing choices. Tests: tests/test_rssnr_gamma.py (mapping round-trip,
 censoring floor, snapshot-pin cache rejection, gamma_maps plumbing
 bit-identity); suite 264 unit green.
+
+## Matched processing + 30 km prediction (`--processing standard --add-30km`, 2026-07-31)
+
+Full 50 km, best-model config (picked bed + RSSNR gamma), all four passes
+(low/mid/high/**syn30km**) through a CSARP_standard-matching chain, into
+`outputs/basal_clutter/full_pbed_rssnr_proc/`.
+
+### Processing chain: real vs applied (recorded per pass in run_config)
+
+REAL (provenance): motion-compensated **f-k**, sigma_x **2.5 m** SLC,
+start_eps 3.15 (2016 param structs, scout-verified; ft_wind hanning
+hand-verified) -> delay-and-sum combine -> **rline_rng [-5..5] = 11 looks,
+dline 6** -> 14.85 m posting, ~25 m effective along-track resolution (11/6 =
+M24-verified CReSIS-standard convention; NOT directly read from the 2016
+structs -- recorded assumption).
+
+APPLIED: simulate at the **product posting 14.85 m** (every measured trace;
+sim columns land on the measured columns) -> first-order nadir mocomp
+(dz to smoothed track; residual rms 0.113/0.068/0.049/0.0 m = lambda/14 or
+better) -> `soundersim.processing.focused_sar` (straight-track
+backprojection, hann) at the **alias-limited aperture**
+sin(theta)=lam/(4*ds), theta = 1.52 deg: **87 / 546 / 627 / 1647 m**
+(7/38/43/112 traces) at each pass's median optical bed range -> 3-look
+stride-1 incoherent average. Az resolution ~21 m (hann) vs the product's
+~25 m effective. Derivation recorded: the 2.5 m SLC would need 2.5 m posting
+(~40x compute); at posting ds the best unaliased resolution IS ds, so
+matching the post-look effective level is the honest optimum. Straight-track
+check: the line is dead straight (chord dev p95 0.01-0.06 m); vertical
+motion is the real deviation and mocomp leaves <~lambda/14. Gap list
+g1-g6 recorded in config (SLC res, looks count, air-only focusing ~1 rad
+edge phase at altitude, first-order-only mocomp, near-surface Doppler
+aliasing ratio 3.65/1.12/1.10/1.04, combine inside the array pattern).
+Unprocessed path untouched (default `--processing none`; `_proc` cache
+suffix; const-gamma companions got their own fine-posting `_pbed_proc`
+cache).
+
+### Acceptance correlations under matched processing (vs unprocessed)
+
+| pass | const (proc) | RSSNR (proc) | RSSNR (unproc, phase 2) | sanity bed-layer | implied-vs-meas |
+|---|---|---|---|---|---|
+| low  | -0.17 | **+0.76** | +0.76 | +0.92 | +0.87 |
+| mid  | -0.14 | **+0.81** | +0.84 | +0.85 | +0.85 |
+| high | +0.02 | **+0.76** | +0.79 | +0.84 | +0.80 |
+
+**The acceptance result HOLDS under matched processing** (mean r 0.78 vs
+0.80 unprocessed; the small dip is look-averaging smoothing both sim and
+implied against a measured curve that already had its own 11 looks).
+Constant gamma stays uninformative. Visual acceptance: the sim radargrams
+now show **continuous arcs, not beads** -- the mid/high sim panels are
+texture-comparable to the measured f-k product (sim arcs crisper: g2's
+fewer looks). Sim mid-column medians barely move vs unprocessed (e.g. high
+-43.1 -> -42.9 dB): mean-power metrics are insensitive to coherent
+reprocessing, as expected.
+
+### 30 km stratospheric prediction (the design question)
+
+Geometry: 29,858 m median AGL, reach ct **+-11.24 km** (surface 11.24 km /
+bed 5.23 km), facet spacing 81.9 m, 91k facets/interface/chunk, fast-time
+window to ~215 us, 17 chunks, **249 s wall** -- the reach derivation stayed
+compute-feasible (no cap needed). Aperture 1647 m (112 traces).
+
+**Verdict: on this line, at 190 MHz/50 MHz with the 2016 DC-8 system
+geometry, the bed remains visible at 30 km -- but marginally.** In the bed
+window the bed-borne energy beats the surface-borne clutter by **+11.4 dB**
+(median); the bed peak stands **+5.0 dB** above the total mid-column
+clutter (scout contrast metric) -- vs measured +28.6 dB at 442 m and
++3.0-4.6 dB at 9-10.7 km, i.e. the 30 km pass sits just past the high pass
+on the clutter-limit trend rather than falling off a cliff (the surface
+clutter level saturates once the full off-nadir surface is inside the
+window). Mid-column stays surface-borne (-33.8 dB rel surface peak, ~1 dB
+above the 10.7 km pass). Along-track, the RSSNR-driven bed brightness spans
+~40 dB, so the DIM half of the line (s < 40 km, G2 to -32 dB) drops to or
+below the clutter at 30 km while the bright half stands well clear --
+exactly the along-track discrimination this feature chain was built to
+predict. CAVEATS: clutter-limited analysis only (no receiver-noise/link
+budget -- at 30 km the extra ~9 dB of two-way spreading loss vs 10.7 km
+makes thermal SNR the other binding constraint); surface roughness at the
+validated representative values; 500 m BedMachine cross-track texture and
+the picked-bed/RSSNR cross-track-constant caveats carry over; 82 m facets
+mean sub-facet bed texture is unresolved.
+
+Timings: RSSNR quad 1941.7 s fresh (1038/518/136/249), const companions
+1671 s (fine posting), processing+analysis ~6 min/invocation. One harness
+kill/resume mid-run (all chunks cache-resumable, no loss). Tests: 269 unit
+green (tests/test_basal_processing.py added: aperture math, chain
+recording, 30 km construction; pass-table test updated for the synthetic
+entry); ruff clean.

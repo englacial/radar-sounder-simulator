@@ -30,7 +30,11 @@ def test_pass_table_matches_scout():
     """Frames, slices, direction and altitudes from claude_notes/
     basal_clutter_scout.md (pilot s=30-40 km; full segment s=18-68 km)."""
     assert rbc.SEASON == "2016_Antarctica_DC8"
-    assert list(rbc.PASSES) == ["low", "mid", "high"] == rbc.ORDER
+    # the three REAL passes (ORDER) plus the deliberate synthetic 30 km
+    # entry (--add-30km), which rides the LOW pass's frames
+    assert rbc.ORDER == ["low", "mid", "high"]
+    assert list(rbc.PASSES) == rbc.ORDER + [rbc.SYN30_KEY]
+    assert rbc.PASSES[rbc.SYN30_KEY]["synthetic_msl_m"] == 30000.0
 
     p = rbc.PASSES["low"]
     assert not p["rev"]
