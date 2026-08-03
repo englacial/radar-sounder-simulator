@@ -1479,16 +1479,28 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None):
     return fp
 
 
-def fig_decomposition(out, preps, analyses, keys=None):
+def fig_decomposition(out, preps, analyses, keys=None, ablation=None):
     """Per pass: measured vs sim total vs the sim's per-interface split
-    (surface-borne vs bed-borne) mean-power profiles below the surface."""
+    (surface-borne vs bed-borne) mean-power profiles below the surface.
+
+    ``ablation`` = list of (preps, analyses, label) bed-source variants
+    (radargram row order): the panel then shows measured, ONE surface-borne
+    curve (verified bed-source-invariant; all variants drawn and flagged if
+    they deviate beyond speckle/numerical noise) and one BED-borne curve per
+    bed source; sim totals are dropped for legibility."""
     series = [("measured", "measured", dict(color="black", lw=1.8)),
               ("sim_total", "sim total", dict(color="tab:blue", lw=1.4)),
               ("sim_surface", "sim surface-borne",
                dict(color="tab:orange", lw=1.2, ls="--")),
               ("sim_bed", "sim bed-borne",
                dict(color="tab:green", lw=1.2, ls="-."))]
+    ab_styles = [dict(color="tab:red", lw=1.2, ls=":"),
+                 dict(color="tab:purple", lw=1.2, ls=(0, (4, 2)))]
     keys = keys or ORDER
+    if ablation:
+        series = [s for s in series if s[0] != "sim_total"]
+        series[-1] = ("sim_bed", "sim bed-borne (picked bed)",
+                      dict(color="tab:green", lw=1.2, ls="-."))
     fig, axs = plt.subplots(1, len(keys), figsize=(5.2 * len(keys), 4.8),
                             sharey=True, squeeze=False)
     for k, key in enumerate(keys):
@@ -1497,6 +1509,23 @@ def fig_decomposition(out, preps, analyses, keys=None):
         for pk, label, st in series:
             if pk in a["profs"]:
                 ax.plot(*a["profs"][pk], label=label, **st)
+        for (pr_v, an_v, label), st in zip(ablation or [], ab_styles):
+            av = an_v[key]
+            # surface-borne must be bed-source-invariant (same surface DEM,
+            # geometry, speckle seeds): verify, plot only if it deviates
+            x0, y0 = a["profs"]["sim_surface"]
+            xv, yv = av["profs"]["sim_surface"]
+            dev = float(np.nanmax(np.abs(
+                np.interp(x0, xv, yv) - y0)[(x0 >= -1.0) & (x0 <= 13.5)
+                                            & (y0 > -105.0)]))
+            print(f"  decomposition {key} [{label}]: surface-borne max "
+                  f"deviation {dev:.3f} dB vs picked-bed run", flush=True)
+            if dev > 0.3:
+                ax.plot(xv, yv, color=st["color"], lw=0.9, ls="--",
+                        label=f"sim surface-borne ({label}) DEVIATES "
+                              f"{dev:.1f} dB")
+            ax.plot(*av["profs"]["sim_bed"],
+                    label=f"sim bed-borne ({label})", **st)
         tb = a["bed_delay_med_us"]
         ax.axvspan(1.0, tb - MID_HI_US, color="tab:blue", alpha=0.06,
                    label="mid-column window" if k == 0 else None)
@@ -1908,15 +1937,16 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     (out / "run_config.json").write_text(json.dumps(config, indent=1) + "\n")
 
     if bed_ablation:
-        old = out / "radargrams.png"
-        two = out / "radargrams_tworow.png"
-        if old.exists() and not two.exists():
-            shutil.copy2(old, two)  # keep the pre-ablation two-row version
+        for old, keep in (("radargrams.png", "radargrams_tworow.png"),
+                          ("decomposition.png", "decomposition_pbed.png")):
+            if (out / old).exists() and not (out / keep).exists():
+                shutil.copy2(out / old, out / keep)  # pre-ablation version
+    ab_fig = ([(pr, an, label) for pr, an, label, _ in ab_rows]
+              if bed_ablation else None)
     figs = [fig_radargrams(out, preps, analyses, segment, keys=order,
-                           ablation=([(pr, an, label)
-                                      for pr, an, label, _ in ab_rows]
-                                     if bed_ablation else None)),
-            fig_decomposition(out, preps, analyses, keys=order)]
+                           ablation=ab_fig),
+            fig_decomposition(out, preps, analyses, keys=order,
+                              ablation=ab_fig)]
     if gamma_rssnr and corr_stats is not None:
         syn = None
         if add_30km:
