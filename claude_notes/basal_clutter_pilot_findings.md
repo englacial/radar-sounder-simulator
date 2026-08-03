@@ -305,3 +305,73 @@ kill/resume mid-run (all chunks cache-resumable, no loss). Tests: 269 unit
 green (tests/test_basal_processing.py added: aperture math, chain
 recording, 30 km construction; pass-table test updated for the synthetic
 entry); ruff clean.
+
+## Bed-source ablation: picked bed vs BedMachine vs DEMOGORGN (2026-08-03)
+
+Three-way ablation on the full 50 km, best-model config otherwise identical
+(RSSNR gamma + matched CSARP processing), composed as the FOUR-row
+`outputs/basal_clutter/full_pbed_rssnr_proc/radargrams.png` (measured /
+picked bed / BedMachine / DEMOGORGN seed 0; two-row original kept as
+radargrams_tworow.png). Metrics keyed `bedmachine_bed_ablation_*` /
+`demogorgn_bed_ablation_*`; DEMOGORGN standalone run in
+`outputs/basal_clutter/full_dgn_rssnr_proc/`.
+
+DEMOGORGN plumbing (per claude_notes/demogorgn_scout.md): pinned snapshot
+`WG801625MG778C4DS6Y0`, seed 0, `opr.fetch_demogorgn_window` (raw cache +
+EIGEN-6C4 geoid added on read from **band 2 of the BedMachine cache** -- the
+one real plumbing change; old single-band caches refetch once,
+backward-compatibly gated and tested). PLAIN DEMOGORGN only; the picked-bed
+hybrid (residual 81.3 -> 43.7 m rms, anisotropy 1.90 -> 1.27) is a
+**recorded follow-up**, deliberately not wired. No license found -- internal
+use only until the Gator Glaciology group provides one (recorded in config).
+
+### Bed-window power (dB rel own surface peak) and r vs measured (1 km)
+
+| pass | measured | picked bed | BedMachine | DEMOGORGN | r: pbed / BM / DGN |
+|---|---|---|---|---|---|
+| low  | -54.3 | -48.6 | -50.1 | -46.4 | +0.76 / +0.68 / **+0.85** |
+| mid  | -46.0 | -40.6 | -44.8 | -43.4 | +0.81 / +0.73 / +0.78 |
+| high | -46.1 | -42.3 | -43.6 | -43.1 | +0.76 / +0.66 / +0.78 |
+| 30 km | -- | -42.1 | -43.2 | -41.4 | -- |
+
+Mid-column is bed-source-insensitive (within ~1 dB across all three --
+surface-borne everywhere, as established). Every bed source rides the RSSNR
+gamma to r >= 0.66: the reflectivity field, not the topography, carries the
+along-track brightness pattern.
+
+### What each source gets right/wrong (numbers + visual)
+
+* **Picked bed**: along-track exact at nadir (offset ~0) and the densest
+  arc field -- visually closest to the measured texture in the low panel --
+  but its roughness is cross-track INERT (ridges artifact, upper-bound
+  clutter; unchanged caveat).
+* **BedMachine**: smooth everywhere -- a bald continuous bed line with
+  sparse gentle arcs, visibly unlike measured; bed-window 1-4 dB dimmer than
+  picked bed; nadir bed sits 31-69 m deep vs the passes' own picks (the
+  known -29 m bias + the 6% cross-pass pick-thickness spread); lowest r on
+  every pass.
+* **DEMOGORGN**: statistically right everywhere -- isotropic 2-D texture
+  with realistic arc density (between BedMachine and picked bed in the
+  figure, and arguably the most measured-like at mid/high); **beats picked
+  bed on the acceptance correlation on low (+0.85 vs +0.76) and high (+0.78
+  vs +0.76)** -- consistent with the picked bed's cross-track ridges being
+  an artifact that DEMOGORGN's honest 2-D roughness avoids. Its bed line is
+  ITS OWN realization: locally different wiggles than measured (43.7 m rms
+  vs picks), though the **median nadir offset is small: -0.08/+0.21/+0.14 us
+  = -7/+17/+12 m** (low/mid/high) -- the scout's ~44 m raw offset was the
+  GEOID datum, which the band-2 plumbing removes; what remains is the
+  thickness-convention scatter, visible as local bed-line disagreement, not
+  a constant shift. Reported, not tuned.
+
+30 km prediction is bed-source-robust: bed-window -41.4..-43.2 dB and
+mid-column -33.8..-34.2 dB across all three beds -- the stratospheric
+verdict (+11 dB bed-over-clutter in window, ~5 dB peak margin,
+clutter-limited) does not hinge on the bed choice.
+
+Timings: BedMachine ablation sims 1933 s fresh (low 1021 / mid 526 / high
+137 / syn30 250); DEMOGORGN standalone 1908.6 s fresh (1012/514/134/248,
+--no-companion) + one-time BedMachine band-2 cache refetches; composition
+run pure cache (+15 process_standard calls, ~12 min). Tests: 276 unit green
+(tests/test_demogorgn.py: band-2 gate incl. refetch-on-single-band,
+raw+geoid datum path on the staggered grid, snapshot/seed cache pinning,
+tag composition, hybrid-raises, nadir-offset math); ruff clean.

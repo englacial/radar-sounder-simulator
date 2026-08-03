@@ -233,8 +233,9 @@ PICKED_BED_NOTE = (
     "runs are directly comparable.")
 
 
-def case_tag(picked_bed, gamma_rssnr=False, proc=False):
+def case_tag(picked_bed, gamma_rssnr=False, proc=False, dgn=False):
     return ((PBED_TAG if picked_bed else "")
+            + (DGN_TAG if dgn else "")
             + (GRSSNR_TAG if gamma_rssnr else "")
             + (PROC_TAG if proc else ""))
 
@@ -573,6 +574,56 @@ def apply_rssnr_gamma(base, axis, gmap):
 
 
 # ========================================================================
+# DEMOGORGN bed (--demogorgn-bed): geostatistically simulated bed realization
+# ========================================================================
+# claude_notes/demogorgn_scout.md: SGS/MCMC 100-member ensemble on the
+# Bedmap3 500 m grid, CONDITIONED on this very flight line (ensemble sd
+# 0.5 m at nadir), isotropic 2-D texture (AT/CT 1.03 vs picked-bed's 1.90),
+# 88% of the 500 m-resolvable pick roughness (50.3 vs BedMachine's 28.5 m
+# rms). KNOWN, DOCUMENTED, NOT TUNED AWAY: its nadir bed sits ~+44 m raw /
+# ~43.7 m rms off OUR picks (a thickness-convention disagreement with the
+# Bedmap3-ingested version of this survey) -> expect a visible ~0.5 us bed-
+# line offset vs the measured panels. PLAIN DEMOGORGN only (the clean
+# three-way bed-source ablation); the picked-bed hybrid (residual drops
+# 81.3 -> 43.7 m rms, anisotropy 1.90 -> 1.27) is a RECORDED FOLLOW-UP,
+# deliberately not wired.
+DGN_TAG = "_dgn"
+DGN_NOTE = (
+    "bed = DEMOGORGN-Antarctica realization (500 m Bedmap3 grid, EIGEN-6C4 "
+    "geoid added from the BedMachine cache band 2), bilinearly resampled "
+    "onto the 32 m scene grid; pinned snapshot, seed recorded. Conditioned "
+    "on this line (ensemble sd 0.5 m at nadir) with isotropic 2-D texture; "
+    "its nadir bed differs from our picks by ~43.7 m rms (+44 m median raw; "
+    "thickness-convention disagreement, scout-documented) -- reported, not "
+    "corrected. Plain DEMOGORGN; the picked-bed hybrid is a recorded "
+    "follow-up.")
+
+
+def apply_demogorgn_bed(base, fsub, ct_m, seed):
+    """Replace the base scene's bed DEM with the DEMOGORGN realization
+    (ellipsoidal, via opr.fetch_demogorgn_window), resampled onto the scene
+    grid and clamped below the surface. Returns recorded stats."""
+    from soundersim.opr import (DEMOGORGN_SNAPSHOT, fetch_demogorgn_window,
+                                fill_nodata_nearest)
+
+    lat, lon = rac._lonlat(fsub)
+    bounds = (float(lon.min()), float(lat.min()),
+              float(lon.max()), float(lat.max()))
+    dgn, tr_d, crs_d, meta = fetch_demogorgn_window(
+        bounds, pad_m=ct_m + 600.0, seed=seed)
+    bed = rac.resample_to_grid(dgn, tr_d, crs_d, base.dems[0].shape,
+                               base.transform, base.crs)
+    bed, fill = fill_nodata_nearest(bed)
+    clamp = float((bed > base.dems[0] - 0.1).mean())
+    base.dems[1] = np.minimum(bed, base.dems[0] - 0.1).astype(np.float32)
+    base.params["bed_source"] = DGN_NOTE
+    return {"seed_id": int(seed), "snapshot_id": DEMOGORGN_SNAPSHOT,
+            "posting_m": meta["posting_m"], "datum": meta["returned_datum"],
+            "nodata_fill_frac": round(fill, 6),
+            "bed_clamp_frac": round(clamp, 6), "note": DGN_NOTE}
+
+
+# ========================================================================
 # CSARP_standard-matching processing (--processing standard)
 # ========================================================================
 # THE REAL CHAIN (recorded provenance): motion-compensated f-k migration,
@@ -820,7 +871,7 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
 
 
 def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
-              fine_posting=False):
+              fine_posting=False, dgn_seed=None):
     """Slice (+reverse) the pass's frames onto the common window, derive the
     reach and grids, and build the base scene (REMA + BedMachine, cached).
     ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene;
@@ -899,6 +950,12 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
     # Picked bed: the fast-time grid, reach and facet spacing above stay at
     # their BedMachine values (derived from each pass's OWN picks) so the two
     # runs share one lattice and are directly comparable.
+    if dgn_seed is not None and ref is not None:
+        raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
+                         "follow-up, not wired (clean three-way ablation)")
+    aux["demogorgn"] = (apply_demogorgn_bed(base, fsub, reach["ct_m"],
+                                            dgn_seed)
+                        if dgn_seed is not None else None)
     aux["picked_bed"] = apply_picked_bed(base, ref) if ref else None
     aux["rssnr_gamma"] = (apply_rssnr_gamma(base, axis or ref, gmap)
                           if gmap else None)
@@ -916,6 +973,7 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
             "idx": idx, "s_m": s, "agl": agl, "r_min": r_min,
             "picked_bed": bool(ref), "gamma_rssnr": bool(gmap),
             "proc": bool(fine_posting), "synthetic": synth_note,
+            "dgn": dgn_seed is not None,
             "h_med": float(np.nanmedian(agl)), "thick_med": thick_med,
             "tw_m": tw_ref}
 
@@ -998,7 +1056,7 @@ def simulate_pass(p, runs_dir, att, surf_rough, force):
         scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"],
                             gamma=p["gamma_rssnr"])
         rid = (f"{p['key']}_{p['segment']}"
-               f"{case_tag(p['picked_bed'], p['gamma_rssnr'], p['proc'])}"
+               f"{case_tag(p['picked_bed'], p['gamma_rssnr'], p['proc'], p['dgn'])}"
                f"_c{ci:02d}"
                + ("_srough" if surf_rough else "")
                + (f"_att{att:g}" if att != rac.ATT_DB_PER_KM else ""))
@@ -1009,6 +1067,10 @@ def simulate_pass(p, runs_dir, att, surf_rough, force):
                 **({"gamma_rssnr": True, "rssnr_snapshot": RSSNR_SNAPSHOT,
                     "rssnr_k_db": p["aux"]["rssnr_gamma"]["k_db"]}
                    if p["gamma_rssnr"] else {}),
+                **({"demogorgn_seed": p["aux"]["demogorgn"]["seed_id"],
+                    "demogorgn_snapshot":
+                        p["aux"]["demogorgn"]["snapshot_id"]}
+                   if p["dgn"] else {}),
                 "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
                 "reversed": p["rev"], "chunk": ci, "n_chunks": len(chunks),
                 "rows": [int(rows[0]), int(rows[-1])], "n_traces_total": n,
@@ -1071,6 +1133,19 @@ def _med_db_rel(num, den):
     if not ok.any():
         return float("nan")
     return float(np.median(10.0 * np.log10(num[ok] / den[ok])))
+
+
+def nadir_bed_offset(p, sim):
+    """Median offset of the SIMULATED nadir bed vs the pass's own radar
+    pick (us and in-ice meters) -- reported, not tuned away (the DEMOGORGN
+    thickness-convention misfit shows up here)."""
+    d = sim["nadir"][:, 1] - p["bot"][p["idx"]]
+    med = float(np.nanmedian(d))
+    return {"med_us": round(med * 1e6, 3),
+            "med_m_ice": round(med * C / (2.0 * np.sqrt(rac.EPS_ICE)), 1),
+            "note": "sim nadir bed twtt minus the pass's own Bottom pick; "
+            "the per-pass registration gate aligns the SURFACE only and "
+            "cannot absorb a bed offset"}
 
 
 def clutter_metrics(P, twtt, dt, t_s, t_b):
@@ -1324,15 +1399,40 @@ def fig_bed_brightness(out, preps, corr_series, corr_stats, segment,
 # figures (grayscale radargrams = sequential magnitude; profile series in
 # fixed categorical order with legend, one axis)
 # ========================================================================
-def fig_radargrams(out, preps, analyses, segment, keys=None):
-    """Measured (top) vs simulated (bottom) per pass, shared surface-
-    referenced twtt axis and one shared dB-rel-surface color scale. A
-    synthetic pass has no measured data: its top panel is a placeholder."""
+def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
+    """One simulated-pass panel: dB rel per-pass median simulated surface
+    peak, surface-referenced twtt axis."""
+    twtt_s = p["rc_frame"].t0 + np.arange(
+        p["rc_frame"].n_samples) * p["rc_frame"].dt
+    ref_s = 10.0 * np.log10(max(float(np.nanmedian(
+        _wpeak(a["P"], twtt_s, p["rc_frame"].dt, a["t_s"],
+               SURF_WIN_US))), 1e-300))
+    surf_med_s = float(np.nanmedian(a["t_s"]))
+    rel_s = (twtt_s - surf_med_s) * 1e6
+    ms = (rel_s >= y_lo) & (rel_s <= y_hi)
+    s_sim = s0 + p["s_m"][p["idx"]] / 1e3
+    ax.imshow(_db(a["P"])[:, ms].T - ref_s, aspect="auto", cmap="gray",
+              vmin=vmin, vmax=vmax,
+              extent=[s_sim[0], s_sim[-1], rel_s[ms][-1], rel_s[ms][0]])
+    ax.set_title(f"{key} sim {label} (ct ±{p['reach']['ct_m'] / 1e3:.1f} km,"
+                 f" {p['spacing']:.1f} m facets)", fontsize=10)
+
+
+def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None):
+    """Measured (top) vs simulated per pass, shared surface-referenced twtt
+    axis and one shared dB-rel-surface color scale. A synthetic pass has no
+    measured data: its top panel is a placeholder. ``ablation`` = list of
+    (preps, analyses, label) bed-source rows appended below the picked-bed
+    row (row 2 is then labeled 'picked bed'): the clean bed-source
+    ablation."""
     keys = keys or ORDER
+    ablation = ablation or []
     y_lo, y_hi = -1.0, 13.5
     vmin, vmax = -90.0, 5.0
     s0 = S0_KM[segment]
-    fig, axs = plt.subplots(2, len(keys), figsize=(5.4 * len(keys), 8.8),
+    nrow = 2 + len(ablation)
+    fig, axs = plt.subplots(nrow, len(keys),
+                            figsize=(5.4 * len(keys), 4.4 * nrow),
                             sharey=True, squeeze=False)
     for k, key in enumerate(keys):
         p, a = preps[key], analyses[key]
@@ -1356,27 +1456,22 @@ def fig_radargrams(out, preps, analyses, segment, keys=None):
                       extent=[s_km[0], s_km[-1], rel[m][-1], rel[m][0]])
             ax.set_title(f"{key} measured ({p['h_med']:.0f} m AGL)",
                          fontsize=10)
-        # sim: dB rel per-pass median simulated surface peak
-        twtt_s = p["rc_frame"].t0 + np.arange(
-            p["rc_frame"].n_samples) * p["rc_frame"].dt
-        ref_s = 10.0 * np.log10(max(float(np.nanmedian(
-            _wpeak(a["P"], twtt_s, p["rc_frame"].dt, a["t_s"],
-                   SURF_WIN_US))), 1e-300))
-        surf_med_s = float(np.nanmedian(a["t_s"]))
-        rel_s = (twtt_s - surf_med_s) * 1e6
-        ms = (rel_s >= y_lo) & (rel_s <= y_hi)
-        s_sim = s0 + p["s_m"][p["idx"]] / 1e3
-        ax = axs[1, k]
-        ax.imshow(_db(a["P"])[:, ms].T - ref_s, aspect="auto", cmap="gray",
-                  vmin=vmin, vmax=vmax,
-                  extent=[s_sim[0], s_sim[-1], rel_s[ms][-1], rel_s[ms][0]])
-        ax.set_title(f"{key} sim (ct ±{p['reach']['ct_m'] / 1e3:.1f} km, "
-                     f"{p['spacing']:.1f} m facets)", fontsize=10)
-        ax.set_xlabel("anchor along-track s (km)")
-    for r in range(2):
+        # sim row(s): picked-bed (labeled when ablation rows are present)
+        _sim_radargram_panel(axs[1, k], p, a, key,
+                             "(picked bed)" if ablation else "",
+                             s0, y_lo, y_hi, vmin, vmax)
+        for r, (pr, an, label) in enumerate(ablation):
+            _sim_radargram_panel(axs[2 + r, k], pr[key], an[key], key,
+                                 f"({label})", s0, y_lo, y_hi, vmin, vmax)
+        axs[nrow - 1, k].set_xlabel("anchor along-track s (km)")
+    for r in range(nrow):
         axs[r, 0].set_ylabel("twtt below surface (us)")
-    fig.suptitle("basal-clutter altitude triplet: measured (top) vs "
-                 "simulated surface+bed (bottom), dB rel own surface peak")
+    fig.suptitle(
+        "basal-clutter altitude triplet: measured (top) vs simulated "
+        "surface+bed, dB rel own surface peak"
+        + (" -- bed-source ablation: picked bed / "
+           + " / ".join(label for _, _, label in ablation)
+           + ", all else identical" if ablation else ""))
     fig.tight_layout()
     fp = out / "radargrams.png"
     fig.savefig(fp, dpi=130)
@@ -1431,12 +1526,19 @@ def fig_decomposition(out, preps, analyses, keys=None):
 def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         surf_rough=True, out_root=None, force=False, make_report=True,
         picked_bed=False, gamma_rssnr=False, processing="none",
-        add_30km=False):
+        add_30km=False, bed_ablation=False, demogorgn_bed=False,
+        demogorgn_seed=0, companion=True):
     proc = processing == "standard"
+    if bed_ablation and not picked_bed:
+        raise ValueError("--bed-ablation adds bed-source rows to the "
+                         "picked-bed case: run it WITH --picked-bed")
+    if demogorgn_bed and picked_bed:
+        raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
+                         "follow-up, not wired (clean three-way ablation)")
     order = ORDER + ([SYN30_KEY] if add_30km else [])
     n_traces = n_traces or (N_TRACES_PILOT if segment == "pilot"
                             else N_TRACES_FULL)
-    tag = case_tag(picked_bed, gamma_rssnr, proc)
+    tag = case_tag(picked_bed, gamma_rssnr, proc, demogorgn_bed)
     out = Path(out_root or OUT_DEFAULT) / (segment + tag)
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
@@ -1462,7 +1564,13 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     for key in order:
         print(f"== {key} ({segment}{tag}) ==", flush=True)
         p = prep_pass(key, segment, n_traces, ref=ref, gmap=gmap, axis=axis,
-                      fine_posting=proc)
+                      fine_posting=proc,
+                      dgn_seed=demogorgn_seed if demogorgn_bed else None)
+        if p["aux"]["demogorgn"]:
+            d = p["aux"]["demogorgn"]
+            print(f"  DEMOGORGN bed: seed {d['seed_id']}, snapshot "
+                  f"{d['snapshot_id']}, clamp {d['bed_clamp_frac']:.4f}",
+                  flush=True)
         if p["synthetic"]:
             print(f"  SYNTHETIC pass: {p['synthetic']['synthetic_msl_m']:.0f}"
                   f" m constant ellipsoidal height, roll 0, AGL med "
@@ -1494,9 +1602,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
 
     # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
     corr_stats = corr_series = None
-    if gamma_rssnr:
+    if gamma_rssnr and companion:
         runs_const = (Path(out_root or OUT_DEFAULT)
-                      / (segment + case_tag(picked_bed, False, proc))
+                      / (segment + case_tag(picked_bed, False, proc,
+                                            demogorgn_bed))
                       / "runs")
         corr_stats, corr_series = {}, {}
         for key in ORDER:
@@ -1517,6 +1626,29 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                   f"{st['r_bedlayer_rssnr_vs_implied']:+.3f}; "
                   f"implied-vs-meas "
                   f"{st['r_implied_vs_measured']:+.3f})", flush=True)
+
+    # ---- bed-source ablation rows: BEDMACHINE and DEMOGORGN beds ----
+    # (identical RSSNR gamma + processing; only the bed topography changes)
+    ab_rows = None
+    if bed_ablation:
+        ab_rows = []
+        for label, seed in (("BedMachine bed", None),
+                            (f"DEMOGORGN bed, seed {demogorgn_seed}",
+                             demogorgn_seed)):
+            runs_ab = (Path(out_root or OUT_DEFAULT)
+                       / (segment + case_tag(False, gamma_rssnr, proc,
+                                             seed is not None)) / "runs")
+            pr, an, sm = {}, {}, {}
+            for key in order:
+                print(f"== {key} {label} ablation (cache-first) ==",
+                      flush=True)
+                p_ab = prep_pass(key, segment, n_traces, ref=None, gmap=gmap,
+                                 axis=axis, fine_posting=proc, dgn_seed=seed)
+                s_ab = simulate_pass(p_ab, runs_ab, att, surf_rough, force)
+                proc_ab = process_standard(p_ab, s_ab) if proc else None
+                pr[key], sm[key] = p_ab, s_ab
+                an[key] = analyze_pass(p_ab, s_ab, proc=proc_ab)
+            ab_rows.append((pr, an, label, sm))
 
     # ---- metrics ----
     rec = "recorded only"
@@ -1593,6 +1725,36 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "delay), plus bed peak over mid-column clutter (the scout "
             "contrast metric, sign-flipped). Best-model config: picked "
             "bed + RSSNR gamma. " + rec}
+    if bed_ablation:
+        for pr, an, label, sm in ab_rows:
+            slug = "demogorgn" if "DEMOGORGN" in label else "bedmachine"
+            for key in order:
+                a_ab, a_pb = an[key], analyses[key]
+                e = {"value": a_ab["sim"]["bed_rel_surf_db"],
+                     "threshold": None, "op": "record", "pass": True,
+                     f"sim_{slug}": a_ab["sim"],
+                     "sim_picked_bed": a_pb["sim"],
+                     f"decomposition_{slug}_db": a_ab["decomposition"],
+                     "nadir_bed_offset_vs_picks":
+                         nadir_bed_offset(pr[key], sm[key]),
+                     "note": f"bed-source ABLATION row ({label}) with "
+                     "IDENTICAL RSSNR gamma + processing; compare "
+                     "sim_picked_bed (row 2) and the measured metrics in "
+                     f"clutter_{key}. " + rec}
+                if slug == "demogorgn":
+                    e["provenance"] = pr[key]["aux"]["demogorgn"]
+                if a_pb["meas_bed_prof_db"] is not None:
+                    p = preps[key]
+                    s_sim = p["s_m"][p["idx"]]
+                    meas = np.interp(s_sim, p["s_m"], _smooth_db(
+                        p["s_m"], a_pb["meas_bed_prof_db"]))
+                    e["r_bed_brightness_vs_measured"] = {
+                        slug: round(_pearson(_smooth_db(
+                            pr[key]["s_m"][pr[key]["idx"]],
+                            a_ab["sim_bed_prof_db"]), meas), 3),
+                        "picked_bed": round(_pearson(_smooth_db(
+                            s_sim, a_pb["sim_bed_prof_db"]), meas), 3)}
+                metrics[f"{slug}_bed_ablation_{key}"] = e
     if gamma_rssnr:
         metrics["rssnr_gamma_mapping"] = {
             "value": gmap["k_db"], "threshold": None, "op": "record",
@@ -1607,23 +1769,35 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "note": "median-anchored K (dB): |Gamma_bed|^2 = 2*A*H - RSSNR "
             "+ K; K - K_phys is the absolute-chain gap the anchoring "
             "absorbs (attenuation + surface-model uncertainty). " + rec}
-        metrics["bed_brightness_correlation"] = {
-            "value": round(float(np.mean(
-                [corr_stats[k]["r_sim_rssnr_vs_measured"]
-                 for k in ORDER])), 3),
-            "threshold": None, "op": "record", "pass": True,
-            "per_pass": corr_stats,
-            "note": "KEY DELIVERABLE (acceptance): along-track Pearson r of "
-            "the ~1 km-smoothed bed-window power profile (dB rel own "
-            "surface peak) between sim and MEASURED, RSSNR-driven vs "
-            "constant bed gamma (same picked-bed geometry). "
-            "r_bedlayer_rssnr_vs_implied is the by-construction sanity "
-            "check (bed-borne layer only -- geometry/speckle-limited); "
-            "r_sim_rssnr_vs_implied uses the TOTAL field, whose bed window "
-            "is surface-clutter-crowded at altitude (the study's own "
-            "finding), so it is expected to degrade low->mid->high; "
-            "r_implied_vs_measured is the data-only ceiling estimate. "
-            + rec}
+        if corr_stats is not None:
+            metrics["bed_brightness_correlation"] = {
+                "value": round(float(np.mean(
+                    [corr_stats[k]["r_sim_rssnr_vs_measured"]
+                     for k in ORDER])), 3),
+                "threshold": None, "op": "record", "pass": True,
+                "per_pass": corr_stats,
+                "note": "KEY DELIVERABLE (acceptance): along-track Pearson "
+                "r of the ~1 km-smoothed bed-window power profile (dB rel "
+                "own surface peak) between sim and MEASURED, RSSNR-driven "
+                "vs constant bed gamma (same bed geometry). "
+                "r_bedlayer_rssnr_vs_implied is the by-construction sanity "
+                "check (bed-borne layer only -- geometry/speckle-limited); "
+                "r_sim_rssnr_vs_implied uses the TOTAL field, whose bed "
+                "window is surface-clutter-crowded at altitude (the "
+                "study's own finding), so it is expected to degrade "
+                "low->mid->high; r_implied_vs_measured is the data-only "
+                "ceiling estimate. " + rec}
+    if demogorgn_bed:
+        for key in order:
+            metrics[f"dgn_nadir_bed_offset_{key}"] = {
+                "value": nadir_bed_offset(preps[key],
+                                          sims[key])["med_us"],
+                "threshold": None, "op": "record", "pass": True,
+                **nadir_bed_offset(preps[key], sims[key]),
+                "provenance": preps[key]["aux"]["demogorgn"],
+                "note": "DEMOGORGN nadir-bed offset vs this pass's own "
+                "radar pick (thickness-convention misfit, "
+                "scout-documented): reported, not tuned away. " + rec}
 
     config = {
         "case": case, "segment": segment, "n_traces": n_traces,
@@ -1631,7 +1805,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "margin_us": MARGIN_US, "post_bed_window_us": POST_BED_US,
         "chunk_m": CHUNK_M, "picked_bed": bool(picked_bed),
         "gamma_rssnr": bool(gamma_rssnr),
+        "demogorgn_bed": bool(demogorgn_bed),
         "passes": {}, "measured_caveats": MEASURED_CAVEATS}
+    if demogorgn_bed:
+        config["demogorgn"] = {**preps[ORDER[0]]["aux"]["demogorgn"],
+                               "license": "NONE FOUND -- internal "
+                               "engineering use only until the Gator "
+                               "Glaciology group provides one (scout "
+                               "section 7)"}
     if gamma_rssnr:
         config["rssnr_gamma"] = {
             k: gmap[k] for k in
@@ -1710,6 +1891,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "registration; BedMachine 500 m texture caveat applies. "
         + MEASURED_CAVEATS
         + (" PICKED BED: " + PICKED_BED_NOTE if picked_bed else "")
+        + (" DEMOGORGN BED: " + DGN_NOTE if demogorgn_bed else "")
         + (" RSSNR GAMMA: " + RSSNR_GAMMA_NOTE if gamma_rssnr else "")
         + (" PROCESSING: CSARP_standard-matching chain applied identically "
            "to every simulated pass (measured panels are already the "
@@ -1725,9 +1907,17 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     (out / "metrics.json").write_text(json.dumps(doc, indent=1) + "\n")
     (out / "run_config.json").write_text(json.dumps(config, indent=1) + "\n")
 
-    figs = [fig_radargrams(out, preps, analyses, segment, keys=order),
+    if bed_ablation:
+        old = out / "radargrams.png"
+        two = out / "radargrams_tworow.png"
+        if old.exists() and not two.exists():
+            shutil.copy2(old, two)  # keep the pre-ablation two-row version
+    figs = [fig_radargrams(out, preps, analyses, segment, keys=order,
+                           ablation=([(pr, an, label)
+                                      for pr, an, label, _ in ab_rows]
+                                     if bed_ablation else None)),
             fig_decomposition(out, preps, analyses, keys=order)]
-    if gamma_rssnr:
+    if gamma_rssnr and corr_stats is not None:
         syn = None
         if add_30km:
             p30, a30 = preps[SYN30_KEY], analyses[SYN30_KEY]
@@ -1842,6 +2032,23 @@ def main():
                     f"{SYN30_MSL_M:.0f} m constant ellipsoidal height on "
                     "the same line (same 2016 system params, roll 0): a "
                     "prediction panel -- no measured data exists")
+    ap.add_argument("--bed-ablation", action="store_true",
+                    help="with --picked-bed: also simulate every pass with "
+                    "the BEDMACHINE and DEMOGORGN beds (identical "
+                    "gamma/processing; own cache suffixes) and add them as "
+                    "radargram rows -- the clean bed-source ablation")
+    ap.add_argument("--demogorgn-bed", action="store_true",
+                    help="use a DEMOGORGN realization as the bed "
+                    f"(pinned snapshot, {DGN_TAG} suffix); PLAIN -- the "
+                    "picked-bed hybrid is a recorded follow-up. Nadir bed "
+                    "sits ~44 m off our picks (documented, reported)")
+    ap.add_argument("--demogorgn-seed", type=int, default=0,
+                    help="DEMOGORGN realization seed_id (default 0; "
+                    "conditioning makes the seed nearly irrelevant at "
+                    "nadir)")
+    ap.add_argument("--no-companion", action="store_true",
+                    help="skip the constant-gamma companion correlation "
+                    "run (e.g. when only the sims/caches are needed)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
@@ -1849,7 +2056,9 @@ def main():
         surf_rough=not args.smooth_surface, out_root=args.out,
         force=args.force, picked_bed=args.picked_bed,
         gamma_rssnr=args.gamma_from_rssnr, processing=args.processing,
-        add_30km=args.add_30km)
+        add_30km=args.add_30km, bed_ablation=args.bed_ablation,
+        demogorgn_bed=args.demogorgn_bed, demogorgn_seed=args.demogorgn_seed,
+        companion=not args.no_companion)
 
 
 if __name__ == "__main__":

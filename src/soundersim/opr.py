@@ -51,6 +51,21 @@ BEDMACHINE = {
 }
 DATUM_NOTE = ("heights in m above the WGS84 ellipsoid per PGC documentation; "
               "matches CReSIS Elevation, no geoid offset applied")
+# DEMOGORGN-Antarctica: 100-member geostatistically simulated bed ensemble on
+# the Bedmap3 500 m grid (Gator Glaciology / Englacial; SGS + MCMC
+# mass-conservation, claude_notes/demogorgn_scout.md). A "LIVING DATA
+# PRODUCT" with NO metadata in the store: CRS/posting/datum were established
+# empirically by the scout -- EPSG:3031, 500 m, cell centers staggered 250 m
+# from BedMachine's grid, and values referenced to the EIGEN-6C4 GEOID like
+# BedMachine's native bed (add the BedMachine geoid to reach the ellipsoid).
+# The snapshot is PINNED; a store update forces an explicit re-pin.
+DEMOGORGN = {
+    "bucket": "us-west-2.opendata.source.coop",
+    "prefix": "englacial/demogorgn/icechunk/realizations.icechunk",
+    "region": "us-west-2", "crs": "EPSG:3031", "posting": 500.0,
+    "product": "DEMOGORGN-Antarctica (100-realization SGS/MCMC bed ensemble)",
+}
+DEMOGORGN_SNAPSHOT = "WG801625MG778C4DS6Y0"   # pinned 2026-08-03 (scout)
 CACHE_DIR = Path(__file__).resolve().parents[2] / "outputs" / "cache"
 NODATA = -9999.0
 
@@ -220,6 +235,10 @@ def fetch_bedmachine_window(bounds, region, pad_m=0.0, cache_dir=None):
     read from the product; see BEDMACHINE datum note). ``meta`` records the
     product/version and the BedMachine mask composition of the window. Cached
     as GeoTIFF + JSON sidecar under outputs/cache/; reruns are offline.
+
+    The cache GeoTIFF carries the EIGEN-6C4 geoid as BAND 2 (the repo's one
+    geoid source, consumed by ``fetch_demogorgn_window``); pre-band-2
+    single-band caches are treated as a miss and refetched once.
     """
     prod = BEDMACHINE[region]
     crs = prod["crs"]
@@ -229,7 +248,11 @@ def fetch_bedmachine_window(bounds, region, pad_m=0.0, cache_dir=None):
     cache_dir = Path(cache_dir or CACHE_DIR)
     tif = cache_dir / f"bedmachine_{region}_{key}.tif"
 
-    if not tif.exists():
+    needs_fetch = not tif.exists()
+    if not needs_fetch:
+        with rasterio.open(tif) as src:
+            needs_fetch = src.count < 2  # pre-geoid-band cache: refetch
+    if needs_fetch:
         import earthaccess
 
         earthaccess.login(strategy="netrc")
@@ -259,9 +282,10 @@ def fetch_bedmachine_window(bounds, region, pad_m=0.0, cache_dir=None):
         cache_dir.mkdir(parents=True, exist_ok=True)
         out = np.where(np.isfinite(bed), bed, NODATA).astype(np.float32)
         with rasterio.open(tif, "w", driver="GTiff", height=bed.shape[0],
-                           width=bed.shape[1], count=1, dtype="float32",
+                           width=bed.shape[1], count=2, dtype="float32",
                            crs=crs, transform=transform, nodata=NODATA) as dst:
             dst.write(out, 1)
+            dst.write(geoid.astype(np.float32), 2)
         tif.with_suffix(".json").write_text(json.dumps({
             "product": prod["product"], "version": version, "url": prod["url"],
             "crs": crs, "posting_m": step, "bounds_lonlat": list(bounds),
@@ -269,6 +293,7 @@ def fetch_bedmachine_window(bounds, region, pad_m=0.0, cache_dir=None):
             "vertical_datum": ("bed + geoid: meters above the WGS84 ellipsoid; "
                                "product bed is geoid-referenced, geoid var: "
                                + json.dumps(geoid_attrs, default=str)),
+            "geoid_band": 2,
             "mask_counts": counts,
             "mask_legend": "0 ocean, 1 ice-free land, 2 grounded ice, "
                            "3 floating ice, 4 other",
@@ -279,6 +304,106 @@ def fetch_bedmachine_window(bounds, region, pad_m=0.0, cache_dir=None):
         transform, crs = src.transform, str(src.crs)
     bed = np.where(bed == NODATA, np.nan, bed).astype(np.float32)
     meta = json.loads(tif.with_suffix(".json").read_text())
+    return bed, transform, crs, meta
+
+
+def bedmachine_geoid_window(bounds, region, pad_m=0.0, cache_dir=None):
+    """(geoid, transform, crs): the EIGEN-6C4 geoid on the BedMachine window
+    grid, from band 2 of the ``fetch_bedmachine_window`` cache (fetching it
+    if needed)."""
+    fetch_bedmachine_window(bounds, region, pad_m=pad_m, cache_dir=cache_dir)
+    prod = BEDMACHINE[region]
+    proj_bounds = _padded_proj_bounds(bounds, prod["crs"], pad_m)
+    key = hashlib.sha256(json.dumps(
+        [prod["url"],
+         [round(b, 1) for b in proj_bounds]]).encode()).hexdigest()[:12]
+    tif = Path(cache_dir or CACHE_DIR) / f"bedmachine_{region}_{key}.tif"
+    with rasterio.open(tif) as src:
+        return src.read(2), src.transform, str(src.crs)
+
+
+def fetch_demogorgn_window(bounds, pad_m=0.0, seed=0,
+                           snapshot=DEMOGORGN_SNAPSHOT, cache_dir=None):
+    """Windowed DEMOGORGN realization covering a lon/lat bbox + pad_m meters.
+
+    Antarctica only (the ensemble's domain). Returns (bed, transform, crs,
+    meta) at the native 500 m posting with bed converted to meters above the
+    WGS84 ELLIPSOID: DEMOGORGN publishes GEOID-referenced values with no
+    metadata (established empirically -- claude_notes/demogorgn_scout.md), so
+    the EIGEN-6C4 geoid from the BedMachine cache (band 2,
+    ``bedmachine_geoid_window``) is bilinearly resampled onto DEMOGORGN's
+    250 m-staggered grid and added ON READ. The cache GeoTIFF holds the RAW
+    geoid-referenced realization (mirroring the raw BedMachine netCDF), keyed
+    on (store, snapshot, seed, bounds): the pinned snapshot of this "living
+    data product" or a seed change forces a refetch.
+    """
+    crs, step = DEMOGORGN["crs"], DEMOGORGN["posting"]
+    proj_bounds = _padded_proj_bounds(bounds, crs, pad_m)
+    key = hashlib.sha256(json.dumps(
+        [DEMOGORGN["bucket"], DEMOGORGN["prefix"], snapshot, int(seed),
+         [round(b, 1) for b in proj_bounds]]).encode()).hexdigest()[:12]
+    cache_dir = Path(cache_dir or CACHE_DIR)
+    tif = cache_dir / f"demogorgn_antarctic_seed{int(seed):03d}_{key}.tif"
+
+    if not tif.exists():
+        import icechunk
+        import zarr
+
+        st = icechunk.s3_storage(bucket=DEMOGORGN["bucket"],
+                                 prefix=DEMOGORGN["prefix"],
+                                 region=DEMOGORGN["region"], anonymous=True)
+        repo = icechunk.Repository.open(st)
+        g = zarr.open_group(
+            store=repo.readonly_session(snapshot_id=snapshot).store, mode="r")
+        x, y = g["x"][:], g["y"][:]              # x ascending, y DESCENDING
+        seed_ids = g["seed_id"][:]
+        si = np.where(seed_ids == int(seed))[0]
+        if not len(si):
+            raise LookupError(f"DEMOGORGN seed_id {seed} not in the store")
+        x0, y0, x1, y1 = proj_bounds
+        ci = np.where((x >= x0 - step) & (x <= x1 + step))[0]
+        ri = np.where((y >= y0 - step) & (y <= y1 + step))[0]
+        if not len(ci) or not len(ri):
+            raise LookupError(f"DEMOGORGN does not cover {bounds}")
+        bed = g["realizations"][int(si[0]), ri[0]:ri[-1] + 1,
+                                ci[0]:ci[-1] + 1].astype(np.float32)
+        transform = rasterio.transform.from_origin(
+            x[ci[0]] - step / 2, y[ri[0]] + step / 2, step, step)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        out = np.where(np.isfinite(bed), bed, NODATA).astype(np.float32)
+        with rasterio.open(tif, "w", driver="GTiff", height=bed.shape[0],
+                           width=bed.shape[1], count=1, dtype="float32",
+                           crs=crs, transform=transform, nodata=NODATA) as dst:
+            dst.write(out, 1)
+        tif.with_suffix(".json").write_text(json.dumps({
+            "product": DEMOGORGN["product"],
+            "store": {k: DEMOGORGN[k] for k in ("bucket", "prefix", "region")},
+            "snapshot_id": snapshot, "seed_id": int(seed),
+            "crs": crs, "posting_m": step, "bounds_lonlat": list(bounds),
+            "pad_m": pad_m, "proj_bounds": list(proj_bounds),
+            "vertical_datum": (
+                "RAW GEOID-REFERENCED values (EIGEN-6C4, established "
+                "empirically -- the store has no metadata); "
+                "fetch_demogorgn_window adds the BedMachine geoid on read "
+                "to reach the WGS84 ellipsoid"),
+            "living_data_product": (
+                "the ensemble may change without notice; this window is "
+                "pinned to the snapshot above -- delete to re-fetch"),
+        }, indent=1) + "\n")
+
+    with rasterio.open(tif) as src:
+        bed = src.read(1)
+        transform, crs = src.transform, str(src.crs)
+    bed = np.where(bed == NODATA, np.nan, bed).astype(np.float32)
+    geoid, tr_g, crs_g = bedmachine_geoid_window(bounds, "antarctic",
+                                                 pad_m=pad_m,
+                                                 cache_dir=cache_dir)
+    bed = bed + resample_to_grid(geoid, tr_g, crs_g, bed.shape, transform,
+                                 crs)
+    meta = json.loads(tif.with_suffix(".json").read_text())
+    meta["returned_datum"] = ("bed + EIGEN-6C4 geoid (BedMachine band 2, "
+                              "bilinear across the 250 m grid stagger): "
+                              "meters above the WGS84 ellipsoid")
     return bed, transform, crs, meta
 
 
