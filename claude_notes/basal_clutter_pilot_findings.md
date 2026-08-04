@@ -375,3 +375,109 @@ run pure cache (+15 process_standard calls, ~12 min). Tests: 276 unit green
 (tests/test_demogorgn.py: band-2 gate incl. refetch-on-single-band,
 raw+geoid datum path on the staggered grid, snapshot/seed cache pinning,
 tag composition, hybrid-raises, nadir-offset math); ruff clean.
+
+## Bed-return tail excess (2026-08-03, assembly only)
+
+Quantifies the observation that **all three simulated bed variants sit above
+the measured bed-return decay after the bed echo**. New metric
+`bed_return_tail_{pass}` in
+`outputs/basal_clutter/full_pbed_rssnr_proc/metrics.json` + `bed_tail.png`
+(mirrored to `outputs/verification/basal_clutter_full_pbed_rssnr_proc/`).
+Pure cache replay of the composition invocation -- **no new simulations**.
+
+Definition: trace-ensemble mean power (dB rel each trace's OWN surface peak,
+the tool's existing gain-free currency), profiled against delay past **each
+trace's own bed reference** -- measured on its `Bottom` pick, sims on the
+**sim bed-layer nadir twtt** (the per-pass gate registers the SURFACE only,
+so no bed alignment is borrowed; residual nadir-bed offsets stay recorded in
+`*_bed_ablation_*.nadir_bed_offset_vs_picks`: BedMachine +0.37/+0.82/+0.71 us
+= 31/69/60 m deep, DEMOGORGN -0.08/+0.21/+0.14 us = -7/+17/+12 m). Slope = Theil-Sen (robust: one bright
+arc crossing the window cannot set it) over **bed+0.5 -> bed+3.5 us**;
+excess = sim - measured at bed+1/2/3 us.
+
+### Slopes: delay (dB/us) and refracted bed incidence angle (dB/deg)
+
+| pass | measured | picked bed | BedMachine | DEMOGORGN |
+|---|---|---|---|---|
+| low 449 m | **-8.22** / -2.01 | -7.46 / -1.62 | -8.26 / -1.81 | -6.51 / -1.54 |
+| mid 9150 m | **-5.15** / -2.64 | -4.15 / -1.95 | -5.28 / -2.68 | -4.90 / -2.43 |
+| high 10684 m | **-3.17** / -1.65 | -3.63 / -1.98 | -3.05 / -1.54 | -2.90 / -1.62 |
+| 30 km (pred.) | -- | -3.36 / -2.91 | -4.82 / -4.11 | -0.80 / -0.72 |
+
+The same post-bed delay probes **very different bed angles per altitude**
+(`bed_return_angle_map_deg`, +1/+2/+3 us): low **18/24/27 deg**, mid 6/8/10,
+high 5/7/9, 30 km 3/4/6. The dB/us columns are therefore NOT comparable
+across passes; the dB/deg columns are, and they are flat-ish (-1.5..-2.7)
+across the triplet -- one angular-backscatter law seen through three
+geometries.
+
+### Excess (sim - measured, dB) at bed+1 / +2 / +3 us
+
+| pass | picked bed | BedMachine | DEMOGORGN |
+|---|---|---|---|
+| low | **+10.8 / +9.7 / +11.8** | -5.9 / -9.8 / -5.5 | -14.3 / -14.4 / -11.4 |
+| mid | **+13.3 / +14.2 / +11.5** | +10.1 / +7.8 / +6.1 | +10.5 / +7.6 / +11.0 |
+| high | **+15.9 / +17.3 / +12.6** | +13.0 / +13.2 / +16.3 | +10.8 / +11.1 / +21.7 |
+
+Measured tail levels (dB rel own surface peak) at +1/+2/+3 us: low
+-57.5/-65.2/-73.2, mid -40.3/-46.0/-48.7, high -43.9/-47.1/-50.0.
+
+### Fair-comparison guard and noise-floor caveat
+
+Guard = min over the fit window of (sim **bed returns** - sim **surface
+returns**) from the per-interface decomposition; >= 10 dB required for the
+total-field tail to be read as bed returns.
+
+| pass | guard pbed | guard BM | guard DGN | meas tail +3 us | meas floor | margin | sim record coverage |
+|---|---|---|---|---|---|---|---|
+| low | +26.7 ok | **+9.6 FAIL** | **+3.8 FAIL** | -73.2 | -125.8 | **+52.6** | 1.00 / 1.00 / 1.00 |
+| mid | +26.7 ok | +16.3 ok | +22.3 ok | -48.7 | -86.1 | **+37.4** | 0.95 / 0.97 / 0.92 |
+| high | +29.1 ok | +23.6 ok | +26.9 ok | -50.0 | -75.3 | **+25.3** | 1.00 / 1.00 / 1.00 |
+| 30 km | +17.5 ok | +15.0 ok | +13.0 ok | -- | -- | -- | 1.00 |
+
+* The two guard FAILs are the LOW pass's genuinely-2-D beds, whose bed
+  returns fall so fast that the (bed-source-invariant) surface returns come
+  within 4-10 dB by bed+3.5 us: their already-negative excesses are
+  **upper bounds** on the sim bed returns; use the bed-returns-only slopes
+  (-8.39 BedMachine, -7.01 DEMOGORGN) instead of the total-field ones.
+* **No pass is floor-limited**: the measured tail stands 25-53 dB above the
+  pass's own floor estimate at bed+3 us, so the measured decay is real
+  returns and the excesses are not a floor artifact. The high pass has the
+  least headroom (+25.3 dB), as expected from its -75.3 dB floor.
+* Sim coverage < 1 on the mid pass only (0.92-0.97): the fast-time window is
+  anchored on the DEEPEST bed + 3.5 us, so a few of the shallowest traces run
+  out of record at the very end of the fit window.
+
+### What the numbers say
+
+The excess is real and **grows with altitude**: the best-model (picked bed)
+sim runs +10 dB hot at 449 m, +14 at 9.2 km and +17 at 10.7 km at bed+2 us --
+roughly **double to quadruple the corresponding bed-WINDOW offset** already
+recorded in `clutter_*` (+5.7 / +5.4 / +3.8 dB), i.e. the sim does not merely
+put too much power in the bed echo, it puts too much power **off-apex**. The
+slope columns say where that comes from: at low and mid the sim tail decays
+**0.8-1.0 dB/us too slowly**, at high it decays slightly too fast (-3.63 vs
+-3.17) so its whole +16 dB gap is already open by bed+1 us. Two mechanisms
+are visible and separable. (1) **Attenuation obliquity**: raising the
+one-way attenuation from the run's 15 dB/km to run_cross_season's calibrated
+effective 31 dB/km adds 2.15 -> 4.44 dB of decay across the low pass's
+window (+0.76 dB/us, essentially the entire low-pass slope deficit) but only
+0.08 -> 0.16 dB/us at mid/high, whose tails never leave 10 deg -- so the
+attenuation book cannot explain the altitude-growing part. (2) **Bed
+roughness/anisotropy**: the bed-source ablation splits cleanly at the low
+pass, where the picked bed's cross-track RIDGES (the known 1-D-residual
+artifact, anisotropy 1.90) sit +10 dB hot while the two genuinely 2-D beds
+sit 5-14 dB LOW -- i.e. at 449 m the tail is a direct read-out of bed
+roughness and the picked bed's excess is largely artifact, whereas at 9-11 km
+**all three beds are +7..+17 dB hot**, so the altitude part of the excess is
+NOT a bed-topography choice. That leaves the RSSNR gamma's recorded
+bright-end overshoot (+5-10 dB where G2 > 0 dB), the missing volume/
+englacial loss, and the sim's coherent-field speckle statistics (g2: 2-3
+looks vs the product's 6-11) as the remaining candidates -- the last of which
+raises the ensemble MEAN only weakly, so the level terms are the prime
+suspects. Practical consequence for the 30 km prediction: its bed-over-
+clutter margin (+11.4 dB in the bed window) is computed from the same
+too-hot off-apex bed returns, so the prediction is optimistic in the same
+direction, and the DEMOGORGN 30 km tail (-0.80 dB/us, essentially flat) is
+the least trustworthy of the four -- a follow-up, not a fix, and nothing
+here was tuned.

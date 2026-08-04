@@ -58,7 +58,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
 from pyproj import Transformer  # noqa: E402
-from scipy import ndimage  # noqa: E402
+from scipy import ndimage, stats  # noqa: E402
 from scipy.spatial import cKDTree  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +102,20 @@ SCOUT_PK_US = 0.3                    # ... over peak within +-0.3 us of bed
 # and agrees with end-30..-25 to ~1 dB (low), so it is a floor estimate
 # with at most a few dB of residual high-pass clutter tail (upper bound).
 FLOOR_TAIL_LO_US, FLOOR_TAIL_HI_US = 12.0, 8.0
+# BED-RETURN TAIL (the "sim tails flatten above measured" observation).
+# Windows are relative to each trace's OWN bed reference -- the measured
+# Bottom pick for measured data, the SIM BED-LAYER NADIR TWTT for sims (the
+# per-pass surface registration aligns the surface only, so each dataset is
+# referenced to its own bed and the residual nadir-bed offset is reported
+# alongside, never used to shift a curve).
+TAIL_PROF_US = (-1.0, 4.0)          # bed-referenced profile extent
+TAIL_FIT_US = (0.5, 3.5)            # robust (Theil-Sen) slope fit window
+TAIL_EXCESS_US = (1.0, 2.0, 3.0)    # sim - measured sample delays
+TAIL_GUARD_DB = 10.0                # fair-comparison guard: the sim SURFACE
+                                    # returns must sit this far BELOW the sim
+                                    # BED returns across the fit window, else
+                                    # the "bed tail" is really surface clutter
+TAIL_FLOOR_MARGIN_DB = 3.0          # measured tail counted floor-limited below
 
 N_TRACES_PILOT = 48
 N_TRACES_FULL = 240        # same ~210 m sim trace spacing as the pilot
@@ -181,6 +195,19 @@ def bed_reach(h, d, n_ice, dt_extra):
     if dt_extra >= t_extra[-1]:
         raise ValueError("bed_reach: sweep did not cover dt_extra")
     return float(np.interp(dt_extra, t_extra, y))
+
+
+def bed_incidence_deg(h, d, n_ice, dt_extra):
+    """Refracted IN-ICE incidence angle at the bed (deg) for a bed return
+    arriving ``dt_extra`` (s, scalar or array) past the nadir-bed delay --
+    the same Snell sweep as ``bed_reach``, inverted for the angle instead of
+    the cross-track distance. This is the angular-backscatter reading of a
+    post-bed delay: tail delay -> off-nadir bed incidence angle."""
+    theta = np.linspace(0.0, np.deg2rad(89.5), 4000)[1:]
+    phi = np.arcsin(np.clip(np.sin(theta) / n_ice, 0.0, 1.0 - 1e-12))
+    t_extra = (2.0 * (h / np.cos(theta) + n_ice * d / np.cos(phi)) / C
+               - 2.0 * (h + n_ice * d) / C)
+    return np.degrees(np.interp(dt_extra, t_extra, phi))
 
 
 def derive_reach(h_max, dbs_max, d_min):
@@ -1189,6 +1216,159 @@ def rel_mean_profile(P, twtt, dt, t_ref, norm, lo_us=-1.5, hi_us=14.5):
     return rel_us, 10.0 * np.log10(np.maximum(prof, 1e-30))
 
 
+# ------------------------------------------------------------------------
+# bed-return tail: how fast the power decays AFTER the bed echo
+# ------------------------------------------------------------------------
+# Complements (does not duplicate) the existing bed-WINDOW level in
+# clutter_{key} / *_bed_ablation_{key} ("bed_rel_surf_db", a single mean over
+# bed-0.5 -> bed+1.5 us): this measures the SHAPE of the decay past the bed,
+# which is where the sim and the measurement visibly diverge.
+def _at_us(rel_us, db, t):
+    """Profile value (dB) at delay ``t`` us past the bed reference."""
+    ok = np.isfinite(db)
+    if ok.sum() < 2:
+        return float("nan")
+    return float(np.interp(t, rel_us[ok], db[ok]))
+
+
+def tail_slope_db_per_us(rel_us, db, lo=None, hi=None):
+    """Robust (Theil-Sen) slope of a mean-power profile (dB) vs delay (us)
+    over the fit window. Negative = a decaying tail; ~0 = a flat pedestal.
+    Theil-Sen (not least squares) so a single bright arc crossing the window
+    cannot set the slope."""
+    lo = TAIL_FIT_US[0] if lo is None else lo
+    hi = TAIL_FIT_US[1] if hi is None else hi
+    m = np.isfinite(db) & (rel_us >= lo) & (rel_us <= hi)
+    if m.sum() < 3:
+        return float("nan")
+    return float(stats.theilslopes(db[m], rel_us[m])[0])
+
+
+def tail_slope_db_per_deg(p, rel_us, db, lo=None, hi=None):
+    """Same robust fit against the REFRACTED off-nadir bed incidence angle
+    (deg) instead of delay -- the physically interpretable angular-backscatter
+    view. Uses the pass's median geometry (median AGL, median ice thickness);
+    the delay->angle map is nonlinear, so this is a window-average slope."""
+    lo = TAIL_FIT_US[0] if lo is None else lo
+    hi = TAIL_FIT_US[1] if hi is None else hi
+    m = np.isfinite(db) & (rel_us >= lo) & (rel_us <= hi)
+    if m.sum() < 3:
+        return float("nan")
+    ang = bed_incidence_deg(p["h_med"], p["thick_med"],
+                            float(np.sqrt(rac.EPS_ICE)), rel_us[m] * 1e-6)
+    return float(stats.theilslopes(db[m], ang)[0])
+
+
+def tail_angle_map(p, delays_us=(0.5, 1.0, 2.0, 3.0, 3.5)):
+    """Post-bed delay -> refracted bed incidence angle (deg) for this pass."""
+    n_ice = float(np.sqrt(rac.EPS_ICE))
+    return {f"+{t:g}us": round(float(bed_incidence_deg(
+        p["h_med"], p["thick_med"], n_ice, t * 1e-6)), 2) for t in delays_us}
+
+
+def sim_tail_stats(p, a):
+    """Bed-return tail numbers for ONE simulated pass/bed source, from its
+    bed-referenced ensemble mean-power profiles (dB rel own surface peak).
+    Includes the fair-comparison guard: the sim SURFACE-return curve must sit
+    >= TAIL_GUARD_DB below the sim BED-return curve everywhere in the fit
+    window, else the total-field tail is surface clutter, not bed returns."""
+    rel, tot = a["bed_profs"]["sim_total"]
+    sur, bed = a["bed_profs"]["sim_surface"][1], a["bed_profs"]["sim_bed"][1]
+    lo, hi = TAIL_FIT_US
+    m = (rel >= lo) & (rel <= hi)
+    marg = bed[m] - sur[m]
+    j = int(np.argmin(marg))
+    ok = bool(marg[j] >= TAIL_GUARD_DB)
+    return {
+        "slope_db_per_us": round(tail_slope_db_per_us(rel, tot), 3),
+        "bed_returns_slope_db_per_us": round(tail_slope_db_per_us(rel, bed), 3),
+        "slope_db_per_deg": round(tail_slope_db_per_deg(p, rel, tot), 3),
+        "level_rel_surf_db": {f"+{t:g}us": round(_at_us(rel, tot, t), 2)
+                              for t in TAIL_EXCESS_US},
+        "bed_returns_level_rel_surf_db": {
+            f"+{t:g}us": round(_at_us(rel, bed, t), 2) for t in TAIL_EXCESS_US},
+        "guard": {"min_bed_minus_surface_returns_db": round(float(marg[j]), 2),
+                  "at_us": round(float(rel[m][j]), 2),
+                  "threshold_db": TAIL_GUARD_DB, "pass": ok,
+                  "note": "sim bed returns minus sim surface returns "
+                  "(per-interface decomposition), minimum over the fit "
+                  "window; a FAIL means the total-field tail there is "
+                  "surface-return clutter and the total-field slope/excess "
+                  "must be read as an upper bound (use the bed-returns-only "
+                  "slope instead)"},
+        "record_coverage_frac": a["tail_cov"]["sim"]}
+
+
+def meas_tail_stats(p, a):
+    """Measured bed-return tail + the noise-floor caveat: is the measured
+    decay genuinely bed returns at bed+3 us, or is it floor-limited there?"""
+    rel, db = a["bed_profs"]["measured"]
+    lev = {f"+{t:g}us": round(_at_us(rel, db, t), 2) for t in TAIL_EXCESS_US}
+    floor = a["floor_db"]
+    marg = round(lev[f"+{TAIL_EXCESS_US[-1]:g}us"] - floor, 2)
+    return {"slope_db_per_us": round(tail_slope_db_per_us(rel, db), 3),
+            "slope_db_per_deg": round(tail_slope_db_per_deg(p, rel, db), 3),
+            "level_rel_surf_db": lev,
+            "record_coverage_frac": a["tail_cov"]["measured"],
+            "noise_floor_caveat": {
+                "floor_rel_surf_db": floor,
+                f"tail_minus_floor_at_+{TAIL_EXCESS_US[-1]:g}us_db": marg,
+                "floor_limited": bool(marg < TAIL_FLOOR_MARGIN_DB),
+                "margin_threshold_db": TAIL_FLOOR_MARGIN_DB,
+                "note": "measured floor = deep record tail (end -12..-8 us, "
+                "the tool's existing estimate; an UPPER bound -- it may "
+                "still hold a few dB of clutter tail). A small margin means "
+                "the measured tail is floor-limited there and the sim-minus-"
+                "measured excess is a LOWER bound on the real gap"}}
+
+
+def bed_tail_entry(key, p, a, sources):
+    """Assemble the bed-return-tail metric for one pass. ``sources`` =
+    [(slug, analysis)] bed-source variants (the first is the headline).
+    All curves are trace-ensemble mean power in dB rel each trace's own
+    surface peak, referenced to that dataset's OWN bed reference."""
+    sim = {slug: sim_tail_stats(p, a_s) for slug, a_s in sources}
+    meas = meas_tail_stats(p, a) if a["bed_profs"].get("measured") else None
+    slopes = {"measured": meas["slope_db_per_us"] if meas else None,
+              **{slug: sim[slug]["slope_db_per_us"] for slug in sim}}
+    slopes_deg = {"measured": meas["slope_db_per_deg"] if meas else None,
+                  **{slug: sim[slug]["slope_db_per_deg"] for slug in sim}}
+    excess = None
+    if meas is not None:
+        excess = {slug: {t: round(sim[slug]["level_rel_surf_db"][t]
+                                  - meas["level_rel_surf_db"][t], 2)
+                         for t in meas["level_rel_surf_db"]} for slug in sim}
+    head = sources[0][0]
+    value = (excess[head][f"+{TAIL_EXCESS_US[1]:g}us"] if excess
+             else sim[head]["slope_db_per_us"])
+    return {
+        "value": value, "threshold": None, "op": "record", "pass": True,
+        "bed_return_tail_slope_db_per_us": slopes,
+        "bed_return_tail_slope_db_per_deg": slopes_deg,
+        "bed_return_tail_excess_db": excess,
+        "sim": sim, "measured": meas,
+        "bed_return_angle_map_deg": tail_angle_map(p),
+        "agl_med_m": round(p["h_med"], 0),
+        "fit_window_us": list(TAIL_FIT_US),
+        "excess_delays_us": list(TAIL_EXCESS_US),
+        "note": "KEY DELIVERABLE (bed-return tail): robust Theil-Sen slope "
+        "of the trace-ensemble mean power (dB rel own surface peak) vs "
+        f"delay over bed+{TAIL_FIT_US[0]:g} -> bed+{TAIL_FIT_US[1]:g} us, "
+        "each trace referenced to its OWN bed (measured: its Bottom pick; "
+        "sim: the sim bed-layer nadir twtt), plus sim-minus-measured excess "
+        "at bed+1/2/3 us. Negative slope = decaying tail. 'guard' is the "
+        "fair-comparison check that the sim tail is bed returns and not "
+        "surface returns; 'noise_floor_caveat' asks whether the MEASURED "
+        "tail is floor-limited. The *_db_per_deg variants refit the same "
+        "window against the REFRACTED off-nadir bed incidence angle "
+        "(bed_return_angle_map_deg): the same post-bed delay probes very "
+        "different bed angles at 0.4 vs 10 km AGL, so the angular slopes -- "
+        "not the delay slopes -- are what compare across passes. "
+        "Complements the single bed-window level in "
+        f"clutter_{key} (bed-0.5 -> bed+1.5 us mean) -- this is the decay "
+        "SHAPE past the bed, not the window level. recorded only"}
+
+
 def analyze_pass(p, sim, proc=None):
     """Per-pass sim-vs-measured clutter metrics + per-interface (surface- vs
     bed-borne) decomposition + profiles for the figures. ``proc``
@@ -1234,6 +1414,17 @@ def analyze_pass(p, sim, proc=None):
         "sim_surface": rel_mean_profile(Ps, tw, dtf, t_s, spk),
         "sim_bed": rel_mean_profile(Pb, tw, dtf, t_s, spk),
     }
+    # BED-referenced profiles (the tail metrics): sims on the SIM bed-layer
+    # nadir twtt, measured on its own Bottom pick. record_coverage = fraction
+    # of traces whose record actually reaches the end of the fit window (the
+    # fast-time window is anchored on the DEEPEST bed + POST_BED_US).
+    bed_profs = {
+        "sim_total": rel_mean_profile(P, tw, dtf, t_b, spk, *TAIL_PROF_US),
+        "sim_surface": rel_mean_profile(Ps, tw, dtf, t_b, spk, *TAIL_PROF_US),
+        "sim_bed": rel_mean_profile(Pb, tw, dtf, t_b, spk, *TAIL_PROF_US),
+    }
+    tail_cov = {"sim": round(float(np.mean(
+        tw[-1] - t_b >= TAIL_FIT_US[1] * 1e-6)), 3), "measured": None}
     clean = {k: round(v, 2) for k, v in m_sim.items() if not k.startswith("_")}
 
     def _prof_db(m):
@@ -1258,6 +1449,10 @@ def analyze_pass(p, sim, proc=None):
         noise_limited = bool(m_meas["midcol_rel_surf_db"] - floor_db < 3.0)
         profs["measured"] = rel_mean_profile(meas, tw_m, dt_m, p["surf"],
                                              m_meas["_spk"])
+        bed_profs["measured"] = rel_mean_profile(
+            meas, tw_m, dt_m, p["bot"], m_meas["_spk"], *TAIL_PROF_US)
+        tail_cov["measured"] = round(float(np.mean(
+            tw_m[-1] - p["bot"] >= TAIL_FIT_US[1] * 1e-6)), 3)
         cleanm = {k: round(v, 2) for k, v in m_meas.items()
                   if not k.startswith("_")}
         meas_prof = _prof_db(m_meas)
@@ -1274,7 +1469,8 @@ def analyze_pass(p, sim, proc=None):
             "meas_noise_limited": noise_limited,
             "bed_delay_med_us": round(float(np.nanmedian(
                 (p["bot"] - p["surf"]))) * 1e6, 2),
-            "profs": profs, "P": P, "t_s": t_s, "meas_arr": meas}
+            "profs": profs, "bed_profs": bed_profs, "tail_cov": tail_cov,
+            "P": P, "t_s": t_s, "meas_arr": meas}
 
 
 # ========================================================================
@@ -1549,6 +1745,59 @@ def fig_decomposition(out, preps, analyses, keys=None, ablation=None):
     return fp
 
 
+def fig_bed_tail(out, preps, analyses, metrics, keys=None, ablation=None):
+    """Per pass: BED-REFERENCED ensemble mean-power profiles -- measured vs
+    each bed source's sim total, plus the sim surface-return curve (the
+    fair-comparison guard) and the measured noise floor. The fit window is
+    shaded; this is the figure behind bed_return_tail_*."""
+    keys = keys or ORDER
+    styles = {"picked_bed": dict(color="tab:green", lw=1.4),
+              "bedmachine": dict(color="tab:red", lw=1.2, ls=":"),
+              "demogorgn": dict(color="tab:purple", lw=1.2, ls=(0, (4, 2)))}
+    ab_an = {("demogorgn" if "DEMOGORGN" in label else "bedmachine"): an
+             for _, an, label in (ablation or [])}
+    fig, axs = plt.subplots(1, len(keys), figsize=(5.2 * len(keys), 4.6),
+                            sharey=True, squeeze=False)
+    for k, key in enumerate(keys):
+        ax, a = axs[0, k], analyses[key]
+        e = metrics[f"bed_return_tail_{key}"]
+        main = next(iter(e["sim"]))
+        if "measured" in a["bed_profs"]:
+            ax.plot(*a["bed_profs"]["measured"], color="black", lw=1.8,
+                    label=f"measured ({e['measured']['slope_db_per_us']:+.1f}"
+                          " dB/us)")
+            ax.axhline(e["measured"]["noise_floor_caveat"]["floor_rel_surf_db"],
+                       color="0.5", lw=0.9, ls=":", label="measured floor")
+        for slug, an in [(main, analyses)] + list(ab_an.items()):
+            av = an[key] if slug != main else a
+            ax.plot(*av["bed_profs"]["sim_total"],
+                    label=f"sim {slug.replace('_', ' ')} "
+                          f"({e['sim'][slug]['slope_db_per_us']:+.1f} dB/us)",
+                    **styles.get(slug, dict(lw=1.2)))
+        ax.plot(*a["bed_profs"]["sim_surface"], color="tab:orange", lw=1.0,
+                ls="--", label=f"sim surface returns ({main.replace('_', ' ')})")
+        ax.axvspan(*TAIL_FIT_US, color="tab:blue", alpha=0.07,
+                   label="slope fit window" if k == 0 else None)
+        ax.axvline(0.0, color="0.5", lw=0.8)
+        ang = e["bed_return_angle_map_deg"]
+        ax.set_title(f"{key} ({preps[key]['h_med']:.0f} m AGL)  bed incidence "
+                     f"+1/+2/+3 us = {ang['+1us']:.0f}/{ang['+2us']:.0f}/"
+                     f"{ang['+3us']:.0f} deg", fontsize=9)
+        ax.set_xlim(*TAIL_PROF_US)
+        ax.grid(alpha=0.3)
+        ax.set_xlabel("delay past own bed reference (us)")
+        if k == 0:
+            ax.set_ylabel("dB rel own surface peak (mean power)")
+            ax.legend(fontsize=7, loc="lower left")
+    fig.suptitle("bed-return tail: decay past the bed echo (each dataset on "
+                 "its OWN bed reference)")
+    fig.tight_layout()
+    fp = out / "bed_tail.png"
+    fig.savefig(fp, dpi=130)
+    plt.close(fig)
+    return fp
+
+
 # ========================================================================
 # main
 # ========================================================================
@@ -1784,6 +2033,27 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                         "picked_bed": round(_pearson(_smooth_db(
                             s_sim, a_pb["sim_bed_prof_db"]), meas), 3)}
                 metrics[f"{slug}_bed_ablation_{key}"] = e
+    # ---- bed-return tail: decay past the bed echo, sim vs measured ----
+    main_slug = ("picked_bed" if picked_bed else
+                 "demogorgn" if demogorgn_bed else "bedmachine")
+    ab_by_slug = [("demogorgn" if "DEMOGORGN" in label else "bedmachine", an)
+                  for _, an, label, _ in (ab_rows or [])]
+    for key in order:
+        sources = ([(main_slug, analyses[key])]
+                   + [(slug, an[key]) for slug, an in ab_by_slug])
+        e = bed_tail_entry(key, preps[key], analyses[key], sources)
+        metrics[f"bed_return_tail_{key}"] = e
+        sl = e["bed_return_tail_slope_db_per_us"]
+        print(f"  bed-return tail {key}: slope dB/us " + ", ".join(
+            f"{k} {v:+.2f}" for k, v in sl.items() if v is not None)
+            + ("; excess at +2 us " + ", ".join(
+                f"{k} {v['+2us']:+.1f}" for k, v in
+                e["bed_return_tail_excess_db"].items())
+               if e["bed_return_tail_excess_db"] else "")
+            + "; guard " + ", ".join(
+                f"{k} {'ok' if v['guard']['pass'] else 'FAIL'} "
+                f"({v['guard']['min_bed_minus_surface_returns_db']:+.1f} dB)"
+                for k, v in e["sim"].items()), flush=True)
     if gamma_rssnr:
         metrics["rssnr_gamma_mapping"] = {
             "value": gmap["k_db"], "threshold": None, "op": "record",
@@ -1917,7 +2187,13 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "reach derived per pass out to nadir-bed delay + "
         f"{MARGIN_US:.0f} us for both interfaces (bed reach includes Snell "
         "refraction); reversed high passes' roll negated; per-pass surface "
-        "registration; BedMachine 500 m texture caveat applies. "
+        "registration; BedMachine 500 m texture caveat applies. BED-RETURN "
+        "TAIL (bed_return_tail_*): robust slope of the bed-referenced "
+        "ensemble mean-power profile over bed+"
+        f"{TAIL_FIT_US[0]:g}..+{TAIL_FIT_US[1]:g} us and the sim-minus-"
+        "measured excess at bed+1/2/3 us, with a guard that the sim tail is "
+        "bed returns (not surface returns) and a caveat on whether the "
+        "measured tail is noise-floor-limited. "
         + MEASURED_CAVEATS
         + (" PICKED BED: " + PICKED_BED_NOTE if picked_bed else "")
         + (" DEMOGORGN BED: " + DGN_NOTE if demogorgn_bed else "")
@@ -1946,7 +2222,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     figs = [fig_radargrams(out, preps, analyses, segment, keys=order,
                            ablation=ab_fig),
             fig_decomposition(out, preps, analyses, keys=order,
-                              ablation=ab_fig)]
+                              ablation=ab_fig),
+            fig_bed_tail(out, preps, analyses, metrics, keys=order,
+                         ablation=ab_fig)]
     if gamma_rssnr and corr_stats is not None:
         syn = None
         if add_30km:
