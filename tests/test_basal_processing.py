@@ -53,7 +53,11 @@ def test_processing_chain_recorded(monkeypatch):
         nav_llh = nav
 
     p = {"lam": lam, "s_m": s, "idx": np.arange(T), "base": Base(),
-         "bot": np.full(T, 8e-6), "surf": np.full(T, 6e-6)}
+         "bot": np.full(T, 8e-6), "surf": np.full(T, 6e-6),
+         # sim-trace views (prep_pass contract; == <measured>[idx] at the
+         # product posting, the refined grid's own values at --posting-div>1)
+         "s_sim": s, "bot_sim": np.full(T, 8e-6),
+         "surf_sim": np.full(T, 6e-6)}
     out = rbc.process_standard(p, {"field": F, "twtt": twtt})
     ch = out["chain"]
     assert ch["real_chain"] == rbc.REAL_CHAIN_2016

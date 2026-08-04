@@ -163,8 +163,11 @@ def test_dgn_plus_picked_bed_raises():
 
 
 def test_nadir_bed_offset_math():
+    # bot_sim = the Bottom pick ON THE SIM TRACES (prep_pass contract:
+    # bot[idx] at the product posting, the refined grid at --posting-div>1)
     p = {"bot": np.array([10e-6, 10e-6, 10e-6, 99.0]),
-         "idx": np.array([0, 1, 2])}
+         "idx": np.array([0, 1, 2]),
+         "bot_sim": np.array([10e-6, 10e-6, 10e-6])}
     sim = {"nadir": np.column_stack([np.full(3, 5e-6),
                                      np.full(3, 10.5e-6)])}
     off = rbc.nadir_bed_offset(p, sim)

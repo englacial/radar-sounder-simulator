@@ -117,6 +117,18 @@ TAIL_GUARD_DB = 10.0                # fair-comparison guard: the sim SURFACE
                                     # the "bed tail" is really surface clutter
 TAIL_FLOOR_MARGIN_DB = 3.0          # measured tail counted floor-limited below
 
+# ---- hypothesis-test knobs (campaign 2026-08-03) ----------------------
+# Shared carrier of the triplet (scout table: identical 190 MHz/50 MHz on all
+# three passes); asserted per pass in prep_pass whenever a knob needs it.
+FC_HZ = 190e6
+ANT_DEFAULT = "array"
+LAM_ICE_M = C / (FC_HZ * float(np.sqrt(3.17)))     # ~0.886 m at 190 MHz
+BED_ROUGH_VALIDITY = (
+    "Gerekos 2023 sub-facet roughness: l <= facet size (10.7/46.0/49.8/81.9 m "
+    "here) and up to a few lambda_ice (lambda_ice = 0.886 m at 190 MHz); "
+    "accuracy ~0.3 dB below lambda/10, ~1 dB near sigma = lambda/4 = 0.22 m "
+    "(the comfortable ceiling), degrading beyond ~0.4*lambda")
+
 N_TRACES_PILOT = 48
 N_TRACES_FULL = 240        # same ~210 m sim trace spacing as the pilot
 
@@ -493,7 +505,8 @@ def segment_s_range(ref, segment):
     return float(min(ss)), float(max(ss))
 
 
-def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi):
+def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi,
+                        g2_offset_db=0.0):
     """Median-anchored |Gamma_bed|^2(s) profile (module-section comment).
 
     Pure mapping math (unit-tested): G2 = 2*A*H - RSSNR + K with K set so
@@ -514,7 +527,9 @@ def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi):
     base = 2.0 * att_db_per_km * thick_m / 1e3 - rssnr        # G2 - K
     g2_const = float(20.0 * np.log10(abs(
         fresnel_normal(rac.EPS_ICE, rac.EPS_BED))))
-    k = g2_const - float(np.median(base[seg]))
+    # g2_offset_db (T1 double-count guard) rides on K: it shifts the whole
+    # mapped profile, so every recorded statistic below sees it.
+    k = g2_const - float(np.median(base[seg])) + g2_offset_db
     g2 = base + k
     floor = float(np.nanmin(g2[seg]))
     g2 = np.where(ok, g2, floor)
@@ -546,18 +561,53 @@ def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi):
             "med_sample_spacing_m": round(float(np.median(np.diff(s[o]))), 0)}
 
 
-def build_rssnr_gamma(axis, segment, att):
+def bed_rough_nadir_db(sigma_m, f0=FC_HZ, eps_ice=None):
+    """Gerekos coherent-term mean-POWER attenuation at NADIR on a buried bed
+    facet, in dB: 10*log10(exp(-sigma^2 K^2)) with K = 2*k_ice*cos(0) (the
+    facet's LOCAL medium is ice -- docs/roughness.md). Returned NEGATIVE."""
+    k_ice = 2.0 * np.pi * f0 * np.sqrt(eps_ice or rac.EPS_ICE) / C
+    return float(-(sigma_m * 2.0 * k_ice) ** 2 * 10.0 / np.log(10.0))
+
+
+def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
+                      extra_db=0.0):
     """Fetch + map: the shared anchor G2(s) profile dict (rssnr_gamma_profile
     output + fetch provenance), on the anchor along-track axis ``axis``
-    (ref_bed_picks)."""
+    (ref_bed_picks).
+
+    DOUBLE-COUNT GUARD (``bed_rough_sigma``, T1): the RSSNR-derived G2 is
+    calibrated against the MEASURED bed echo, which already contains whatever
+    roughness loss the real bed has. Switching on sub-facet bed roughness
+    makes the kernel apply exp(-sigma^2 K^2) a second time, so the mapped G2
+    is raised by exactly that nadir attenuation and the nadir bed level is
+    conserved by construction (verified against baseline in the metrics).
+    Only the COHERENT term is compensated -- the added incoherent term is
+    surplus, so the conservation is exact only while the specular term
+    dominates at nadir; the measured nadir shift is reported."""
     d, prov = fetch_rssnr_anchor()
     tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
     sx, sy = tr.transform(d["lon"], d["lat"])
     s_smp = project_to_track(sx, sy, axis["x"], axis["y"], axis["s"])
     thick = C / (2.0 * np.sqrt(axis["eps_ice"])) * (d["btw"] - d["stw"])
     seg_lo, seg_hi = segment_s_range(axis, segment)
+    shift = ((-bed_rough_nadir_db(bed_rough_sigma) + extra_db)
+             if bed_rough_sigma else 0.0)
     prof = rssnr_gamma_profile(s_smp, d["rssnr"], thick, d["qc"], att,
-                               seg_lo, seg_hi)
+                               seg_lo, seg_hi, g2_offset_db=shift)
+    if bed_rough_sigma:
+        prof["bed_rough_guard"] = {
+            "sigma_m": bed_rough_sigma,
+            "nadir_coherent_attenuation_db":
+                round(bed_rough_nadir_db(bed_rough_sigma), 2),
+            "empirical_extra_db": round(extra_db, 2),
+            "g2_shift_db": round(shift, 2),
+            "note": "G2 raised by the nadir coherent-term roughness "
+            "attenuation so the nadir bed level is conserved (the RSSNR "
+            "calibration already contains the real bed's roughness loss). "
+            "The analytic term compensates the COHERENT part only; "
+            "empirical_extra_db is the pilot-measured residual that brings "
+            "the nadir bed window back onto the baseline once the added "
+            "INCOHERENT term is counted (recorded, not tuned per pass)"}
     prof["provenance"] = prov
     prof["note"] = RSSNR_GAMMA_NOTE
     return prof
@@ -768,11 +818,11 @@ def process_standard(p, sim):
     F = sim["field"]                       # (T, nb, 2) complex64
     twtt = sim["twtt"]
     lam = p["lam"]
-    s_sim = p["s_m"][p["idx"]]
+    s_sim = p["s_sim"]
     spacing = float(np.median(np.diff(s_sim)))
-    r_bed = float(C * np.nanmedian(p["bot"][p["idx"]]) / 2.0)  # optical range
+    r_bed = float(C * np.nanmedian(p["bot_sim"]) / 2.0)   # optical range
     L, theta_deg = alias_limited_aperture(lam, spacing, r_bed)
-    r_surf = float(C * np.nanmedian(p["surf"][p["idx"]]) / 2.0)
+    r_surf = float(C * np.nanmedian(p["surf_sim"]) / 2.0)
 
     # first-order nadir mocomp: dz to a ~2-aperture smoothed reference track
     z = np.asarray(p["base"].nav_llh[:, 2], np.float64)
@@ -875,6 +925,29 @@ def synth_altitude_fsub(fsub, bot_sub, alt_m):
     return fsub, new_bot, note
 
 
+def upsample_fsub(fsub, bot, div):
+    """T3: refine the along-track SIM grid by ``div`` (14.85 -> 7.43 m at
+    div=2) so the alias-limited aperture (sin(theta) = lam/(4*ds)) doubles.
+
+    Every per-trace GEOMETRY variable is linearly interpolated onto the
+    refined index grid; the radargram ``Data`` is carried by nearest
+    neighbour and is NEVER used on this grid (the measured side of every
+    metric keeps the original frame). Endpoints are preserved exactly, so
+    the refined traces land on the measured columns plus (div-1) new
+    columns between each pair."""
+    n = int(fsub.sizes["slow_time"])
+    pos = np.linspace(0.0, n - 1.0, (n - 1) * div + 1)
+    src = np.arange(n, dtype=np.float64)
+    up = fsub.isel(slow_time=np.rint(pos).astype(int)).copy()
+    for v in ("Latitude", "Longitude", "Elevation", "Roll", "Pitch",
+              "Heading", "Surface", "GPS_time"):
+        if v in up:
+            up[v] = ("slow_time",
+                     np.interp(pos, src, np.asarray(fsub[v].values,
+                                                    np.float64)))
+    return up, np.interp(pos, src, np.asarray(bot, np.float64))
+
+
 def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
     """rac.radar_grid with this study's margins (post-bed window POST_BED_US
     > clutter margin MARGIN_US): alias-free dt/oversample grid anchored on a
@@ -898,7 +971,7 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
 
 
 def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
-              fine_posting=False, dgn_seed=None):
+              fine_posting=False, dgn_seed=None, posting_div=1):
     """Slice (+reverse) the pass's frames onto the common window, derive the
     reach and grids, and build the base scene (REMA + BedMachine, cached).
     ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene;
@@ -943,6 +1016,16 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
             fsub, bot_sub, spec["synthetic_msl_m"])
     if fine_posting:
         n_traces = int(fsub.sizes["slow_time"])
+    # T3: simulate on a FINER along-track grid than the product posting. The
+    # measured arrays (fsub/bot_sub/surf) are untouched -- only the SIM trace
+    # grid is refined, so the measured side of every metric is unchanged.
+    fsub_sim, bot_sim_full = fsub, bot_sub
+    if posting_div > 1:
+        if not fine_posting:
+            raise ValueError("--posting-div refines the product-posting sim "
+                             "grid: use it with --processing standard")
+        fsub_sim, bot_sim_full = upsample_fsub(fsub, bot_sub, posting_div)
+        n_traces = int(fsub_sim.sizes["slow_time"])
 
     params = rac.mcords_params(SEASON, spec["param_frame"])
     wf = params["waveform"]
@@ -973,24 +1056,36 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
                                       oversample, window)
 
     base, aux = _retry(f"base_scene {key}",
-                       lambda: rac.base_scene(fsub, n_traces, reach["ct_m"]))
+                       lambda: rac.base_scene(fsub_sim, n_traces,
+                                              reach["ct_m"]))
     # Picked bed: the fast-time grid, reach and facet spacing above stay at
     # their BedMachine values (derived from each pass's OWN picks) so the two
     # runs share one lattice and are directly comparable.
     if dgn_seed is not None and ref is not None:
         raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
                          "follow-up, not wired (clean three-way ablation)")
-    aux["demogorgn"] = (apply_demogorgn_bed(base, fsub, reach["ct_m"],
+    aux["demogorgn"] = (apply_demogorgn_bed(base, fsub_sim, reach["ct_m"],
                                             dgn_seed)
                         if dgn_seed is not None else None)
     aux["picked_bed"] = apply_picked_bed(base, ref) if ref else None
     aux["rssnr_gamma"] = (apply_rssnr_gamma(base, axis or ref, gmap)
                           if gmap else None)
     idx = aux["idx"]
-    lat, lon = rac._lonlat(fsub)
     tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
-    px, py = tr.transform(lon, lat)
-    s = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(px), np.diff(py)))])
+
+    def _s_of(fs):
+        lat_, lon_ = rac._lonlat(fs)
+        x_, y_ = tr.transform(lon_, lat_)
+        return np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(x_),
+                                                         np.diff(y_)))])
+
+    s = _s_of(fsub)                                    # MEASURED trace axis
+    # sim-trace views: identical to <measured>[idx] at posting_div == 1, and
+    # the refined grid's own values when the sim grid is finer (T3).
+    s_sim = (s[idx] if posting_div == 1 else _s_of(fsub_sim)[idx])
+    surf_sim = (surf[idx] if posting_div == 1
+                else np.asarray(fsub_sim.Surface.values, np.float64)[idx])
+    bot_sim = bot_sub[idx] if posting_div == 1 else bot_sim_full[idx]
     return {"key": key, "segment": segment, "parts": parts, "rev": spec["rev"],
             "roll_note": roll_note, "params": params, "window": window,
             "win_note": win_note, "fsub": fsub, "bot": bot_sub, "surf": surf,
@@ -998,6 +1093,8 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
             "lam": lam, "spacing": spacing, "reach": reach, "rc_sim": rc_sim,
             "rc_frame": rc_frame, "b0": b0, "base": base, "aux": aux,
             "idx": idx, "s_m": s, "agl": agl, "r_min": r_min,
+            "s_sim": s_sim, "surf_sim": surf_sim, "bot_sim": bot_sim,
+            "posting_div": posting_div,
             "picked_bed": bool(ref), "gamma_rssnr": bool(gmap),
             "proc": bool(fine_posting), "synthetic": synth_note,
             "dgn": dgn_seed is not None,
@@ -1012,7 +1109,7 @@ def chunk_rows(p):
     """Split the sim trace indices into along-track chunks (~CHUNK_M, or
     ~CHUNK_M_PROC at fine posting: ~200 traces/chunk bounds kernel memory,
     and the shorter DEM windows cut wasted facet work)."""
-    s_sel = p["s_m"][p["idx"]]
+    s_sel = p["s_sim"]
     track = float(s_sel[-1] - s_sel[0])
     chunk_m = CHUNK_M_PROC if p.get("proc") else CHUNK_M
     n_chunks = max(1, int(round(track / chunk_m)))
@@ -1056,57 +1153,100 @@ def chunk_scene(base, rows, ct, gamma=False):
     return sc
 
 
-def sim_cfg(rc_sim, spacing, att, surf_rough):
+def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
+            bed_rough=None):
+    """``antenna``: 'array' (the MCoRDS-like default) or 'isotropic' (the
+    T4 pattern-sensitivity bound). ``bed_rough`` = (sigma_m, corr_length_m)
+    attaches Gerekos sub-facet roughness to the BED interface (T1)."""
     rcg = (RoughnessConfig(sigma_m=rac.SURF_ROUGH_SIGMA_M,
                            corr_length_m=rac.SURF_ROUGH_CL_M)
            if surf_rough else None)
+    rcb = (RoughnessConfig(sigma_m=bed_rough[0], corr_length_m=bed_rough[1])
+           if bed_rough else None)
+    ant = rc_sim.antenna
+    if antenna == "isotropic":
+        ant = AntennaConfig(kind="isotropic")
+    elif antenna == "array8":
+        # more-directive BRACKET: the same 0.5-lambda cross-track array with
+        # 8 elements (1.6x the recorded 5-element aperture). Not a claim
+        # about the real antenna -- the physical element pattern (dipoles
+        # over structure) always makes the true pattern MORE directive than
+        # the bare 5-element array factor the baseline uses, and this
+        # brackets that direction the way 'isotropic' brackets the other.
+        ant = AntennaConfig(kind="array", n_elements=8,
+                            spacing_lam=rac.SPACING_LAM, roll_source="nav")
     return SimConfig(
-        mode="coherent", split_sides=False, radar=rc_sim,
+        mode="coherent", split_sides=False,
+        radar=rc_sim.model_copy(update={"antenna": ant}),
         facets=FacetConfig(spacing=spacing),
         media=[Medium(name="air", eps_r=1.0),
                Medium(name="ice", eps_r=rac.EPS_ICE,
                       attenuation_db_per_km=att),
                Medium(name="bed", eps_r=rac.EPS_BED)],
         interfaces=[DemInterface(name="surface", roughness=rcg),
-                    DemInterface(name="bed")])
+                    DemInterface(name="bed", roughness=rcb)])
 
 
-def simulate_pass(p, runs_dir, att, surf_rough, force):
+def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None):
+    """Cache file name for one chunk. Non-default hypothesis knobs append a
+    suffix; the default case keeps the pre-campaign names (cache reuse)."""
+    return (f"{p['key']}_{p['segment']}"
+            f"{case_tag(p['picked_bed'], p['gamma_rssnr'], p['proc'], p['dgn'])}"
+            f"_c{ci:02d}"
+            + ("_srough" if surf_rough else "")
+            + (f"_att{att:g}" if att != rac.ATT_DB_PER_KM else "")
+            + ("" if antenna == ANT_DEFAULT else f"_ant{antenna}")
+            + ("" if not bed_rough
+               else f"_brough{bed_rough[0]:g}_{bed_rough[1]:g}")
+            + ("" if p.get("posting_div", 1) == 1
+               else f"_pdiv{p['posting_div']:d}"))
+
+
+def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
+               antenna=ANT_DEFAULT, bed_rough=None):
+    """run_level cache key for one chunk. Optional features (gamma,
+    DEMOGORGN, and the hypothesis knobs) contribute keys ONLY when they are
+    ON, so every pre-existing cache stays valid byte-for-byte."""
+    return {"season": SEASON, "pass": p["key"], "segment": p["segment"],
+            "picked_bed": p["picked_bed"],
+            **({"gamma_rssnr": True, "rssnr_snapshot": RSSNR_SNAPSHOT,
+                "rssnr_k_db": p["aux"]["rssnr_gamma"]["k_db"]}
+               if p["gamma_rssnr"] else {}),
+            **({"demogorgn_seed": p["aux"]["demogorgn"]["seed_id"],
+                "demogorgn_snapshot": p["aux"]["demogorgn"]["snapshot_id"]}
+               if p["dgn"] else {}),
+            "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
+            "reversed": p["rev"], "chunk": ci, "n_chunks": n_chunks,
+            "rows": [int(rows[0]), int(rows[-1])], "n_traces_total": n,
+            "spacing_m": round(p["spacing"], 4),
+            "ct_m": round(p["reach"]["ct_m"], 1), "att_db_per_km": att,
+            **({} if antenna == ANT_DEFAULT else {"antenna": antenna}),
+            **({} if not bed_rough
+               else {"bed_rough": [float(bed_rough[0]), float(bed_rough[1])]}),
+            **({} if p.get("posting_div", 1) == 1
+               else {"posting_div": int(p["posting_div"])}),
+            "window": p["window"], "surf_rough": bool(surf_rough),
+            "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
+            "t0_us": round(p["rc_sim"].t0 * 1e6, 5),
+            "n_samples_sim": p["rc_sim"].n_samples}
+
+
+def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
+                  bed_rough=None):
     """Chunked cached coherent surface+bed runs; assembled per-layer fields.
     Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...)."""
     chunks = chunk_rows(p)
-    cfg = sim_cfg(p["rc_sim"], p["spacing"], att, surf_rough)
+    cfg = sim_cfg(p["rc_sim"], p["spacing"], att, surf_rough, antenna,
+                  bed_rough)
     n = len(p["idx"])
     field = twtt = nadir = None
     wall, facets, dropped = 0.0, [], []
     for ci, rows in enumerate(chunks):
         scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"],
                             gamma=p["gamma_rssnr"])
-        rid = (f"{p['key']}_{p['segment']}"
-               f"{case_tag(p['picked_bed'], p['gamma_rssnr'], p['proc'], p['dgn'])}"
-               f"_c{ci:02d}"
-               + ("_srough" if surf_rough else "")
-               + (f"_att{att:g}" if att != rac.ATT_DB_PER_KM else ""))
-        # gamma keys only when ON: constant-gamma metas stay byte-identical
-        # to pre-feature caches (run_level skip-exists keys on meta json)
-        meta = {"season": SEASON, "pass": p["key"], "segment": p["segment"],
-                "picked_bed": p["picked_bed"],
-                **({"gamma_rssnr": True, "rssnr_snapshot": RSSNR_SNAPSHOT,
-                    "rssnr_k_db": p["aux"]["rssnr_gamma"]["k_db"]}
-                   if p["gamma_rssnr"] else {}),
-                **({"demogorgn_seed": p["aux"]["demogorgn"]["seed_id"],
-                    "demogorgn_snapshot":
-                        p["aux"]["demogorgn"]["snapshot_id"]}
-                   if p["dgn"] else {}),
-                "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
-                "reversed": p["rev"], "chunk": ci, "n_chunks": len(chunks),
-                "rows": [int(rows[0]), int(rows[-1])], "n_traces_total": n,
-                "spacing_m": round(p["spacing"], 4),
-                "ct_m": round(p["reach"]["ct_m"], 1), "att_db_per_km": att,
-                "window": p["window"], "surf_rough": bool(surf_rough),
-                "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
-                "t0_us": round(p["rc_sim"].t0 * 1e6, 5),
-                "n_samples_sim": p["rc_sim"].n_samples}
+        rid = chunk_rid(p, ci, att, surf_rough, antenna, bed_rough)
+        meta = chunk_meta(p, ci, rows, len(chunks), n, att, surf_rough,
+                          antenna, bed_rough)
         diag, arrs = rac.run_level(rid, scene, cfg, meta, runs_dir,
                                    p["oversample"], force)
         if field is None:
@@ -1166,7 +1306,7 @@ def nadir_bed_offset(p, sim):
     """Median offset of the SIMULATED nadir bed vs the pass's own radar
     pick (us and in-ice meters) -- reported, not tuned away (the DEMOGORGN
     thickness-convention misfit shows up here)."""
-    d = sim["nadir"][:, 1] - p["bot"][p["idx"]]
+    d = sim["nadir"][:, 1] - p["bot_sim"]
     med = float(np.nanmedian(d))
     return {"med_us": round(med * 1e6, 3),
             "med_m_ice": round(med * C / (2.0 * np.sqrt(rac.EPS_ICE)), 1),
@@ -1382,7 +1522,7 @@ def analyze_pass(p, sim, proc=None):
         F = sim["field"]
         P = np.abs(F.sum(-1)) ** 2
         Ps, Pb = np.abs(F[..., 0]) ** 2, np.abs(F[..., 1]) ** 2
-    surf_pick = p["surf"][p["idx"]]
+    surf_pick = p["surf_sim"]
 
     # per-pass surface registration (scout pitfall 5: never shared)
     gate = rac.leading_edge_gate(Ps, p["spacing"], dtf, p["rc_frame"].t0,
@@ -1502,7 +1642,7 @@ def bed_profile_correlations(p, a, a_const, gmap, axis):
     grid). sim(RSSNR) vs the RSSNR-implied pattern is the by-construction
     sanity check (geometry/speckle-limited); sim vs MEASURED -- for both
     gamma models -- is the real test. Returns (stats, plot-series)."""
-    s_meas, s_sim = p["s_m"], p["s_m"][p["idx"]]
+    s_meas, s_sim = p["s_m"], p["s_sim"]
     meas = np.interp(s_sim, s_meas,
                      _smooth_db(s_meas, a["meas_bed_prof_db"]))
     sim_r = _smooth_db(s_sim, a["sim_bed_prof_db"])
@@ -1606,7 +1746,7 @@ def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
     surf_med_s = float(np.nanmedian(a["t_s"]))
     rel_s = (twtt_s - surf_med_s) * 1e6
     ms = (rel_s >= y_lo) & (rel_s <= y_hi)
-    s_sim = s0 + p["s_m"][p["idx"]] / 1e3
+    s_sim = s0 + p["s_sim"] / 1e3
     ax.imshow(_db(a["P"])[:, ms].T - ref_s, aspect="auto", cmap="gray",
               vmin=vmin, vmax=vmax,
               extent=[s_sim[0], s_sim[-1], rel_s[ms][-1], rel_s[ms][0]])
@@ -1805,8 +1945,19 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         surf_rough=True, out_root=None, force=False, make_report=True,
         picked_bed=False, gamma_rssnr=False, processing="none",
         add_30km=False, bed_ablation=False, demogorgn_bed=False,
-        demogorgn_seed=0, companion=True):
+        demogorgn_seed=0, companion=True, out_name=None,
+        antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
+        bed_rough_extra_db=0.0, passes=None):
     proc = processing == "standard"
+    if out_name and (companion and gamma_rssnr or bed_ablation):
+        raise ValueError("--out-name relocates the case directory; the "
+                         "companion/ablation runs resolve their own sibling "
+                         "directories, so run it with --no-companion and "
+                         "without --bed-ablation (hypothesis tests)")
+    if bed_rough and not gamma_rssnr:
+        raise ValueError("--bed-rough needs --gamma-from-rssnr: the "
+                         "double-count guard is applied to the RSSNR-mapped "
+                         "gamma (constant-gamma path not wired)")
     if bed_ablation and not picked_bed:
         raise ValueError("--bed-ablation adds bed-source rows to the "
                          "picked-bed case: run it WITH --picked-bed")
@@ -1814,13 +1965,18 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
                          "follow-up, not wired (clean three-way ablation)")
     order = ORDER + ([SYN30_KEY] if add_30km else [])
+    if passes:
+        unknown = [k for k in passes if k not in order]
+        if unknown:
+            raise ValueError(f"unknown pass(es) {unknown}; have {order}")
+        order = [k for k in order if k in passes]
     n_traces = n_traces or (N_TRACES_PILOT if segment == "pilot"
                             else N_TRACES_FULL)
     tag = case_tag(picked_bed, gamma_rssnr, proc, demogorgn_bed)
-    out = Path(out_root or OUT_DEFAULT) / (segment + tag)
+    out = Path(out_root or OUT_DEFAULT) / (out_name or (segment + tag))
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
-    case = f"{CASE_PREFIX}_{segment}{tag}"
+    case = f"{CASE_PREFIX}_{out_name or (segment + tag)}"
     axis = ref_bed_picks() if (picked_bed or gamma_rssnr) else None
     ref = axis if picked_bed else None
     if picked_bed:
@@ -1830,7 +1986,16 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"{ref['gap_frac_line']:.4f}", flush=True)
     gmap = None
     if gamma_rssnr:
-        gmap = build_rssnr_gamma(axis, segment, att)
+        gmap = build_rssnr_gamma(axis, segment, att,
+                                 bed_rough_sigma=bed_rough[0] if bed_rough
+                                 else None,
+                                 extra_db=bed_rough_extra_db)
+        if bed_rough:
+            g = gmap["bed_rough_guard"]
+            print(f"bed roughness: sigma {g['sigma_m']} m, l "
+                  f"{bed_rough[1]} m; nadir coherent attenuation "
+                  f"{g['nadir_coherent_attenuation_db']} dB -> G2 raised "
+                  f"{g['g2_shift_db']} dB (double-count guard)", flush=True)
         print(f"rssnr gamma: {gmap['n_samples']} samples "
               f"({gmap['provenance']['source']}), snapshot {RSSNR_SNAPSHOT}, "
               f"K {gmap['k_db']} dB (K - K_phys "
@@ -1842,7 +2007,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     for key in order:
         print(f"== {key} ({segment}{tag}) ==", flush=True)
         p = prep_pass(key, segment, n_traces, ref=ref, gmap=gmap, axis=axis,
-                      fine_posting=proc,
+                      fine_posting=proc, posting_div=posting_div,
                       dgn_seed=demogorgn_seed if demogorgn_bed else None)
         if p["aux"]["demogorgn"]:
             d = p["aux"]["demogorgn"]
@@ -1867,7 +2032,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"n_traces {len(p['idx'])}; "
               f"n_samples_sim {p['rc_sim'].n_samples}", flush=True)
         preps[key] = p
-        sims[key] = simulate_pass(p, runs_dir, att, surf_rough, force)
+        sims[key] = simulate_pass(p, runs_dir, att, surf_rough, force,
+                                  antenna=antenna, bed_rough=bed_rough)
         if proc:
             procs[key] = process_standard(p, sims[key])
             ch = procs[key]["chain"]
@@ -1886,7 +2052,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                             demogorgn_bed))
                       / "runs")
         corr_stats, corr_series = {}, {}
-        for key in ORDER:
+        for key in [k for k in ORDER if k in order]:
             print(f"== {key} constant-gamma companion (cache-first) ==",
                   flush=True)
             p_const = dict(preps[key])
@@ -1960,7 +2126,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "img_comb-contaminated on the low pass). " + rec}
     # headline: altitude trend of mid-column clutter, sim vs measured
     trend = {}
-    for hi in ("mid", "high"):
+    for hi in [k for k in ("mid", "high")
+               if k in order and "low" in order]:
         trend[f"{hi}-low"] = {
             "measured_db": round(analyses[hi]["meas"]["midcol_rel_surf_db"]
                                  - analyses["low"]["meas"]["midcol_rel_surf_db"], 2),
@@ -1968,20 +2135,21 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                             - analyses["low"]["sim"]["midcol_rel_surf_db"], 2)}
         trend[f"{hi}-low"]["error_db"] = round(
             trend[f"{hi}-low"]["sim_db"] - trend[f"{hi}-low"]["measured_db"], 2)
-    metrics["altitude_trend"] = {
-        "value": trend["high-low"]["sim_db"], "threshold": None,
-        "op": "record", "pass": True, "pairs": trend,
-        "note": "KEY DELIVERABLE: mid-column clutter power delta (dB, rel "
-        "own surface peaks -- gain-free) high/mid pass minus low pass, sim "
-        "vs measured; the scout's measured whole-line value is ~+20 dB. "
-        "If the low pass's measured mid-column is noise-limited its "
-        "measured delta is a LOWER bound. " + rec}
+    if "high-low" in trend:      # needs the whole triplet (--passes subsets)
+        metrics["altitude_trend"] = {
+            "value": trend["high-low"]["sim_db"], "threshold": None,
+            "op": "record", "pass": True, "pairs": trend,
+            "note": "KEY DELIVERABLE: mid-column clutter power delta (dB, "
+            "rel own surface peaks -- gain-free) high/mid pass minus low "
+            "pass, sim vs measured; the scout's measured whole-line value is "
+            "~+20 dB. If the low pass's measured mid-column is noise-limited "
+            "its measured delta is a LOWER bound. " + rec}
     metrics["simulation_wall_s"] = {
         "value": round(sum(s["wall_s"] for s in sims.values()), 1),
         "threshold": None, "op": "record", "pass": True,
         "per_pass_s": {k: round(sims[k]["wall_s"], 1) for k in order},
         "note": rec}
-    if add_30km:
+    if add_30km and SYN30_KEY in order:
         a30 = analyses[SYN30_KEY]
         d30 = a30["decomposition"]
         bed_over_clutter = round(d30["bed"]["bed_rel_surf_db"]
@@ -2023,12 +2191,12 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                     e["provenance"] = pr[key]["aux"]["demogorgn"]
                 if a_pb["meas_bed_prof_db"] is not None:
                     p = preps[key]
-                    s_sim = p["s_m"][p["idx"]]
+                    s_sim = p["s_sim"]
                     meas = np.interp(s_sim, p["s_m"], _smooth_db(
                         p["s_m"], a_pb["meas_bed_prof_db"]))
                     e["r_bed_brightness_vs_measured"] = {
                         slug: round(_pearson(_smooth_db(
-                            pr[key]["s_m"][pr[key]["idx"]],
+                            pr[key]["s_sim"],
                             a_ab["sim_bed_prof_db"]), meas), 3),
                         "picked_bed": round(_pearson(_smooth_db(
                             s_sim, a_pb["sim_bed_prof_db"]), meas), 3)}
@@ -2072,7 +2240,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             metrics["bed_brightness_correlation"] = {
                 "value": round(float(np.mean(
                     [corr_stats[k]["r_sim_rssnr_vs_measured"]
-                     for k in ORDER])), 3),
+                     for k in corr_stats])), 3),
                 "threshold": None, "op": "record", "pass": True,
                 "per_pass": corr_stats,
                 "note": "KEY DELIVERABLE (acceptance): along-track Pearson "
@@ -2105,6 +2273,15 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "chunk_m": CHUNK_M, "picked_bed": bool(picked_bed),
         "gamma_rssnr": bool(gamma_rssnr),
         "demogorgn_bed": bool(demogorgn_bed),
+        "antenna": antenna,
+        "posting_div": posting_div,
+        "bed_roughness": (None if not bed_rough else {
+            "sigma_m": bed_rough[0], "corr_length_m": bed_rough[1],
+            "interface": "bed only (the surface keeps its own "
+                         "representative roughness)",
+            "gerekos_validity": BED_ROUGH_VALIDITY,
+            "gamma_double_count_guard": gmap["bed_rough_guard"]
+            if gamma_rssnr else None}),
         "passes": {}, "measured_caveats": MEASURED_CAVEATS}
     if demogorgn_bed:
         config["demogorgn"] = {**preps[ORDER[0]]["aux"]["demogorgn"],
@@ -2148,6 +2325,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "param_frame": PASSES[key]["param_frame"],
             "n_traces_measured": int(len(p["surf"])),
             "n_traces_sim": int(len(p["idx"])),
+            "posting_div": p["posting_div"],
             "agl_med_m": round(p["h_med"], 0),
             "reach": {k: round(v, 1) if isinstance(v, float) else v
                       for k, v in p["reach"].items()},
@@ -2171,7 +2349,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 "basis": "5x pilot wall (50/10 km at fixed trace spacing; "
                 "5 chunks of the pilot's exact geometry; per-chunk JAX "
                 "recompile risk if chunk shapes differ -- pilot wall "
-                "already includes one compile)"} for k in ORDER}
+                "already includes one compile)"} for k in order}
         config["full_projection"]["total_s"] = round(
             5.0 * sum(s["wall_s"] for s in sims.values()), 1)
 
@@ -2227,9 +2405,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                          ablation=ab_fig)]
     if gamma_rssnr and corr_stats is not None:
         syn = None
-        if add_30km:
+        if add_30km and SYN30_KEY in order:
             p30, a30 = preps[SYN30_KEY], analyses[SYN30_KEY]
-            s30 = p30["s_m"][p30["idx"]]
+            s30 = p30["s_sim"]
             tr = Transformer.from_crs("EPSG:4326", "EPSG:3031",
                                       always_xy=True)
             px, py = tr.transform(p30["base"].nav_llh[:, 1],
@@ -2358,6 +2536,37 @@ def main():
                     help="skip the constant-gamma companion correlation "
                     "run (e.g. when only the sims/caches are needed)")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--out-name", default=None,
+                    help="override the case directory NAME under --out "
+                    "(default '<segment><tag>'); hypothesis tests use it to "
+                    "keep one directory + cache per variable. Requires "
+                    "--no-companion and no --bed-ablation")
+    ap.add_argument("--antenna", choices=["array", "isotropic", "array8"],
+                    default=ANT_DEFAULT,
+                    help="antenna pattern (default array = the MCoRDS-like "
+                    "5-element cross-track array); 'isotropic' is the "
+                    "pattern-sensitivity worst case and 'array8' the "
+                    "more-directive bracket (8 elements, 1.6x aperture)")
+    ap.add_argument("--bed-rough", nargs=2, type=float, default=None,
+                    metavar=("SIGMA_M", "CORR_LEN_M"),
+                    help="Gerekos sub-facet roughness on the BED interface "
+                    "(the surface keeps its own); the RSSNR gamma is raised "
+                    "by the nadir coherent attenuation so the nadir bed "
+                    "level is conserved. " + BED_ROUGH_VALIDITY)
+    ap.add_argument("--passes", nargs="+", default=None,
+                    metavar="KEY",
+                    help="simulate only these passes (default all; e.g. "
+                    "'--passes low' for a cheap pilot). The altitude-trend "
+                    "metric needs the whole triplet and is skipped otherwise")
+    ap.add_argument("--bed-rough-extra-db", type=float, default=0.0,
+                    help="extra dB added to the --bed-rough gamma guard (the "
+                    "pilot-measured residual that also compensates the added "
+                    "INCOHERENT term; recorded in the config)")
+    ap.add_argument("--posting-div", type=int, default=1,
+                    help="refine the SIM along-track posting by this factor "
+                    "(2 -> 7.43 m, doubling the alias-limited aperture and "
+                    "the simulation cost); measured data untouched. "
+                    "Requires --processing standard")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     run(segment=args.segment, n_traces=args.n_traces, att=args.att,
@@ -2366,7 +2575,11 @@ def main():
         gamma_rssnr=args.gamma_from_rssnr, processing=args.processing,
         add_30km=args.add_30km, bed_ablation=args.bed_ablation,
         demogorgn_bed=args.demogorgn_bed, demogorgn_seed=args.demogorgn_seed,
-        companion=not args.no_companion)
+        companion=not args.no_companion, out_name=args.out_name,
+        antenna=args.antenna,
+        bed_rough=tuple(args.bed_rough) if args.bed_rough else None,
+        posting_div=args.posting_div, passes=args.passes,
+        bed_rough_extra_db=args.bed_rough_extra_db)
 
 
 if __name__ == "__main__":

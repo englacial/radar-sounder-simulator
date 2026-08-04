@@ -481,3 +481,256 @@ too-hot off-apex bed returns, so the prediction is optimistic in the same
 direction, and the DEMOGORGN 30 km tail (-0.80 dB/us, essentially flat) is
 the least trustworthy of the four -- a follow-up, not a fix, and nothing
 here was tuned.
+
+## Hypothesis campaign on the bed-return tail excess (2026-08-03)
+
+Baseline for every test: **DEMOGORGN bed + RSSNR gamma + matched CSARP
+processing** (`outputs/basal_clutter/full_dgn_rssnr_proc`, copied to
+`hypothesis_tests/baseline/`), ONE variable changed at a time. Each test
+writes `radargrams.png`, `decomposition.png`, `bed_tail.png`, `metrics.json`
+and `run_config.json` to `outputs/basal_clutter/hypothesis_tests/<test>/` and
+mirrors metrics+figures to `outputs/verification/basal_clutter_<test>/`.
+
+New CLI knobs (all OFF by default, and each contributes to the chunk cache
+key ONLY when non-default, so all 68 pre-campaign caches stayed valid -- the
+baseline replay re-ran 0 simulations): `--out-name`, `--passes`, `--antenna
+{array,isotropic,array8}`, `--bed-rough SIGMA L`, `--bed-rough-extra-db`,
+`--posting-div`.
+
+**Read the guard column first.** `bed_return_tail_*` records the total-field
+slope AND the bed-returns-only slope, plus the guard (sim bed returns minus
+sim surface returns over the fit window). Several variants push surface
+clutter up or bed returns down until the total-field tail is no longer bed
+returns; where the guard fails only the **bed-returns-only** slope is
+interpretable, and that is the column tabulated. T1/T3/T4b were run on **low
++ high only** (the two ends of the altitude trend) to stay inside the compute
+budget -- mid tracks high everywhere in this study, and syn30km has no
+measured counterpart so it cannot enter a "vs measured" delta.
+
+### Master table (sim = DEMOGORGN bed; excess = sim - measured at bed+2 us)
+
+| test | pass | bed-return slope dB/us | d base | excess +2 us | d base | bed window dB | d base | guard dB | measured slope/bed |
+|---|---|---|---|---|---|---|---|---|---|
+| baseline | low | -7.01 | +0.00 | -14.4 | +0.0 | -46.4 | +0.0 | FAIL +4 | -8.22 / -54.3 |
+| baseline | mid | -4.90 | +0.00 | +7.6 | +0.0 | -43.4 | +0.0 | ok +22 | -5.15 / -46.0 |
+| baseline | high | -2.91 | +0.00 | +11.1 | +0.0 | -43.0 | +0.0 | ok +27 | -3.17 / -46.1 |
+| baseline | syn30km | -0.76 | +0.00 | -- | -- | -41.4 | +0.0 | ok +13 | -- |
+| t2_att31 | low | -7.74 | -0.73 | -24.0 | -9.6 | -67.3 | -20.9 | FAIL -21 | -8.22 / -54.3 |
+| t2_att31 | mid | -4.58 | +0.32 | -12.2 | -19.8 | -60.8 | -17.4 | FAIL +1 | -5.15 / -46.0 |
+| t2_att31 | high | -2.36 | +0.55 | -10.3 | -21.4 | -60.9 | -17.8 | FAIL +5 | -3.17 / -46.1 |
+| t2_att31 | syn30km | -0.78 | -0.02 | -- | -- | -52.5 | -11.1 | FAIL -8 | -- |
+| t4_isotropic | low | -5.71 | +1.30 | +8.1 | +22.5 | -44.2 | +2.2 | FAIL +2 | -8.22 / -54.3 |
+| t4_isotropic | mid | -4.09 | +0.81 | +13.3 | +5.7 | -37.6 | +5.8 | FAIL +4 | -5.15 / -46.0 |
+| t4_isotropic | high | -2.69 | +0.22 | +16.6 | +5.5 | -38.3 | +4.8 | FAIL +8 | -3.17 / -46.1 |
+| t4_isotropic | syn30km | -0.22 | +0.54 | -- | -- | -37.6 | +3.8 | FAIL +3 | -- |
+| t4b_array8 | low | -6.98 | +0.03 | -14.6 | -0.2 | -46.7 | -0.3 | FAIL +3 | -8.22 / -54.3 |
+| t4b_array8 | high | -2.81 | +0.09 | +10.1 | -1.0 | -43.3 | -0.2 | ok +27 | -3.17 / -46.1 |
+| t1_bedrough | low | -5.35 | +1.66 | +16.5 | +30.9 | -48.1 | -1.8 | ok +36 | -8.22 / -54.3 |
+| t1_bedrough | high | -1.80 | +1.11 | +11.9 | +0.8 | -43.5 | -0.5 | ok +31 | -3.17 / -46.1 |
+| t3_posting | low | -6.98 | +0.03 | -13.9 | +0.4 | -48.9 | -2.5 | FAIL +4 | -8.22 / -54.3 |
+| t3_posting | high | -2.20 | +0.71 | +11.5 | +0.4 | -47.1 | -4.0 | ok +27 | -3.17 / -46.1 |
+
+### T2 attenuation 15 -> 31 dB/km (`t2_att31`, 32.1 min, all four passes)
+
+`--att 31`. The mapping re-anchors automatically, and the re-anchoring is the
+story: **K = +11.39 -> -10.60 dB**, so **K - K_phys = +21.71 -> -0.28 dB** --
+at 31 dB/km the median-anchored constant coincides with the physically
+derived one, i.e. the 21.7 dB fudge the A = 15 mapping needed disappears.
+This independently confirms the ~31 dB/km effective attenuation from
+`run_cross_season` on a second line (`implied_eff_att_db_per_km` = 30.8 in
+both runs).
+
+**The Gamma^2 > 0 dB fraction does NOT vanish: it is unchanged at 0.189**,
+and the bright tail moves UP (segment p95 +11.7 -> +17.4 dB). That prediction
+does not survive contact with the mapping: K is set by the segment MEDIAN, so
+the median stays pinned at the Fresnel -12.9 dB whatever A is, while the
+spread of `2*A*H(s)` grows with A. The unphysical fraction is a property of
+the median anchoring, not of the attenuation value.
+
+**Nadir bed level shift: -20.9 / -17.4 / -17.8 / -11.1 dB** (low/mid/high/30
+km). This follows analytically: the received bed level goes as
+`G2 - 2AH = K - RSSNR(s)`, so it depends on A ONLY through K, and K moved
+-22.0 dB. The surface-return decomposition is bit-identical to baseline
+(bed-window surface returns -89.83 / -68.86 / -71.95 dB in both), confirming
+only the bed layer moved. Consequence: **every level-based tail metric drops
+~20 dB and the guard fails on all four passes** -- the total-field tail is now
+surface clutter. The interpretable quantity is the level-invariant
+**bed-returns-only slope**.
+
+There the result is sharp: **low -7.01 -> -7.74 dB/us (-0.73)**, closing 60%
+of the low pass's slope deficit vs measured (-8.22). That is exactly the
+attenuation-obliquity term predicted in the tail-metric note: over the low
+pass's fit window the refracted path angle runs 13.2 -> 27.9 deg, adding
+2*H*(1/cos(phi) - 1) = 0.143 km of two-way ice path, worth 2.15 dB at 15
+dB/km and 4.44 dB at 31 -- a predicted +0.76 dB/us steepening against +0.73
+measured. At mid/high the same term is worth only 0.08-0.09 dB/us (their
+tails never leave 10 deg) and the measured slopes move the other way
+(-4.90 -> -4.58, -2.91 -> -2.36): the wider G2 dynamic range re-weights the
+trace ensemble toward the bright half of the line, whose arcs reach further.
+
+**Verdict: attenuation is the low pass's missing decay and nothing else's.**
+It cannot touch the altitude-growing excess, and as configured it costs a 20
+dB bed-level collapse that no longer matches the measured bed brightness. A
+level-preserving variant (A = 31 with K held at its A = 15 value) is the
+obvious follow-up and was NOT run.
+
+### T4 antenna pattern (`t4_isotropic` + `t4_array8`)
+
+Worst case first: `--antenna isotropic` removes the 5-element cross-track
+array factor entirely. The tail metrics move a LOT -- excess at +2 us
++22.5 / +5.7 / +5.5 dB (low/mid/high) -- so by the brief's own rule the
+hypothesis is not bounded small and the more-directive bracket was run too.
+
+But the decomposition says exactly WHERE the movement is:
+
+| quantity, bed window | low | mid | high | 30 km |
+|---|---|---|---|---|
+| surface returns, baseline -> isotropic | -89.8 -> -67.0 (**+22.9**) | -68.9 -> -46.3 (**+22.6**) | -72.0 -> -48.1 (**+23.9**) | -55.4 -> -44.5 (**+11.0**) |
+| bed returns, baseline -> isotropic | -46.4 -> -44.2 (+2.2) | -43.5 -> -40.7 (+2.8) | -43.1 -> -41.3 (+1.8) | -42.7 -> -41.9 (+0.8) |
+
+**The pattern is a ~23 dB control on far off-nadir SURFACE clutter and a
+~2 dB control on bed returns.** Bed returns arrive within a few degrees of
+nadir where the array factor is flat, so they barely notice it; the surface
+clutter that fills the record comes from tens of degrees off-nadir where the
+array is the only thing suppressing it. Mid-column clutter rises +23.6 /
++7.3 / +5.9 dB, and the guard fails on every pass (surface returns are
+brought up to within 2-8 dB of the bed returns).
+
+Since the baseline guard PASSES at mid/high with +22 and +27 dB of margin,
+the +11..+17 dB bed-return excess at altitude is measured on genuinely
+bed-dominated tails, and a 2 dB pattern sensitivity on bed returns cannot
+account for it.
+
+### T1 sub-facet bed roughness (`t1_bedrough`, 42.7 min, low + high)
+
+**Choosing sigma/l from the data.** Structure function of the LOW pass's own
+bed picks over the 50 km segment (14.85 m sampling): rms deviation 4.14 m at
+30 m lag rising to 113 m at 3.8 km, a clean self-affine law
+**sigma(L) = 0.580 * L^0.662 m (Hurst H = 0.66)** fitted over the resolved
+59-3803 m band. Extrapolated to the wavelength scale that Gerekos sub-facet
+roughness represents this gives **sigma = 0.535 m at l = lambda_ice (0.886 m)**
+and 1.12 m at l = 2.7 m -- i.e. **2.4-5x beyond the Gerekos comfortable
+ceiling** (sigma = lambda_ice/4 = 0.222 m, where the paper's own validation
+measures ~1 dB error; accuracy degrades past ~0.4 lambda). The test was
+therefore run AT the ceiling, **sigma = 0.22 m, l = 0.886 m** (l = 1
+lambda_ice: <= facet size everywhere -- 10.7 m at the low pass, 49.8 m at the
+high -- and giving a diffuse lobe of half-width ~atan(sqrt(2) sigma/l) ~ 19
+deg, which is the angular band the tail window probes). The data-implied
+roughness is LARGER, so the measured effect below is a LOWER bound.
+
+**The double-count guard needed an empirical term, and finding out why is a
+result.** The analytic guard raises G2 by the nadir coherent-term attenuation
+`exp(-sigma^2 K^2)` = 42.26 dB. A one-chunk-class pilot (10 km, low pass,
+`t1_pilot_base` vs `t1_pilot_rough`) showed that overshoots by **+39.0 dB**:
+the bed window went -48.29 -> -9.28 dB. The reason is physical -- at
+sigma = lambda/4 the coherent term is annihilated but the INCOHERENT term
+inherits nearly all of it, so the true nadir mean-power loss is only
+**~3.3 dB**, not 42.3. The full run therefore used
+`--bed-rough-extra-db -39.0` (net G2 shift +3.26 dB), and the conservation
+check on the full segment is **-1.75 dB (low) and -0.49 dB (high)** -- high
+inside the ~1 dB target, low slightly outside because the calibration came
+from a 10 km sub-segment with a different bed-brightness mix. Both recorded
+in `run_config.bed_roughness.gamma_double_count_guard`.
+
+**Result: roughness moves the tail the WRONG way, hard.** With the nadir
+level held, the low pass's bed-return tail rises from -71.9/-80.1/-85.7 to
+**-42.8/-48.7/-53.7 dB** at bed+1/2/3 us (+29 dB) and its slope flattens
+**-7.01 -> -5.35 dB/us**; the high pass flattens **-2.91 -> -1.80**. Measured
+is -8.22 and -3.17. Adding lambda-scale bed roughness makes the simulated bed
+LESS specular and its tail flatter, which is the opposite of the measured
+behaviour. Surface returns are bit-identical (-89.83 / -71.95 dB), a clean
+one-variable control.
+
+**The useful by-product is a bracket on the real bed's wavelength-scale
+roughness.** At the low pass the measured tail sits BETWEEN the smooth-bed
+sim (14 dB below measured at +2 us) and the sigma = 0.22 m sim (16 dB above),
+so the effective lambda-scale roughness is somewhere in between -- a naive
+sigma^2 (weak-scattering) interpolation puts it near **3-4 cm**, an order of
+magnitude below the 0.53 m the pick spectrum extrapolates. Caveat: the
+measured post-bed tail also carries englacial and off-nadir surface
+scattering that this surface+bed model excludes by design, so 3-4 cm is an
+UPPER bound. Either way the self-affine extrapolation from km-scale picks
+badly over-predicts the roughness the radar actually sees at 0.9 m, which is
+the physically interesting finding.
+
+### T3 aperture / posting (`t3_posting`, 37.6 min, low + high)
+
+`--posting-div 2`: the SIM along-track grid is refined to **7.43 m** (6729 /
+6739 traces vs 3365 / 3370) while the measured frame is untouched, so the
+alias-limited aperture doubles -- **87 -> 175 m (low)** and **627 -> 1255 m
+(high)**, half-angle 1.52 -> 3.05 deg, hann azimuth resolution **21.4 ->
+10.7 m** (the product's effective ~25 m). Fast-time grid, facet spacing,
+reach, bed and gamma are bit-identical to baseline.
+
+**The prediction does not hold: the tail excess does not drop.** At +2 us it
+moves **-14.4 -> -13.9 (low)** and **+11.1 -> +11.5 (high)** -- 0.4-0.5 dB in
+the WRONG direction. Everything falls by a common-mode 2.5-4 dB (bed returns
+-2.5 / -4.0, surface returns -3.4 / -2.5), so sim-minus-measured is
+preserved. The low pass's bed-return slope is unchanged to **+0.03 dB/us**.
+
+Physically this is the right answer for a nadir-looking sounder: the post-bed
+tail is built from **cross-track** off-nadir arrivals, and no along-track
+aperture can compress those. The along-track share of the tail excess is
+~0.5 dB.
+
+**Caveat on the high pass.** Doubling the aperture quadruples the
+air-only-focusing residual phase (recorded gap g3: ~1 rad at the baseline
+aperture edge at altitude -> ~4 rad here), so the high pass's +0.71 dB/us
+slope flattening is plausibly a focusing artifact of pushing g3 past its
+validity rather than physics. The LOW pass (87 -> 175 m, g3 negligible) is
+the clean measurement, and it says +0.03 dB/us.
+
+### T4b more-directive bracket (`t4b_array8`, 19.2 min, low + high)
+
+Because the isotropic delta was large, the other side was run: the same
+0.5-lambda cross-track array with **8 elements instead of 5** (1.6x aperture)
+-- an honest bracket for the fact that real elements (dipoles over structure)
+always make the true pattern MORE directive than the bare 5-element array
+factor the baseline uses. It is a bracket, not a claim about the real
+antenna.
+
+**Everything moves by <= 0.44 dB**: surface returns in the bed window -0.33 /
+-0.44 dB, bed returns -0.32 / -0.27, bed-return slope +0.03 / +0.09 dB/us,
+excess at +2 us -0.2 / -1.0 dB. So the pattern sensitivity is strongly
+ASYMMETRIC: deleting the pattern entirely (physically implausible) costs 23
+dB of surface-clutter suppression, while sharpening it in the plausible
+direction changes the bed-return tail by ~1 dB. **Pattern fidelity is bounded
+as a MINOR contributor to the bed-return excess** -- which is the question
+that was asked -- while remaining a first-order control on surface clutter.
+
+### Which hypotheses improved the metrics?
+
+| test | low pass | high pass | verdict |
+|---|---|---|---|
+| T2 att 31 | slope **-0.73** toward measured (60% of the deficit) | slope +0.55 away | PARTIAL, low only; costs a 17-21 dB bed-level collapse |
+| T4 isotropic | slope +1.30 away, excess +22.5 | slope +0.22 away, excess +5.5 | WORSE (worst-case bound only) |
+| T4b array8 | +0.03 / -0.2 | +0.09 / -1.0 | NULL (<= 1 dB) |
+| T1 bed roughness | slope +1.66 away, excess **+30.9** | slope +1.11 away, excess +0.8 | WORSE, decisively |
+| T3 posting/aperture | +0.03 / +0.4 | +0.71 / +0.4 (g3-caveated) | NULL (~0.5 dB) |
+
+**Not one hypothesis reduces the altitude-growing excess.** The only metric
+that improved anywhere is the LOW pass's tail slope under T2, and that is the
+attenuation-obliquity term already predicted analytically in the tail-metric
+note -- it is worth 0.7-0.8 dB/us at 13-28 deg and ~0.1 dB/us at 4-10 deg, so
+it is structurally incapable of explaining a gap that GROWS with altitude.
+Three candidate mechanisms are now bounded and eliminated for the high pass:
+aperture (~0.4 dB), plausible pattern error (~1 dB), and sub-facet bed
+roughness (wrong sign, and the data-extrapolated roughness is even larger).
+The surviving suspects are the ones this campaign did not vary: the RSSNR
+gamma's recorded bright-end overshoot (+5-10 dB where G2 > 0 dB, a LEVEL
+error that would propagate straight into the tail), the absent englacial /
+volume scattering (which raises the MEASURED curve, not the sim, and so
+cannot close a sim-too-hot gap), and the level-preserving attenuation variant
+(A = 31 with K pinned at its A = 15 value) that separates T2's two effects.
+That last one is the cheapest next test and was NOT run.
+
+Timings (wall, this machine, 24 cores, no GPU): T2 32.1 min (all 4 passes),
+T4 isotropic 40.0 (4 passes; its low pass overlapped the T1 pilots, so ~25%
+inflated), T1 pilots 5.9 + 12.8 (10 km, low only), T1 42.7 (low+high, the
+rough branch costs **2.24x** smooth -- 133 vs 60 s/chunk), T3 37.6 (low+high,
+2x traces), T4b 19.2 (low+high). **Campaign total ~3.3 h of simulation**,
+inside the 3.5 h budget. Tests: 276 unit green (`tests/test_basal_hypotheses.py`
+adds sim_cfg wiring for all three antenna variants and bed roughness, the
+cache-key backward-compat lock, the Gerekos nadir-attenuation math, the
+gamma-offset/re-anchoring algebra, `upsample_fsub` endpoint/midpoint exactness
+and the aperture-doubling identity); ruff clean.
