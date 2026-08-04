@@ -307,6 +307,19 @@ def _simulate_multilayer(scene, sim_config):
         unknown = set(gmaps) - set(layered.names)
         if unknown:
             raise ValueError(f"gamma_maps for unknown interfaces: {unknown}")
+    # Per-facet DIFFUSE amplitudes (scene.diffuse_maps, same grid convention
+    # as gamma_maps): the incoherent companion channel of a specular/diffuse
+    # reflectivity split (kernels/multilayer.py). Coherent + refracted only.
+    dmaps = getattr(scene, "diffuse_maps", None) or {}
+    if dmaps:
+        if not coherent:
+            raise ValueError("scene.diffuse_maps requires coherent mode")
+        unknown = set(dmaps) - set(layered.names)
+        if unknown:
+            raise ValueError(f"diffuse_maps for unknown interfaces: {unknown}")
+        if layered.names[0] in dmaps:
+            raise ValueError("diffuse_maps on the top interface is not "
+                             "wired (the surface uses coherent.py)")
 
     outs, drops = [], []
     for j, target in enumerate(layered.interfaces):
@@ -332,12 +345,20 @@ def _simulate_multilayer(scene, sim_config):
             n_max = len(layered.interfaces) - 1
             crossed_sig = (sig_all[:j] if coherent and sig_all[:j].any()
                            else None)
+            dif = None
+            if layered.names[j] in dmaps:
+                dif = (_gamma_map_values(dmaps[layered.names[j]], target,
+                                         frame),
+                       speckle_phasors(len(target.centers),
+                                       (sim_config.roughness_seed, 1000 + j)),
+                       float(sim_config.diffuse_exponent))
             out, drop = refracted_cluttergram(
                 track.positions, track.u_ct, target, layered.interfaces[:j],
                 eps[:j + 1], att[:j + 1], mode=sim_config.mode, gamma=gamma_j,
                 k0=k0 if coherent else None, refraction=refr,
                 pad_to=_joint_pad_to(j, n_max) if refr == "joint" else None,
-                roughness=rough, crossed_sigma=crossed_sig, **window)
+                roughness=rough, crossed_sigma=crossed_sig, diffuse=dif,
+                **window)
         outs.append(out)
         drops.append(drop)
 

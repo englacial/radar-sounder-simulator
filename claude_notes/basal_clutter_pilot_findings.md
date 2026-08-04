@@ -734,3 +734,220 @@ adds sim_cfg wiring for all three antenna variants and bed roughness, the
 cache-key backward-compat lock, the Gerekos nadir-attenuation math, the
 gamma-offset/re-anchoring algebra, `upsample_fsub` endpoint/midpoint exactness
 and the aperture-doubling identity); ruff clean.
+
+## T5: angle-dependent (specular + diffuse) bed reflectivity (2026-08-03)
+
+The T1 falsification said the tail reshaping cannot come from Kirchhoff
+roughness. This implements the alternative the user approved: the
+RSSNR-mapped per-facet bed reflectivity |Gamma_bed|^2(x) is SPLIT into
+
+* **specular** `f_s * |Gamma|^2 * G(psi)`, `G(psi) = exp(-tan^2(psi)/(2 s0^2))`
+  with psi the facet tilt from horizontal -- "bright because flat"
+  (hydraulically ponded water is flat; a facet tilted psi mirrors the
+  nadir-looking radar to 2 psi off-nadir and must not inherit the
+  nadir-calibrated brightness). Folded into the existing per-facet gamma
+  grid: no kernel change.
+* **diffuse** `(1 - f_s) * |Gamma|^2 * cos^n(theta_i)`, a NEW incoherent
+  per-facet channel in `kernels/multilayer.py` mirroring the gamma-facet and
+  roughness-phasor patterns (per-facet amplitude array + frozen unit
+  phasors; `cos_t` and `spread` are already in-kernel, `n` is traced).
+
+### Normalization gate (derived, then measured)
+
+The diffuse per-facet amplitude convention is DERIVED, not fitted:
+
+    a_diff = sqrt(A/(2 pi)) * amp * cos_t^(1 + n/2) * spread * att_f
+
+The prefactor `sqrt(A/(2 pi))` is fixed by requiring the split to conserve
+total nadir power over a flat interface. The specular coherent sum is the
+image-method mirror field -- integrating `(k/2pi) Gamma cos_t spread` over a
+flat plane at range r by stationary phase gives `|E|^2 = Gamma^2/(4 r^2)`.
+The incoherent sum of the diffuse channel over the same plane is
+`sum_i a_i^2 = (1/(2 pi)) amp^2 Int (cos_t spread)^2 dA`, and
+`Int (cos_t / r'^2)^2 dA = pi/(2 r^2)` exactly, so `sum_i a_i^2 =
+amp^2/(4 r^2)`. With `amp^2 = (1-f_s) Gamma^2` the two channels sum to
+`Gamma^2/(4 r^2)` for ANY f_s -- independently of facet size, range and
+wavenumber (the k/2pi prefactor cancels, so the diffuse channel is
+frequency-flat, as a sigma^0 law should be).
+
+Measured against that closed form (`tests/test_multilayer_diffuse.py`,
+flat plane, 6 phasor seeds):
+
+| check | result |
+|---|---|
+| diffuse total vs `amp^2/(4 r^2)`, 4 m facets | **+0.11 dB** |
+| same, 8 m facets | +0.07 dB |
+| same, 16 m facets | -0.38 dB (coarse facets under-resolve the angular integral) |
+| facet-size independence (4 m vs 8 m) | within 0.10 (test tolerance) |
+| cos^n law, single facet, 0-56 deg incidence | exact to 1e-6 |
+| power split linearity in (1-f_s) | exact to 1e-6 |
+| `diffuse=None` / `f_s=1, s0=0` | traces the pre-feature program; grids bit-identical |
+
+### Trial A (RECORDED, REJECTED): the tilt weight needs the same
+### double-count guard the T1 roughness needed
+
+The first pilot pass used `G(psi)` as an absolute weight with the
+user-suggested `s0 ~ 1 deg`. It annihilated the bed: this bed's own tilt
+distribution on the 32 m scene grid is **median 6.62 deg, p90 13.77 deg,
+max 29.9 deg**, so the median facet got `G = -96 dB` and the bed layer fell
+**20 dB (mid/high) to 38 dB (low)**. J_shape got WORSE (7.08 -> 11.00).
+
+The fix is the T1 lesson applied again: the RSSNR mapping is calibrated
+against the MEASURED bed echo, which already contains the real bed's tilt
+mix, so `G(psi)` must enter as a RELATIVE reweighting with unit scene mean,
+never as an absolute loss. The tool now divides by `<G>` (recorded as
+`mean_normalization_db`: -6.24 dB at s0 = 3 deg, -14.52 at s0 = 1,
+-2.50 at s0 = 6.6). With `<G> = 1` the split conserves scene-mean bed power
+for every (f_s, s0) by construction (unit-tested).
+
+Residual bed-WINDOW conservation at the pilot scale (bed layer, dB vs the
+unsplit run; the window is a narrow delay gate, so the diffuse channel's
+delay spreading costs a little even when the total is conserved):
+
+| config | low | mid | high |
+|---|---|---|---|
+| f_s 1.0, s0 3 | -2.39 | +0.23 | +1.35 |
+| f_s 0.9, s0 3 | -2.10 | -0.22 | +0.96 |
+| **f_s 0.5, s0 3** | **-1.55** | **-2.47** | **-1.11** |
+| f_s 0.9, s0 6.6 | +0.70 | +0.56 | +0.87 |
+| f_s 0.0 (all diffuse) | -6.15 | -10.47 | -8.98 |
+| f_s 0.9, s0 1 (rejected) | -11.42 | -7.40 | -6.78 |
+
+So the ~1 dB target is met for `s0 = 6.6`, met to 1-2.5 dB for the
+`s0 = 3` family, and fails in the pure-diffuse limit -- reported, not tuned.
+
+### s0 and n
+
+* **n = 1** (near-Lambert). Deliberate and almost inconsequential: over the
+  fit window the bed incidence angle only reaches 4-10 deg (mid/high) and
+  13-28 deg (low), where `cos^1` costs 0.01-0.5 dB. n is NOT a useful shape
+  knob here and was not scanned; the shaping comes from `G(psi)` and from
+  the specular/diffuse balance.
+* **s0 = 3 deg**, chosen between the user's ~1 deg and this bed's own 6.62
+  deg median tilt, and then confirmed by trial: it puts the normalized
+  weight at p10 -41 dB / median -4.4 dB / max +6.2 dB -- a real
+  flat-vs-tilted contrast that is neither a filter (s0 = 1: p10 -413 dB,
+  median -82 dB) nor a no-op (s0 = 6.6: -7.2 to +2.5 dB). Both alternatives
+  were run and scored (below).
+
+### The objective, and why the brief's version cannot be used alone
+
+    J_abs   = mean_passes(|excess(bed+2 us)| + |slope_sim - slope_meas| * 1 us)
+    J_shape = mean_passes(|dR2|             + |slope_sim - slope_meas| * 1 us)
+    R2 = tail(bed+2 us) - bed-window level   (the tail against the run's OWN bed peak)
+
+Equal weights, both terms in dB (the slope misfit is multiplied by 1 us).
+`J_abs` is the brief's objective, and it is reported -- but with `--att 31`
+now the default its first term carries the KNOWN absolute-level offset (the
+median-anchoring caveat: the simulated bed sits 6-16 dB below measured
+before any splitting), which no bed-angular model can remove. `R2` and the
+slope are both invariant to a constant reflectivity/attenuation error, so
+**J_shape scores exactly what this model is meant to fix** and selects the
+winner. Both are tabulated.
+
+### The pilot scan (10 km, three real passes, DEMOGORGN bed, att 31, n = 1)
+
+Every trial recorded, best first. `dR2` and `dSlope` are sim minus measured
+(dB and dB/us); `guard` is the sim bed-returns-minus-surface-returns margin.
+
+| config | J_shape | J_abs | dR2 low/mid/high | dSlope low/mid/high | guard low/mid/high |
+|---|---|---|---|---|---|
+| **f_s 0.5, s0 3 (WINNER)** | **4.17** | 13.23 | +1.47 / +2.88 / -0.84 | +4.72 / +2.17 / -0.43 | -1.0 / -10.7 / -6.0 |
+| f_s 0.9, s0 3 | 4.32 | 14.59 | -1.15 / +1.45 / -1.61 | +5.74 / +1.67 / -1.35 | -7.9 / -14.6 / -8.2 |
+| f_s 1.0, s0 3 (tilt weight only) | 4.94 | 15.26 | -2.38 / +1.17 / -1.70 | +6.49 / +1.53 / -1.55 | -28.8 / -16.1 / -9.3 |
+| f_s 0.9, s0 6.6 | 5.92 | 12.60 | -3.88 / +3.25 / +2.27 | +5.69 / +1.50 / -1.16 | -7.9 / -6.4 / -2.2 |
+| f_s 0.9, s0 1 | 6.88 | 15.95 | +6.59 / +3.81 / -0.81 | +5.76 / +2.81 / +0.87 | -7.9 / -17.6 / -14.4 |
+| unsplit (current model) | 7.08 | 12.85 | -4.56 / +4.15 / +3.65 | +6.28 / +1.90 / -0.70 | -27.2 / -4.0 / -1.1 |
+| f_s 0.0 (pure diffuse) | 9.23 | 13.15 | +8.64 / +6.93 / +3.62 | +4.36 / +2.96 / +1.18 | +2.0 / -8.2 / -4.9 |
+| f_s 1.0, s0 1, UNNORMALIZED (trial A) | 11.00 | 17.03 | -- (bed annihilated, 20-38 dB) | | |
+
+**The split helps, and both ends are excluded.** J_shape falls from 7.08
+(unsplit) to 4.17, a **2.9 dB** improvement in the joint shape misfit;
+pure diffuse is 5.1 dB WORSE than the winner and 2.2 dB worse than not
+splitting at all, so the data require a specular component; the tilt weight
+alone (f_s = 1) already buys 2.1 dB of the 2.9. `J_abs` barely moves
+(12.85 -> 13.23) exactly as expected: it is dominated by the absolute-level
+offset the model cannot touch.
+
+**f_s is only weakly identified.** J_shape is flat between f_s 0.5 and 0.9
+(4.17 vs 4.32, i.e. 0.15 dB) and rises steeply outside it. The honest
+statement is **f_s = 0.5-0.9 with s0 ~ 3 deg**; f_s = 0.5 is the point
+estimate carried forward, f_s = 0.9 is a recorded neighbour that was NOT
+validated at full scale (compute).
+
+### Full 50 km validation of the winner (`t5_specdiff_fs0.5`, 32.3 min)
+
+f_s = 0.5, s0 = 3 deg, n = 1, DEMOGORGN bed, RSSNR gamma, matched
+processing, att 31, all three real passes + the 30 km prediction. Reference
+is the same configuration WITHOUT the split (`t2_att31`, identical in every
+other respect).
+
+| pass | dSlope unsplit -> T5 (dB/us) | dR2 unsplit -> T5 (dB) | excess+2 (dB) | bed window vs unsplit |
+|---|---|---|---|---|
+| low 449 m | +5.80 -> **+3.51** | -10.99 -> **+3.02** | -24.0 -> -12.9 | -2.90 dB |
+| mid 9150 m | +1.06 -> +1.13 | +2.65 -> **+0.82** | -12.2 -> -15.0 | -0.96 dB |
+| high 10684 m | +0.88 -> **-1.03** | +4.39 -> **+0.63** | -10.3 -> -15.1 | -0.94 dB |
+| **J_shape (full segment)** | | **8.59 -> 3.38** | | |
+
+**One scene-constant f_s DOES satisfy all three altitudes on the tail-shape
+level.** The tail-vs-bed-peak residual `dR2` collapses from
+(-11.0, +2.7, +4.4) dB to **(+3.0, +0.8, +0.6) dB** -- three altitudes
+spanning a 24x range in height, one number, all within ~3 dB and two within
+1 dB. That is the over-determination test passing on the observable the
+model was built for, and it is the strongest evidence so far that the bed's
+angular reflectivity, not its topography or its Kirchhoff roughness, is what
+the tail was missing.
+
+**It does NOT fix the slopes, and the residual pattern is diagnostic.**
+dSlope goes (+5.80, +1.06, +0.88) -> (+3.51, +1.13, -1.03): the high pass
+now slightly over-steepens, mid is unchanged, and the low pass is still
++3.5 dB/us too flat -- by far the largest residual left. The guard says why:
+at the low pass the sim's post-bed tail is only +7.1 dB above its own
+SURFACE returns (and -3.3 / +1.1 dB at mid/high), i.e. a large part of what
+the metric is measuring is surface clutter, whose slope no bed-reflectivity
+parameter can change. The residual therefore implicates **the absolute bed
+level** (the att = 31 / median-anchoring choice leaves the simulated bed
+13-15 dB below measured, so the surface-clutter pedestal is relatively too
+strong) and, second, the surface-clutter model at low altitude -- NOT f_s,
+s0 or n.
+
+### Revised 30 km verdict (the design question)
+
+| model | bed returns - surface returns in the bed window | bed peak over mid-column |
+|---|---|---|
+| picked bed, att 15 (originally reported) | **+11.4 dB** | +5.0 dB |
+| DEMOGORGN, att 31, unsplit | **-7.4 dB** | -0.2 dB |
+| DEMOGORGN, att 31, T5 f_s 0.5 | **-8.6 dB** | -0.2 dB |
+
+**The +11.4 dB margin does not survive.** Under the currently adopted
+attenuation (31 dB/km) the 30 km bed sits 7.4 dB BELOW the surface clutter
+arriving at the same delay, and the specular/diffuse split takes another
+1.2 dB off (it moves bed power out of the specular apex into a diffuse
+pedestal spread over delay). The bed peak no longer stands above the
+mid-column clutter at all (-0.2 dB). Read honestly, the two rows bracket the
+answer: **+11.4 dB (att 15) to -8.6 dB (att 31 + T5)**, and the bracket is
+set by the unresolved ABSOLUTE bed level, not by the angular model -- the
+same 20 dB of attenuation/anchoring ambiguity that T2 exposed. On this line
+the stratospheric bed is therefore "marginal to clutter-limited" rather than
+"visible with 11 dB to spare", and resolving it requires pinning the
+absolute bed level (a level-preserving A = 31 variant with K held at its
+A = 15 value is the cheapest next test, still not run).
+
+### What is now wired
+
+`--specular-fraction F_S [--spec-tilt-deg S0] [--diffuse-exponent N]` on
+`tools/run_basal_clutter.py` (off by default; requires `--gamma-from-rssnr`),
+`SimConfig.diffuse_exponent`, `scene.diffuse_maps` (same grid convention as
+`gamma_maps`), and `refracted_cluttergram(..., diffuse=(amp, phasors,
+n_exp))`. Every knob is absent from the chunk cache key when off, so all
+pre-T5 caches stay valid. Tests: `tests/test_multilayer_diffuse.py` (7: the
+analytic normalization gate, facet-size independence, exact cos^n law, split
+linearity, OFF-is-untouched, mode/shape guards) and 5 more in
+`tests/test_basal_hypotheses.py` (tilt math, the mean-normalization
+double-count guard, flat-vs-tilted contrast, scene-mean power conservation,
+cache-key isolation). Suite 289 unit green; ruff clean.
+
+Timings: pilot scan 7 configs x ~9 min = 63 min (plus ~20 min spent on the
+rejected trial A), full validation 32.3 min (low 1028.8 / mid 518.7 / high
+136.5 / syn30km 251.0 s; the diffuse channel costs ~+2% wall). Total ~2 h of
+simulation.

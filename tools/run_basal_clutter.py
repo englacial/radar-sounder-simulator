@@ -123,6 +123,18 @@ TAIL_FLOOR_MARGIN_DB = 3.0          # measured tail counted floor-limited below
 FC_HZ = 190e6
 ANT_DEFAULT = "array"
 LAM_ICE_M = C / (FC_HZ * float(np.sqrt(3.17)))     # ~0.886 m at 190 MHz
+SPEC_DIFFUSE_NOTE = (
+    "Angle-dependent bed reflectivity: the RSSNR-mapped |Gamma_bed|^2(x) is "
+    "split into a SPECULAR share f_s, weighted by the facet tilt "
+    "G(psi) = exp(-tan^2(psi)/(2 s0^2)) (bright-because-flat: a facet tilted "
+    "psi mirrors the nadir-looking radar to 2 psi off-nadir, so it must not "
+    "inherit the nadir-calibrated brightness), and a DIFFUSE share 1 - f_s "
+    "carried by the kernel's incoherent per-facet channel with a "
+    "cos^n(theta_i) law. The split conserves total bed power at nadir over a "
+    "flat interface BY CONSTRUCTION (kernels/multilayer.py normalization "
+    "derivation; f_s = 1 with s0 = 0 traces the unsplit program "
+    "bit-identically). ONE scene-constant f_s is fitted across all three "
+    "measured altitudes -- the over-determination test.")
 BED_ROUGH_VALIDITY = (
     "Gerekos 2023 sub-facet roughness: l <= facet size (10.7/46.0/49.8/81.9 m "
     "here) and up to a few lambda_ice (lambda_ice = 0.886 m at 190 MHz); "
@@ -613,7 +625,7 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
     return prof
 
 
-def apply_rssnr_gamma(base, axis, gmap):
+def apply_rssnr_gamma(base, axis, gmap, spec=None):
     """Attach ``base.gamma_bed``: per-map-pixel signed FIELD reflection
     coefficient -10^(G2(s_pix)/20) from the shared profile, constant along
     the cross-track normal (apply_picked_bed's projection). Returns recorded
@@ -635,9 +647,64 @@ def apply_rssnr_gamma(base, axis, gmap):
     px, py = base.transform * (cols.ravel(), rows.ravel())
     s_pix = project_to_track(px, py, rx, ry, s_ref)
     g2 = np.interp(s_pix, gmap["s"], gmap["g2_db"])
-    base.gamma_bed = (-(10.0 ** (g2 / 20.0))).reshape(bed.shape).astype(
-        np.float32)
+    g2_grid = g2.reshape(bed.shape)
+    stats = {}
+    if spec is None:
+        base.gamma_bed = (-(10.0 ** (g2_grid / 20.0))).astype(np.float32)
+    else:
+        # SPECULAR/DIFFUSE split of the SAME mapped |Gamma|^2 (T5):
+        #   specular  f_s * G2 * G(psi),  G = exp(-tan^2(psi)/(2 s0^2))
+        #   diffuse   (1 - f_s) * G2,     shaped in-kernel by cos^n(theta)
+        # G(psi) is "bright because flat": a facet tilted by psi mirrors the
+        # nadir-looking radar to 2*psi off-nadir, so it must not inherit the
+        # nadir-calibrated brightness. psi comes from the BED DEM gradient on
+        # the scene grid (32 m) -- a proxy for the facet tilt (facets are
+        # 10.7-49.8 m and are built from this same DEM); recorded, not tuned.
+        f_s, s0_deg, n_exp = spec
+        psi = bed_tilt_rad(bed, base.transform)
+        gw = (np.ones_like(psi) if not s0_deg
+              else np.exp(-np.tan(psi) ** 2
+                          / (2.0 * np.tan(np.deg2rad(s0_deg)) ** 2)))
+        # DOUBLE-COUNT GUARD (same logic as the T1 roughness guard): the
+        # RSSNR-mapped |Gamma|^2 is calibrated against the MEASURED bed echo,
+        # which already contains the real bed's tilt mix. G(psi) must
+        # therefore act as a RELATIVE reweighting with unit scene mean, not
+        # as an absolute loss -- otherwise the nadir bed level collapses (it
+        # does: unnormalized s0 = 1 deg on this bed costs 20-38 dB, recorded
+        # as trial A). With <G> = 1 the split conserves nadir bed power for
+        # every (f_s, s0) by construction: <f_s*G_n> + (1 - f_s) = 1.
+        gw_mean = float(gw.mean())
+        gw = gw / max(gw_mean, 1e-300)
+        amp = 10.0 ** (g2_grid / 20.0)
+        base.gamma_bed = (-(np.sqrt(f_s * gw) * amp)).astype(np.float32)
+        if f_s < 1.0:
+            base.diffuse_bed = (np.sqrt(1.0 - f_s) * amp).astype(np.float32)
+        pw = np.rad2deg(psi)
+        stats = {"specular_fraction": f_s, "spec_tilt_s0_deg": s0_deg,
+                 "diffuse_exponent": n_exp,
+                 "bed_tilt_deg": {k: round(float(v), 2) for k, v in
+                                  [("med", np.median(pw)),
+                                   ("p90", np.percentile(pw, 90)),
+                                   ("max", pw.max())]},
+                 "specular_tilt_weight_db": {
+                     k: round(float(10.0 * np.log10(max(v, 1e-300))), 1)
+                     for k, v in [("med", np.median(gw)),
+                                  ("p10", np.percentile(gw, 10)),
+                                  ("p90", np.percentile(gw, 90)),
+                                  ("max", gw.max())]},
+                 "mean_normalization_db": round(
+                     float(10.0 * np.log10(max(gw_mean, 1e-300))), 2),
+                 "note": "G(psi) is a POWER weight on the SPECULAR channel "
+                 "only, MEAN-NORMALIZED over the scene grid (double-count "
+                 "guard: the RSSNR calibration already contains the bed's "
+                 "tilt mix), so <G> = 1 and the nadir bed level is conserved "
+                 "for every (f_s, s0). mean_normalization_db is the raw "
+                 "<G> that was divided out. The diffuse channel keeps the "
+                 "full (1-f_s) share at every tilt. psi from the 32 m "
+                 "bed-DEM gradient (facets are 10.7-49.8 m and are built "
+                 "from this same DEM)."}
     return {"k_db": gmap["k_db"], "k_phys_db": gmap["k_phys_db"],
+            **({"spec_diffuse": stats} if stats else {}),
             "k_minus_kphys_db": gmap["k_minus_kphys_db"],
             "g2_seg_db": gmap["g2_seg_db"],
             "n_censored": gmap["n_censored"],
@@ -674,6 +741,14 @@ DGN_NOTE = (
     "thickness-convention disagreement, scout-documented) -- reported, not "
     "corrected. Plain DEMOGORGN; the picked-bed hybrid is a recorded "
     "follow-up.")
+
+
+def bed_tilt_rad(bed, transform):
+    """Facet-scale tilt from horizontal (rad) of a DEM on an affine grid:
+    arctan|grad z|, central differences with edge-replication."""
+    dx, dy = abs(transform.a), abs(transform.e)
+    gy, gx = np.gradient(np.asarray(bed, np.float64), dy, dx)
+    return np.arctan(np.hypot(gx, gy))
 
 
 def apply_demogorgn_bed(base, fsub, ct_m, seed):
@@ -971,7 +1046,8 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
 
 
 def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
-              fine_posting=False, dgn_seed=None, posting_div=1):
+              fine_posting=False, dgn_seed=None, posting_div=1,
+              spec_diffuse=None):
     """Slice (+reverse) the pass's frames onto the common window, derive the
     reach and grids, and build the base scene (REMA + BedMachine, cached).
     ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene;
@@ -1068,7 +1144,8 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
                                             dgn_seed)
                         if dgn_seed is not None else None)
     aux["picked_bed"] = apply_picked_bed(base, ref) if ref else None
-    aux["rssnr_gamma"] = (apply_rssnr_gamma(base, axis or ref, gmap)
+    aux["rssnr_gamma"] = (apply_rssnr_gamma(base, axis or ref, gmap,
+                                            spec_diffuse)
                           if gmap else None)
     idx = aux["idx"]
     tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
@@ -1150,11 +1227,15 @@ def chunk_scene(base, rows, ct, gamma=False):
         sc.gamma_maps = {"bed": (
             np.ascontiguousarray(base.gamma_bed[r0:r1, c0:c1]),
             sc.transform, sc.crs)}
+        if getattr(base, "diffuse_bed", None) is not None:
+            sc.diffuse_maps = {"bed": (
+                np.ascontiguousarray(base.diffuse_bed[r0:r1, c0:c1]),
+                sc.transform, sc.crs)}
     return sc
 
 
 def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
-            bed_rough=None):
+            bed_rough=None, diffuse_exponent=1.0):
     """``antenna``: 'array' (the MCoRDS-like default) or 'isotropic' (the
     T4 pattern-sensitivity bound). ``bed_rough`` = (sigma_m, corr_length_m)
     attaches Gerekos sub-facet roughness to the BED interface (T1)."""
@@ -1177,6 +1258,7 @@ def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
                             spacing_lam=rac.SPACING_LAM, roll_source="nav")
     return SimConfig(
         mode="coherent", split_sides=False,
+        diffuse_exponent=diffuse_exponent,
         radar=rc_sim.model_copy(update={"antenna": ant}),
         facets=FacetConfig(spacing=spacing),
         media=[Medium(name="air", eps_r=1.0),
@@ -1187,7 +1269,8 @@ def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
                     DemInterface(name="bed", roughness=rcb)])
 
 
-def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None):
+def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
+              spec=None):
     """Cache file name for one chunk. Non-default hypothesis knobs append a
     suffix; the default case keeps the pre-campaign names (cache reuse)."""
     return (f"{p['key']}_{p['segment']}"
@@ -1199,11 +1282,13 @@ def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None):
             + ("" if not bed_rough
                else f"_brough{bed_rough[0]:g}_{bed_rough[1]:g}")
             + ("" if p.get("posting_div", 1) == 1
-               else f"_pdiv{p['posting_div']:d}"))
+               else f"_pdiv{p['posting_div']:d}")
+            + ("" if not spec
+               else f"_fs{spec[0]:g}_s0{spec[1]:g}_n{spec[2]:g}"))
 
 
 def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
-               antenna=ANT_DEFAULT, bed_rough=None):
+               antenna=ANT_DEFAULT, bed_rough=None, spec=None):
     """run_level cache key for one chunk. Optional features (gamma,
     DEMOGORGN, and the hypothesis knobs) contribute keys ONLY when they are
     ON, so every pre-existing cache stays valid byte-for-byte."""
@@ -1225,6 +1310,8 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
                else {"bed_rough": [float(bed_rough[0]), float(bed_rough[1])]}),
             **({} if p.get("posting_div", 1) == 1
                else {"posting_div": int(p["posting_div"])}),
+            **({} if not spec else {"spec_diffuse": [float(v)
+                                                     for v in spec]}),
             "window": p["window"], "surf_rough": bool(surf_rough),
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
             "t0_us": round(p["rc_sim"].t0 * 1e6, 5),
@@ -1232,21 +1319,21 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
 
 
 def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
-                  bed_rough=None):
+                  bed_rough=None, spec=None):
     """Chunked cached coherent surface+bed runs; assembled per-layer fields.
     Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...)."""
     chunks = chunk_rows(p)
     cfg = sim_cfg(p["rc_sim"], p["spacing"], att, surf_rough, antenna,
-                  bed_rough)
+                  bed_rough, diffuse_exponent=spec[2] if spec else 1.0)
     n = len(p["idx"])
     field = twtt = nadir = None
     wall, facets, dropped = 0.0, [], []
     for ci, rows in enumerate(chunks):
         scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"],
                             gamma=p["gamma_rssnr"])
-        rid = chunk_rid(p, ci, att, surf_rough, antenna, bed_rough)
+        rid = chunk_rid(p, ci, att, surf_rough, antenna, bed_rough, spec)
         meta = chunk_meta(p, ci, rows, len(chunks), n, att, surf_rough,
-                          antenna, bed_rough)
+                          antenna, bed_rough, spec)
         diag, arrs = rac.run_level(rid, scene, cfg, meta, runs_dir,
                                    p["oversample"], force)
         if field is None:
@@ -1947,13 +2034,16 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         add_30km=False, bed_ablation=False, demogorgn_bed=False,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
-        bed_rough_extra_db=0.0, passes=None):
+        bed_rough_extra_db=0.0, passes=None, spec=None):
     proc = processing == "standard"
     if out_name and (companion and gamma_rssnr or bed_ablation):
         raise ValueError("--out-name relocates the case directory; the "
                          "companion/ablation runs resolve their own sibling "
                          "directories, so run it with --no-companion and "
                          "without --bed-ablation (hypothesis tests)")
+    if spec and not gamma_rssnr:
+        raise ValueError("--specular-fraction splits the RSSNR-mapped bed "
+                         "reflectivity: use it with --gamma-from-rssnr")
     if bed_rough and not gamma_rssnr:
         raise ValueError("--bed-rough needs --gamma-from-rssnr: the "
                          "double-count guard is applied to the RSSNR-mapped "
@@ -2008,6 +2098,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         print(f"== {key} ({segment}{tag}) ==", flush=True)
         p = prep_pass(key, segment, n_traces, ref=ref, gmap=gmap, axis=axis,
                       fine_posting=proc, posting_div=posting_div,
+                      spec_diffuse=spec,
                       dgn_seed=demogorgn_seed if demogorgn_bed else None)
         if p["aux"]["demogorgn"]:
             d = p["aux"]["demogorgn"]
@@ -2033,7 +2124,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"n_samples_sim {p['rc_sim'].n_samples}", flush=True)
         preps[key] = p
         sims[key] = simulate_pass(p, runs_dir, att, surf_rough, force,
-                                  antenna=antenna, bed_rough=bed_rough)
+                                  antenna=antenna, bed_rough=bed_rough,
+                                  spec=spec)
         if proc:
             procs[key] = process_standard(p, sims[key])
             ch = procs[key]["chain"]
@@ -2275,6 +2367,11 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "demogorgn_bed": bool(demogorgn_bed),
         "antenna": antenna,
         "posting_div": posting_div,
+        "spec_diffuse": (None if not spec else {
+            "specular_fraction": spec[0], "spec_tilt_s0_deg": spec[1],
+            "diffuse_exponent": spec[2], "model": SPEC_DIFFUSE_NOTE,
+            **((preps[order[0]]["aux"]["rssnr_gamma"] or {}).get(
+                "spec_diffuse", {}) if preps else {})}),
         "bed_roughness": (None if not bed_rough else {
             "sigma_m": bed_rough[0], "corr_length_m": bed_rough[1],
             "interface": "bed only (the surface keeps its own "
@@ -2284,7 +2381,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             if gamma_rssnr else None}),
         "passes": {}, "measured_caveats": MEASURED_CAVEATS}
     if demogorgn_bed:
-        config["demogorgn"] = {**preps[ORDER[0]]["aux"]["demogorgn"],
+        config["demogorgn"] = {**preps[order[0]]["aux"]["demogorgn"],
                                "license": "NONE FOUND -- internal "
                                "engineering use only until the Gator "
                                "Glaciology group provides one (scout "
@@ -2569,6 +2666,21 @@ def main():
                     help="extra dB added to the --bed-rough gamma guard (the "
                     "pilot-measured residual that also compensates the added "
                     "INCOHERENT term; recorded in the config)")
+    ap.add_argument("--specular-fraction", type=float, default=None,
+                    metavar="F_S",
+                    help="split the RSSNR-mapped bed reflectivity into a "
+                    "SPECULAR share f_s (tilt-weighted, coherent) and a "
+                    "DIFFUSE share 1-f_s (cos^n, incoherent). Off unless "
+                    "given; f_s = 1 with --spec-tilt-deg 0 is the unsplit "
+                    "baseline")
+    ap.add_argument("--spec-tilt-deg", type=float, default=1.0,
+                    metavar="S0",
+                    help="rms sub-facet slope s0 (deg) of the specular tilt "
+                    "weight exp(-tan^2(psi)/(2 s0^2)); 0 disables the "
+                    "weighting")
+    ap.add_argument("--diffuse-exponent", type=float, default=1.0,
+                    metavar="N", help="exponent of the diffuse cos^n(theta) "
+                    "angular law (1-2 spans the usual near-Lambert range)")
     ap.add_argument("--posting-div", type=int, default=1,
                     help="refine the SIM along-track posting by this factor "
                     "(2 -> 7.43 m, doubling the alias-limited aperture and "
@@ -2586,7 +2698,10 @@ def main():
         antenna=args.antenna,
         bed_rough=tuple(args.bed_rough) if args.bed_rough else None,
         posting_div=args.posting_div, passes=args.passes,
-        bed_rough_extra_db=args.bed_rough_extra_db)
+        bed_rough_extra_db=args.bed_rough_extra_db,
+        spec=(None if args.specular_fraction is None
+              else (args.specular_fraction, args.spec_tilt_deg,
+                    args.diffuse_exponent)))
 
 
 if __name__ == "__main__":

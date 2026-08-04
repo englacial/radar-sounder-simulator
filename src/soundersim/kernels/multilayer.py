@@ -113,9 +113,39 @@ for the low-contrast firn case K_t is ~5 percent of the reflection K, making
 the whole crossing effect near-negligible there. Smooth defaults trace
 exactly the pre-roughness program; sigma = 0 is bit-identical to it.
 
+Diffuse bed channel (``diffuse=(amp, phasors, n_exp)``, coherent mode only):
+an INCOHERENT per-facet return that runs alongside the specular one, for
+reflectivity models that split the target into a mirror-like part and a
+diffusely scattering part (a facet's specular lobe only points back when the
+facet is nearly normal to the ray; the rest of the reflected power leaves
+the specular direction and is modelled as a cos^n law). Per facet
+
+    a_diff = sqrt(A/(2 pi)) * amp * cos_t^(1 + n_exp/2) * spread * att_f
+
+with a frozen unit random phasor, added to the same complex accumulator as
+the specular amplitude. ``amp`` is a per-facet FIELD amplitude on the same
+scale as ``gamma``.
+
+NORMALIZATION (derived, unit-tested in tests/test_multilayer_diffuse.py).
+The prefactor sqrt(A/(2 pi)) is fixed by requiring that splitting a target's
+power reflectivity as Gamma^2 -> f_s Gamma^2 (specular, field * sqrt(f_s))
+plus (1-f_s) Gamma^2 (diffuse, amp = sqrt(1-f_s) Gamma) conserves the TOTAL
+returned power at nadir over a flat interface. The specular coherent sum is
+the image-method mirror field: integrating (k/2pi) Gamma cos_t spread over a
+flat plane at range r (spread = 1/r^2, stationary phase) gives |E|^2 =
+Gamma^2/(4 r^2). The incoherent sum of the diffuse channel over the same
+plane is sum_i a_i^2 = (1/(2 pi)) amp^2 Int (cos_t spread)^2 dA, and
+Int (cos_t/r'^2)^2 dA = pi/(2 r^2) exactly, so sum_i a_i^2 = amp^2/(4 r^2).
+With amp^2 = (1-f_s) Gamma^2 the two channels sum to Gamma^2/(4 r^2) for any
+f_s, independently of facet size, range and wavenumber (the k/2pi prefactor
+cancels -- the diffuse channel is frequency-flat by construction, as a
+sigma^0 law should be). The extra cos^n_exp factor is a SHAPE on top,
+normalized to 1 at nadir, so n_exp > 0 books slightly less than (1-f_s) of
+the power away from nadir (recorded, not compensated).
+
 Compilation caching: the jitted callable is built once per static
 configuration -- ``(mode, split_sides, n_samples, n_crossed, pattern,
-refraction, joint budgets, roughness statics)``, memoized via
+refraction, joint budgets, roughness statics, diffuse)``, memoized via
 ``functools.lru_cache`` -- with
 every run-varying number (t0/dt/c/gamma/k0, per-leg eps/index/attenuation,
 interface lookup constants, facet blocks, positions) passed as traced
@@ -212,7 +242,7 @@ def _joint_consts(crossed, pad_to, z_platform):
 def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                   pattern="isotropic", refraction="sequential",
                   joint_newton=6, joint_backtrack=4, rough_terms=0,
-                  rough_cross=False, gamma_facet=False):
+                  rough_cross=False, gamma_facet=False, diffuse=False):
     """Build (once per static configuration) the jitted vmapped kernel.
 
     Everything numeric that can vary between runs is a traced argument:
@@ -327,7 +357,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                 c_surf, c_last, r2.x[0])
 
     def one_trace(p, u, pv, blocks, consts, n_leg, eps_leg, att, t0, dt, c,
-                  gamma, k0, pa, pb, sig_t, l_t, sig_c):
+                  gamma, k0, pa, pb, sig_t, l_t, sig_c, n_exp):
         if refraction == "sequential":
             assert len(consts) == n_crossed
 
@@ -336,14 +366,19 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
             # per-facet gamma rides the blocked scan like the phasors do; the
             # scalar path (gamma_facet=False) traces exactly the old program
             fg = None
+            blk_ = list(blk)
+            fdif = fdph = None
+            if diffuse:
+                fdif, fdph = blk_[-2], blk_[-1]
+                blk_ = blk_[:-2]
             if rough_terms and gamma_facet:
-                fc, fn, fa, f1, f2, fph, fg = blk
+                fc, fn, fa, f1, f2, fph, fg = blk_
             elif rough_terms:
-                fc, fn, fa, f1, f2, fph = blk
+                fc, fn, fa, f1, f2, fph = blk_
             elif gamma_facet:
-                fc, fn, fa, f1, f2, fg = blk
+                fc, fn, fa, f1, f2, fg = blk_
             else:
-                fc, fn, fa, f1, f2 = blk
+                fc, fn, fa, f1, f2 = blk_
             gam = fg if gamma_facet else gamma
             q = fc.astype(jnp.float64)
             path_fn = path if refraction == "sequential" else path_joint
@@ -398,6 +433,15 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                            + jnp.where(fa > 0,
                                        (kj / TWO_PI) * gam * cos_t * spread
                                        * att_f * jnp.sqrt(dp) * fph, 0.0))
+                if diffuse:
+                    # module docstring: sqrt(A/2pi) * amp * cos_t^(1+n/2) *
+                    # spread * att_f, incoherent (frozen unit phasor). The
+                    # area mask kills zero-padded block slots.
+                    ct = jnp.maximum(cos_t, 0.0)
+                    a_d = (jnp.sqrt(jnp.maximum(fa, 0.0) / TWO_PI)
+                           * fdif.astype(jnp.float64) * ct
+                           * ct ** (0.5 * n_exp) * spread * att_f)
+                    amp = amp + jnp.where(fa > 0, a_d * fdph, 0.0)
                 contrib = (1j * amp * jnp.exp(-2j * k0 * opl)).astype(
                     jnp.complex64)
                 pwr = (jnp.real(contrib) ** 2
@@ -421,13 +465,13 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
         (hist, dropped), _ = jax.lax.scan(step, init, blocks)
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 15))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 16))
 
 
 def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                           *, mode, t0, dt, n_samples, c, gamma=0.0, k0=None,
                           split_sides=False, pattern=None, roughness=None,
-                          crossed_sigma=None, block_size=None,
+                          crossed_sigma=None, diffuse=None, block_size=None,
                           refraction="sequential", pad_to=None,
                           joint_newton=6, joint_backtrack=4):
     """Binned refracted-path contributions from one target interface.
@@ -516,6 +560,16 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     else:
         sig_t = l_t = 0.0
         n_terms = 0
+    if diffuse is not None:
+        if not coherent:
+            raise ValueError("diffuse channel requires coherent mode")
+        d_amp, d_ph, n_exp = diffuse
+        d_amp = np.asarray(d_amp, np.float64)
+        if d_amp.shape != (n,):
+            raise ValueError(
+                f"diffuse amp shape {d_amp.shape} != ({n},)")
+    else:
+        n_exp = 0.0
     if gamma_facet:
         if gamma_arr.shape != (n,):
             raise ValueError(
@@ -524,6 +578,13 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
         # so an array of a constant matches the scalar path bit-exactly
         blk = blk + (np.pad(gamma_arr, (0, pad)).reshape(
             n_blocks, block_size),)
+    if diffuse is not None:
+        # float64 amplitude + complex64 frozen phasors, appended LAST so the
+        # unpacking above stays positional (see one_trace)
+        blk = blk + (
+            np.pad(d_amp, (0, pad)).reshape(n_blocks, block_size),
+            jnp.asarray(np.pad(np.asarray(d_ph, np.complex64),
+                               (0, pad)).reshape(n_blocks, block_size)))
     # Positions stay float64 NumPy: converted under the x64 scope below, so
     # the platform coordinates (the largest magnitudes) are not truncated.
     uct = np.asarray(u_ct, np.float64)
@@ -536,13 +597,15 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     fn = _refracted_fn(coherent, split_sides, int(n_samples),
                        None if joint else len(crossed), kind, refraction,
                        int(joint_newton), int(joint_backtrack), int(n_terms),
-                       crossed_sigma is not None, gamma_facet)
+                       crossed_sigma is not None, gamma_facet,
+                       diffuse is not None)
     with jax.enable_x64():
         hist, dropped = fn(pos, uct, pv, blk, consts, n_leg, eps, att,
                            np.float64(t0), np.float64(dt), np.float64(c),
                            np.float64(0.0 if gamma_facet else gamma),
                            np.float64(0.0 if k0 is None else k0), pa, pb,
-                           np.float64(sig_t), np.float64(l_t), sig_c)
+                           np.float64(sig_t), np.float64(l_t), sig_c,
+                           np.float64(n_exp))
         hist, dropped = np.asarray(hist), np.asarray(dropped)
     if split_sides:
         hist = hist.reshape(-1, 2, n_samples).transpose(0, 2, 1)

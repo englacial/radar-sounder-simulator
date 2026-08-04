@@ -228,3 +228,135 @@ def test_run_rejects_unsupported_hypothesis_combinations():
                 bed_ablation=True, companion=False)
     with pytest.raises(ValueError, match="bed-rough"):
         rbc.run(segment="full", bed_rough=(0.22, 0.886), gamma_rssnr=False)
+
+
+# --------------------------------------- T5 specular/diffuse bed splitting
+
+class _Base:
+    """Minimal prep-scene stand-in for apply_rssnr_gamma."""
+
+    crs = "EPSG:3031"
+
+    def __init__(self, bed, transform):
+        self.dems = [bed + 500.0, bed]
+        self.transform = transform
+
+
+def _axis_and_gmap(x0, y0, n=40, step=100.0):
+    s = np.arange(n) * step
+    axis = {"x": x0 + s, "y": np.full(n, y0), "s": s}
+    gmap = {"s": s, "g2_db": np.full(n, -12.9)}
+    return axis, gmap
+
+
+def test_bed_tilt_matches_a_known_ramp():
+    from affine import Affine
+    tr = Affine(20.0, 0.0, 0.0, 0.0, -20.0, 0.0)
+    ny, nx = 12, 14
+    slope = 0.1                                   # 10 % grade along +x
+    bed = np.arange(nx)[None, :] * 20.0 * slope + np.zeros((ny, 1))
+    psi = rbc.bed_tilt_rad(bed, tr)
+    assert np.allclose(psi[1:-1, 1:-1], np.arctan(slope), atol=1e-12)
+    assert np.allclose(rbc.bed_tilt_rad(np.zeros((ny, nx)), tr), 0.0)
+
+
+def _apply(spec, slope=0.0):
+    from affine import Affine
+    tr = Affine(20.0, 0.0, 1e6, 0.0, -20.0, -1e6)
+    ny, nx = 30, 140          # >= 100 axis samples inside the scene
+    bed = np.arange(nx)[None, :] * 20.0 * slope + np.zeros((ny, 1))
+    base = _Base(bed, tr)
+    xs, ys = tr * (np.arange(nx) + 0.5, np.full(nx, 0.5))
+    axis, gmap = _axis_and_gmap(xs[0], ys[0], n=nx, step=20.0)
+    axis["x"], axis["y"] = np.asarray(xs), np.asarray(ys)
+    axis["s"] = np.arange(nx) * 20.0
+    gmap = {"s": axis["s"], "g2_db": np.full(nx, -12.9),
+            "k_db": 0.0, "k_phys_db": 0.0, "k_minus_kphys_db": 0.0,
+            "g2_seg_db": {}, "n_censored": 0,
+            "provenance": {"snapshot_id": "x", "source": "y"}}
+    stats = rbc.apply_rssnr_gamma(base, axis, gmap, spec)
+    return base, stats
+
+
+def test_specular_fraction_one_and_no_tilt_weight_is_the_unsplit_baseline():
+    """The bit-identity gate at the tool level: f_s = 1, s0 = 0 must give
+    exactly the unsplit gamma grid and attach NO diffuse map (so the kernel
+    traces the pre-feature program)."""
+    plain, _ = _apply(None)
+    split, _ = _apply((1.0, 0.0, 1.0))
+    assert np.array_equal(plain.gamma_bed, split.gamma_bed)
+    assert getattr(plain, "diffuse_bed", None) is None
+    assert getattr(split, "diffuse_bed", None) is None
+
+
+def test_split_conserves_power_in_the_scene_mean():
+    """<f_s * G_n> + (1 - f_s) == 1 for every f_s and s0: the tilt weight is
+    mean-normalized (double-count guard), so the split conserves the SCENE
+    MEAN bed power exactly -- on a flat bed that is also per-pixel."""
+    plain, _ = _apply(None)
+    ref = (plain.gamma_bed.astype(np.float64) ** 2).mean()
+    for f_s in (0.0, 0.5, 0.9, 0.99):
+        for s0, slope in ((1.0, 0.0), (3.0, 0.05), (1.0, 0.05)):
+            b, _ = _apply((f_s, s0, 1.0), slope=slope)
+            tot = b.gamma_bed.astype(np.float64) ** 2
+            if f_s < 1.0:
+                tot = tot + b.diffuse_bed.astype(np.float64) ** 2
+            pl, _ = _apply(None, slope=slope)
+            assert tot.mean() == pytest.approx(
+                (pl.gamma_bed.astype(np.float64) ** 2).mean(), rel=1e-6)
+    assert ref > 0
+
+
+def test_tilt_weight_darkens_the_specular_channel_only():
+    """On a tilted bed the specular share is cut by G(psi) while the diffuse
+    share keeps its full (1-f_s): the 'bright because flat' mechanism."""
+    f_s, s0 = 0.9, 1.0
+    flat, _ = _apply((f_s, s0, 1.0), slope=0.0)
+    tilt, st = _apply((f_s, s0, 1.0), slope=np.tan(np.deg2rad(3.0)))
+    i = (slice(2, -2), slice(2, -2))
+    # a UNIFORMLY tilted bed normalizes back to <G> = 1, so the specular
+    # level is unchanged: the weight is a relative flat-vs-tilted contrast
+    ratio = (tilt.gamma_bed[i] ** 2) / (flat.gamma_bed[i] ** 2)
+    assert np.allclose(ratio, 1.0, rtol=1e-5)
+    assert np.allclose(tilt.diffuse_bed[i], flat.diffuse_bed[i], rtol=1e-6)
+    assert st["spec_diffuse"]["specular_fraction"] == f_s
+    assert st["spec_diffuse"]["bed_tilt_deg"]["med"] == pytest.approx(3.0,
+                                                                      abs=0.1)
+
+
+def test_tilt_weight_makes_flat_facets_brighter_than_tilted_ones():
+    """Within ONE scene the specular weight is the flat-vs-tilted contrast
+    exp(-tan^2(psi)/(2 s0^2)) -- the 'bright because flat' mechanism (the
+    mean normalization only sets the overall level)."""
+    from affine import Affine
+    tr = Affine(20.0, 0.0, 1e6, 0.0, -20.0, -1e6)
+    ny, nx, s0 = 30, 140, 3.0
+    ramp = np.tan(np.deg2rad(6.0)) * 20.0
+    z = np.zeros((ny, nx))
+    z[:, nx // 2:] = ramp * np.arange(nx - nx // 2)[None, :]   # tilted half
+    base = _Base(z, tr)
+    xs, ys = tr * (np.arange(nx) + 0.5, np.full(nx, 0.5))
+    axis = {"x": np.asarray(xs), "y": np.asarray(ys),
+            "s": np.arange(nx) * 20.0}
+    gmap = {"s": axis["s"], "g2_db": np.full(nx, -12.9), "k_db": 0.0,
+            "k_phys_db": 0.0, "k_minus_kphys_db": 0.0, "g2_seg_db": {},
+            "n_censored": 0, "provenance": {"snapshot_id": "x",
+                                            "source": "y"}}
+    rbc.apply_rssnr_gamma(base, axis, gmap, (1.0, s0, 1.0))
+    flat = base.gamma_bed[5, 5] ** 2
+    tilted = base.gamma_bed[5, -5] ** 2
+    want = np.exp(-np.tan(np.deg2rad(6.0)) ** 2
+                  / (2.0 * np.tan(np.deg2rad(s0)) ** 2))
+    assert tilted / flat == pytest.approx(want, rel=1e-4)
+    assert tilted < flat
+
+
+def test_spec_diffuse_enters_the_cache_key_only_when_on():
+    p, rows = _p(), np.arange(198)
+    assert "spec_diffuse" not in rbc.chunk_meta(p, 0, rows, 17, 3365, 31.0,
+                                                True)
+    m = rbc.chunk_meta(p, 0, rows, 17, 3365, 31.0, True, spec=(0.9, 1.0, 1.0))
+    assert m["spec_diffuse"] == [0.9, 1.0, 1.0]
+    rid = rbc.chunk_rid(p, 0, 31.0, True, spec=(0.9, 1.0, 1.0))
+    assert rid.endswith("_fs0.9_s01_n1")
+    assert rbc.chunk_rid(p, 0, 31.0, True) != rid

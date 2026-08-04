@@ -227,13 +227,21 @@ class SimConfig(BaseModel):
     ``roughness_seed`` seeds the deterministic per-facet speckle phasors of
     any interface with a ``roughness`` config (docs/roughness.md); runs with
     the same seed are reproducible, different seeds draw independent speckle
-    realizations.
+    realizations. It also seeds the DIFFUSE channel's phasors (independent
+    stream).
+
+    ``diffuse_exponent`` is the exponent n of the cos^n(theta_incidence)
+    angular law of the diffuse channel, used only when a scene attaches
+    ``diffuse_maps`` (per-facet diffuse FIELD amplitudes; see
+    kernels/multilayer.py). n = 0 is the flat law; 1-2 spans the usual
+    near-Lambert range.
     """
 
     mode: Literal["incoherent", "coherent"]
     split_sides: bool = False
     refraction: Literal["sequential", "joint"] = "joint"
     roughness_seed: int = 0
+    diffuse_exponent: float = 1.0
     radar: RadarConfig
     facets: FacetConfig
     media: list[Medium] = Field(default_factory=_default_media)
