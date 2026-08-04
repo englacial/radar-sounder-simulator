@@ -2481,11 +2481,18 @@ def main():
     ap.add_argument("--n-traces", type=int, default=None,
                     help=f"sim traces (default {N_TRACES_PILOT} pilot / "
                     f"{N_TRACES_FULL} full)")
-    ap.add_argument("--att", type=float, default=rac.ATT_DB_PER_KM,
-                    help="one-way ice attenuation dB/km (default the b26/"
-                    "altitude 15; run_cross_season calibrated an EFFECTIVE "
-                    "31 on a different West Antarctic line -- affects only "
-                    "bed-borne levels, not the surface-borne geometry)")
+    ap.add_argument("--att", type=float, default=31.0,
+                    help="one-way ice attenuation dB/km (default 31: the "
+                    "hypothesis-campaign T2 value the user adopted 2026-08 -- "
+                    "confirmed independently by run_cross_season repeat-pass "
+                    "calibration and by the RSSNR K-K_phys diagnostic, and "
+                    "the only tested change that improved the bed-return "
+                    "tail slope. KNOWN CONSEQUENCE under median anchoring: "
+                    "absolute nadir bed levels sit 15-20 dB below measured "
+                    "(received level goes as K - RSSNR); a value sweep and "
+                    "the anchoring choice are recorded follow-ups. Affects "
+                    "only bed returns, not the surface-return geometry; 15 "
+                    "remains the b26/altitude tools' constant)")
     ap.add_argument("--smooth-surface", action="store_true",
                     help="disable the representative sub-facet surface "
                     "roughness (default ON: off-nadir surface scattering is "
