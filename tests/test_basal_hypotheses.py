@@ -360,3 +360,69 @@ def test_spec_diffuse_enters_the_cache_key_only_when_on():
     rid = rbc.chunk_rid(p, 0, 31.0, True, spec=(0.9, 1.0, 1.0))
     assert rid.endswith("_fs0.9_s01_n1")
     assert rbc.chunk_rid(p, 0, 31.0, True) != rid
+
+
+# ------------------------------------------------ K anchoring (level mode)
+
+def _fake_rssnr(monkeypatch, n=80):
+    """Synthetic anchor samples so build_rssnr_gamma runs without network."""
+    from pyproj import Transformer
+    s = np.linspace(0.0, 60e3, n)
+    x, y = -1.2e6 + s, np.full(n, -6.0e5)
+    lon, lat = Transformer.from_crs("EPSG:3031", "EPSG:4326",
+                                    always_xy=True).transform(x, y)
+    thick = 600.0 + 100.0 * np.sin(s / 8e3)
+    stw = np.full(n, 3e-6)
+    btw = stw + 2.0 * thick * np.sqrt(rac.EPS_ICE) / C
+    rng = np.random.default_rng(0)
+    d = {"lon": lon, "lat": lat, "stw": stw, "btw": btw,
+         "rssnr": 2.0 * 25.0 * thick / 1e3 + rng.normal(0.0, 1.0, n),
+         "qc": np.ones(n, bool)}
+    monkeypatch.setattr(rbc, "fetch_rssnr_anchor",
+                        lambda *a, **k: (d, {"snapshot_id": "S",
+                                             "source": "test"}))
+    monkeypatch.setattr(rbc, "segment_s_range", lambda *a: (0.0, 60e3))
+    return {"x": x, "y": y, "s": s, "eps_ice": rac.EPS_ICE}
+
+
+def test_level_anchor_raises_k_by_the_recorded_deficit(monkeypatch):
+    """--anchor level must move K (and every level statistic) by exactly the
+    deficit, leaving the SHAPE of the mapped profile untouched; --anchor
+    median must be bit-identical to the pre-feature mapping."""
+    axis = _fake_rssnr(monkeypatch)
+    med = rbc.build_rssnr_gamma(axis, "full", 31.0)
+    lvl = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level")
+    d = rbc.LEVEL_ANCHOR_DEFICIT_DB
+    assert med["anchor"] == "median" and "level_anchor" not in med
+    assert lvl["k_db"] == pytest.approx(med["k_db"] + d, abs=0.01)
+    assert np.allclose(lvl["g2_db"], med["g2_db"] + d, atol=1e-9)
+    for k in ("min", "p5", "med", "p95", "max"):
+        assert lvl["g2_seg_db"][k] == pytest.approx(
+            med["g2_seg_db"][k] + d, abs=0.06)
+    la = lvl["level_anchor"]
+    assert la["deficit_db"] == pytest.approx(d, abs=0.01)
+    assert la["k_level_db"] == lvl["k_db"]
+    assert la["k_median_db"] == pytest.approx(med["k_db"], abs=0.01)
+    # raising K raises the implied reflectivity: the discriminator diagnostic
+    assert lvl["g2_pos_frac_seg"] >= med["g2_pos_frac_seg"]
+
+
+def test_level_anchor_deficit_override_and_bad_mode(monkeypatch):
+    axis = _fake_rssnr(monkeypatch)
+    med = rbc.build_rssnr_gamma(axis, "full", 31.0)
+    lvl = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level",
+                                level_deficit_db=6.0)
+    assert lvl["k_db"] == pytest.approx(med["k_db"] + 6.0, abs=0.01)
+    assert lvl["level_anchor"]["source"] == "supplied"
+    with pytest.raises(ValueError, match="anchor"):
+        rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="nonsense")
+
+
+def test_level_anchor_composes_with_the_bed_roughness_guard(monkeypatch):
+    """The two K offsets are independent and additive."""
+    axis = _fake_rssnr(monkeypatch)
+    base = rbc.build_rssnr_gamma(axis, "full", 31.0)
+    both = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level",
+                                 bed_rough_sigma=0.05, extra_db=-1.0)
+    want = (rbc.LEVEL_ANCHOR_DEFICIT_DB - rbc.bed_rough_nadir_db(0.05) - 1.0)
+    assert both["k_db"] == pytest.approx(base["k_db"] + want, abs=0.02)

@@ -123,6 +123,25 @@ TAIL_FLOOR_MARGIN_DB = 3.0          # measured tail counted floor-limited below
 FC_HZ = 190e6
 ANT_DEFAULT = "array"
 LAM_ICE_M = C / (FC_HZ * float(np.sqrt(3.17)))     # ~0.886 m at 190 MHz
+# LEVEL ANCHORING (--anchor level): the median-anchored K pins the median
+# |Gamma|^2 to the Fresnel constant, which makes the RECEIVED bed level
+# depend on A (received ~ K - RSSNR). Level anchoring instead pins the
+# received level: K is raised by the measured bed-window DEFICIT of the
+# same configuration, so the median simulated bed-window level across the
+# three real passes matches the median measured one. The deficit cannot be
+# computed without a run, so it is supplied as a recorded number and
+# VERIFIED post-run (per-pass residuals land in the metrics). The default
+# is the att = 31 DEMOGORGN unsplit sweep point:
+#   sim bed window -67.3 / -60.8 / -60.9 dB vs measured -54.3 / -46.0 / -46.1
+#   -> per-pass deficits 13.0 / 14.8 / 14.8 dB, median-to-median 14.8 dB.
+LEVEL_ANCHOR_DEFICIT_DB = 14.8
+LEVEL_ANCHOR_NOTE = (
+    "K_level = K_median + D, D = median(measured bed-window level) - "
+    "median(simulated bed-window level) over the three real passes of the "
+    "IDENTICALLY configured median-anchored run. Received bed level shifts "
+    "dB-for-dB with K (received ~ K - RSSNR, independent of A), so one "
+    "analytic step replaces an iteration; the post-run per-pass residuals "
+    "are recorded in rssnr_level_anchor and must land within ~2 dB.")
 SPEC_DIFFUSE_NOTE = (
     "Angle-dependent bed reflectivity: the RSSNR-mapped |Gamma_bed|^2(x) is "
     "split into a SPECULAR share f_s, weighted by the facet tilt "
@@ -582,7 +601,7 @@ def bed_rough_nadir_db(sigma_m, f0=FC_HZ, eps_ice=None):
 
 
 def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
-                      extra_db=0.0):
+                      extra_db=0.0, anchor="median", level_deficit_db=None):
     """Fetch + map: the shared anchor G2(s) profile dict (rssnr_gamma_profile
     output + fetch provenance), on the anchor along-track axis ``axis``
     (ref_bed_picks).
@@ -604,6 +623,13 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
     seg_lo, seg_hi = segment_s_range(axis, segment)
     shift = ((-bed_rough_nadir_db(bed_rough_sigma) + extra_db)
              if bed_rough_sigma else 0.0)
+    lvl = 0.0
+    if anchor == "level":
+        lvl = (LEVEL_ANCHOR_DEFICIT_DB if level_deficit_db is None
+               else float(level_deficit_db))
+        shift = shift + lvl
+    elif anchor != "median":
+        raise ValueError(f"unknown anchor {anchor!r}")
     prof = rssnr_gamma_profile(s_smp, d["rssnr"], thick, d["qc"], att,
                                seg_lo, seg_hi, g2_offset_db=shift)
     if bed_rough_sigma:
@@ -620,6 +646,15 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
             "empirical_extra_db is the pilot-measured residual that brings "
             "the nadir bed window back onto the baseline once the added "
             "INCOHERENT term is counted (recorded, not tuned per pass)"}
+    prof["anchor"] = anchor
+    if anchor == "level":
+        prof["level_anchor"] = {
+            "deficit_db": round(lvl, 2),
+            "k_median_db": round(prof["k_db"] - shift, 2),
+            "k_level_db": prof["k_db"],
+            "source": ("recorded default (att 31 DEMOGORGN unsplit)"
+                       if level_deficit_db is None else "supplied"),
+            "note": LEVEL_ANCHOR_NOTE}
     prof["provenance"] = prov
     prof["note"] = RSSNR_GAMMA_NOTE
     return prof
@@ -2034,7 +2069,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         add_30km=False, bed_ablation=False, demogorgn_bed=False,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
-        bed_rough_extra_db=0.0, passes=None, spec=None):
+        bed_rough_extra_db=0.0, passes=None, spec=None,
+        anchor="median", level_deficit_db=None):
     proc = processing == "standard"
     if out_name and (companion and gamma_rssnr or bed_ablation):
         raise ValueError("--out-name relocates the case directory; the "
@@ -2079,7 +2115,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         gmap = build_rssnr_gamma(axis, segment, att,
                                  bed_rough_sigma=bed_rough[0] if bed_rough
                                  else None,
-                                 extra_db=bed_rough_extra_db)
+                                 extra_db=bed_rough_extra_db,
+                                 anchor=anchor,
+                                 level_deficit_db=level_deficit_db)
+        if anchor == "level":
+            la = gmap["level_anchor"]
+            print(f"level anchoring: K_median {la['k_median_db']} -> K_level "
+                  f"{la['k_level_db']} dB (deficit {la['deficit_db']} dB, "
+                  f"{la['source']})", flush=True)
         if bed_rough:
             g = gmap["bed_rough_guard"]
             print(f"bed roughness: sigma {g['sigma_m']} m, l "
@@ -2314,6 +2357,39 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 f"{k} {'ok' if v['guard']['pass'] else 'FAIL'} "
                 f"({v['guard']['min_bed_minus_surface_returns_db']:+.1f} dB)"
                 for k, v in e["sim"].items()), flush=True)
+    if gamma_rssnr and anchor == "level":
+        # POST-RUN VERIFICATION of the analytic level anchor: per-pass
+        # simulated minus measured bed-window level (dB rel own surface
+        # peak). The anchor targets the MEDIAN of the three real passes, so
+        # the median residual is the headline and the spread is the
+        # per-pass structure the single constant cannot absorb.
+        res = {k: round(analyses[k]["sim"]["bed_rel_surf_db"]
+                        - analyses[k]["meas"]["bed_rel_surf_db"], 2)
+               for k in order if analyses[k]["meas"]}
+        med = float(np.median(list(res.values()))) if res else float("nan")
+        la = gmap["level_anchor"]
+        metrics["rssnr_level_anchor"] = {
+            "value": round(med, 2), "threshold": 2.0, "op": "<=",
+            "pass": bool(abs(med) <= 2.0),
+            "median_residual_db": round(med, 2),
+            "per_pass_residual_db": res,
+            "max_abs_residual_db": round(max(abs(v) for v in res.values()), 2)
+            if res else None,
+            **la,
+            "implied_reflectivity": {
+                "g2_seg_db": gmap["g2_seg_db"],
+                "g2_pos_frac_seg": gmap["g2_pos_frac_seg"],
+                "note": "|Gamma_bed|^2 over the segment under this "
+                "anchoring. A median above 0 dB means the level match "
+                "requires a bed that reflects MORE power than it receives "
+                "-- impossible as a pure reflectivity, so the level "
+                "anchoring at this attenuation is refuted under that "
+                "interpretation (focusing/volume gain would have to make "
+                "up the difference)."},
+            "note": "KEY DELIVERABLE (level anchoring): K set so the median "
+            "simulated bed-window level matches the median measured one at "
+            "the run's attenuation. value/threshold gate the post-run "
+            "median residual at 2 dB. " + rec}
     if gamma_rssnr:
         metrics["rssnr_gamma_mapping"] = {
             "value": gmap["k_db"], "threshold": None, "op": "record",
@@ -2398,6 +2474,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "linear in anchor along-track s (np.interp, edge-clamped), "
             "cross-track constant; H(x) from the DATASET's surface/bed "
             "twtts (self-consistent with its RSSNR), not the DEM")
+        config["rssnr_gamma"]["anchor"] = anchor
+        if anchor == "level":
+            config["rssnr_gamma"]["level_anchor"] = gmap["level_anchor"]
         config["rssnr_gamma"]["shared_field"] = (
             "ONE anchor-derived gamma field applied identically to all "
             "three passes (per-pass fields would confound the altitude "
@@ -2666,6 +2745,16 @@ def main():
                     help="extra dB added to the --bed-rough gamma guard (the "
                     "pilot-measured residual that also compensates the added "
                     "INCOHERENT term; recorded in the config)")
+    ap.add_argument("--anchor", choices=["median", "level"],
+                    default="median",
+                    help="RSSNR K anchoring: 'median' (default, backward "
+                    "compatible) pins the median |Gamma|^2 to the Fresnel "
+                    "constant; 'level' pins the simulated bed-window LEVEL "
+                    "to the measured one by raising K with the recorded "
+                    f"deficit (default {LEVEL_ANCHOR_DEFICIT_DB} dB)")
+    ap.add_argument("--level-deficit-db", type=float, default=None,
+                    help="override the --anchor level deficit D (dB); "
+                    "default is the att 31 DEMOGORGN unsplit measurement")
     ap.add_argument("--specular-fraction", type=float, default=None,
                     metavar="F_S",
                     help="split the RSSNR-mapped bed reflectivity into a "
@@ -2699,6 +2788,7 @@ def main():
         bed_rough=tuple(args.bed_rough) if args.bed_rough else None,
         posting_div=args.posting_div, passes=args.passes,
         bed_rough_extra_db=args.bed_rough_extra_db,
+        anchor=args.anchor, level_deficit_db=args.level_deficit_db,
         spec=(None if args.specular_fraction is None
               else (args.specular_fraction, args.spec_tilt_deg,
                     args.diffuse_exponent)))

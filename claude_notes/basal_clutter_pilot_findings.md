@@ -1090,3 +1090,119 @@ chunk cache with no loss. Pilot-projection: the cost is geometry-driven and
 was taken from the identically-configured `t2_att31` run rather than spent
 again, after a 30 s pilot smoke confirmed the unsplit path still runs at a
 non-default attenuation post-T5. Suite 289 unit green; ruff clean.
+
+## Level anchoring at A = 31: the discriminator, and what it kills (2026-08-06)
+
+`--anchor median|level` (default `median`, backward compatible) on the RSSNR
+mapping. **Rule:** `K_level = K_median + D`, `D = median(measured bed-window
+level) - median(simulated bed-window level)` over the three real passes of
+the IDENTICALLY configured median-anchored run. The received bed level moves
+dB-for-dB with K (received ~ K - RSSNR, independent of A), so one analytic
+step replaces an iteration; `D = 14.8 dB` is the recorded att-31 DEMOGORGN
+unsplit measurement (per-pass deficits 13.0 / 14.8 / 14.8 dB), and the
+post-run residuals are gated in `rssnr_level_anchor`.
+
+Run: full 50 km, four passes, DEMOGORGN bed, A = 31, matched processing,
+unsplit -> `outputs/basal_clutter/hypothesis_tests/att31_klevel/`
+(radargrams / decomposition / bed_tail / metrics / run_config), mirrored to
+`outputs/verification/basal_clutter_att31_klevel/`. **K_median -10.60 ->
+K_level +4.20 dB.** Wall 1954.2 s (32.6 min; low 1037.6 / mid 524.6 / high
+137.3 / syn30km 254.7).
+
+### (a) Level verification and the implied reflectivity
+
+| pass | sim bed window | measured | residual |
+|---|---|---|---|
+| low | -52.5 | -54.3 | **+1.78** |
+| mid | -49.2 | -46.0 | **-3.21** |
+| high | -48.6 | -46.1 | **-2.50** |
+
+Median residual **-2.50 dB**, max |residual| 3.21 -- the analytic anchor
+lands close but **outside the ~2 dB target, and the reason is diagnostic**:
+the reference deficits were read off bed windows that were partly SURFACE
+returns (at A = 31 median-anchored the bed window sits only ~5 dB above its
+own surface-return content), so raising K lifts only the bed part and the
+window moves ~11.6 dB, not the full 14.8. One refinement iteration
+(D = 17.3 dB) would close it; it was not run, and it would make the
+diagnostic below stronger, not weaker.
+
+**The implied reflectivity is the point.** Under level anchoring at A = 31
+the mapped bed reflectivity is
+
+    |Gamma_bed|^2 segment: min -17.7 / p5 -14.2 / med +1.9 / p95 +32.2 /
+    max +33.8 dB,  fraction above 0 dB = 0.541
+
+**The median is +1.9 dB and 54% of the line is above 0 dB.** Said plainly:
+matching the measured bed brightness at 31 dB/km requires a bed that returns
+MORE power than it receives over more than half the segment. That is
+impossible as a pure power reflectivity, so **A = 31 combined with level
+matching is quantitatively refuted under the pure-reflectivity
+interpretation** -- it would need real focusing or volume gain (a converging
+bed, a resonant sub-ice layer) to survive, which nothing else in this study
+supports. For contrast the median-anchored A = 31 run has median -12.9 dB
+and 18.9% above 0, and A = 20 median-anchored has -12.9 dB and 16.2%.
+
+### (b) Tails once the levels are matched
+
+| run | pass | bed window (d meas) | bed-return slope / meas | excess +2 us | guard |
+|---|---|---|---|---|---|
+| **att20** (median, A 20) | low / mid / high | +1.3 / -3.9 / -3.3 | -7.25 / -4.81 / -2.72 vs -8.22 / -5.15 / -3.17 | -20.2 / +0.8 / +4.0 | FAIL-4 / ok+15 / ok+20 |
+| **att31_klevel** (level, A 31) | low / mid / high | +1.8 / -3.2 / -2.5 | -7.74 / -4.58 / -2.36 | -20.8 / +1.2 / +3.9 | FAIL-6 / ok+16 / ok+20 |
+| t2_att31 (median, A 31) | low / mid / high | -13.0 / -14.8 / -14.7 | -7.74 / -4.58 / -2.36 | -24.0 / -12.2 / -10.3 | FAIL-21 / FAIL+1 / FAIL+5 |
+
+**The guards pass again at mid and high** (+16 / +20 dB of bed-over-surface
+margin, vs +1 / +5 median-anchored): with the level restored the post-bed
+tail is a genuine BED measurement once more, which is exactly what the T5
+fit had to work around. Mid and high now satisfy level AND shape reasonably
+(excess +1.2 / +3.9 dB, slope within 0.56 / 0.81 dB/us); the low pass does
+not (excess -20.8, guard FAIL) because its simulated tail is
+surface-clutter-dominated at every attenuation.
+
+### (c) 30 km margin
+
+Bed minus surface returns in the bed window: **+7.39 dB** (bed peak over
+mid-column +3.51), against +6.19 for att20, -7.41 for median-anchored A = 31
+and +12.72 for A = 15. So the stratospheric verdict tracks the bed LEVEL,
+not the attenuation as such: every level-matched world puts the 30 km bed
+6-7 dB clear of the co-arriving surface clutter.
+
+### (d) The actual discriminator: A = 20 + Fresnel-prior vs A = 31 + bright bed
+
+The two level-matched worlds have K within 0.16 dB of each other (+4.36 vs
++4.20), so their bed LEVELS are the same by construction and they differ
+only in the obliquity shaping (31 vs 20 dB/km of extra in-ice path off
+nadir) and in the reflectivity the mapping implies.
+
+* **On the tails they are indistinguishable.** Mean |slope misfit| **0.59
+  (att20) vs 0.62 (att31_klevel) dB/us**; mean |excess| 8.33 vs 8.62 dB.
+  Per pass the differences swap sign (klevel better at low, 0.49 vs 0.97;
+  att20 better at mid/high, 0.34/0.45 vs 0.56/0.81). At 4-28 deg the
+  obliquity term is simply too small to separate 20 from 31 dB/km -- the
+  tail shape does NOT discriminate.
+* **On the implied physics they are not close at all.** A = 20 keeps the
+  median bed reflectivity at the Fresnel -12.9 dB with 16% of samples
+  unphysical; A = 31 needs +1.9 dB median with 54% unphysical.
+
+**Verdict: the discriminator fires, and it fires against A = 31.** The two
+stories fit the observed tails equally well, so the choice must be made on
+the implied reflectivity -- and there A = 31 + level matching demands a bed
+brighter than a perfect mirror over half the line. Combined with the sweep's
+independent brightness evidence (measured bed levels reproduced at 17-21
+dB/km), the coherent story is **A ~ 17-21 dB/km with a near-Fresnel bed**,
+and the K = K_phys closure at 30.7 dB/km should be read as the absolute
+chain (surface model + system constants) being off by ~10-13 dB rather than
+as evidence for high attenuation. The remaining low-pass tail deficit
+(-20 dB excess, guard FAIL at every attenuation) is untouched by any of
+this and stays pinned on the surface-clutter model.
+
+Mechanics: `--anchor level [--level-deficit-db D]`; mode, D, K_median and
+K_level recorded in `run_config.rssnr_gamma.level_anchor` and in the
+`rssnr_level_anchor` metric together with the post-run per-pass residuals
+and the implied-reflectivity block. Anchor mode is NOT in the chunk cache
+file name but IS in the cache key (via `rssnr_k_db`), so a same-directory
+anchor change forces a correct re-simulation rather than a silent reuse;
+variants still get their own `--out-name` directory by convention. Tests:
+3 added (`tests/test_basal_hypotheses.py`: K shifts by exactly D with the
+profile shape untouched, median mode bit-identical, deficit override,
+unknown mode raises, composition with the T1 roughness guard). Suite 292
+unit green; ruff clean.
