@@ -951,3 +951,28 @@ Timings: pilot scan 7 configs x ~9 min = 63 min (plus ~20 min spent on the
 rejected trial A), full validation 32.3 min (low 1028.8 / mid 518.7 / high
 136.5 / syn30km 251.0 s; the diffuse channel costs ~+2% wall). Total ~2 h of
 simulation.
+
+## Thickness regression for attenuation (2026-08-06): inconclusive on-line
+
+RSSNR vs H along the anchor line (cached rssnr_anchor.npz; figure
+outputs/basal_clutter/rssnr_thickness_regression.png):
+
+- FULL line (111 traces, H 497-1063 m): OLS A = 30.5 +/- 5.2 dB/km
+  (Theil-Sen 21.7 [7.4, 33.9]) - numerically reproducing the calibrated
+  31, BUT the leverage comes from the floating section (s > 68 km,
+  corr(H, RSSNR) = 0.57 there), where the bed reflectivity regime is
+  entirely different (ice-ocean interface). Partly coincidental.
+- GROUNDED segment only (s <= 68 km, H 554-883 m): A = 2.8 +/- 6.9,
+  r = 0.07 - NO thickness signal. The 325 m thickness span gives only
+  ~20 dB of expected attenuation dynamic at A=31, swamped by the 13 dB
+  rms (40 dB range) reflectivity variance, plus plausible Gamma-H
+  anticorrelation (thick troughs holding bright water flattens the
+  slope).
+
+Verdict: on a single 50 km grounded segment this regression CANNOT
+separate attenuation from reflectivity; the evidence for ~31 remains
+the three prior routes (repeat-pass calibration, K-K_phys, obliquity
+slope). The statistically sound version is the same regression across
+the full 5,646-frame RSSNR dataset (grounded-only masks, km-scale H
+dynamic range, reflectivity variance averaging down) - a dataset-level
+analysis, recorded as the recommended follow-up.
