@@ -976,3 +976,117 @@ slope). The statistically sound version is the same regression across
 the full 5,646-frame RSSNR dataset (grounded-only masks, km-scale H
 dynamic range, reflectivity variance averaging down) - a dataset-level
 analysis, recorded as the recommended follow-up.
+
+## Attenuation sweep: 15 / 20 / 26 / 31 dB/km (2026-08-06)
+
+Four identically-configured points (full 50 km, all four passes, DEMOGORGN
+bed, RSSNR gamma, matched CSARP processing, **UNSPLIT** -- no T5 flags) so
+the progression is directly comparable end to end: `hypothesis_tests/`
+`baseline` (15) / `att20` / `att26` / `t2_att31` (31). Each new value-dir
+carries `radargrams.png`, `decomposition.png`, `bed_tail.png`,
+`metrics.json`, `run_config.json`, mirrored to
+`outputs/verification/basal_clutter_att{20,26}/`. A T5-split sweep would
+compose on top of this (`--specular-fraction` is orthogonal to `--att`) and
+was not run.
+
+### The mapping re-anchors at every value (median anchoring)
+
+K falls 22 dB across the sweep while the median |Gamma|^2 stays pinned at
+the Fresnel -12.9 dB by construction:
+
+| att dB/km | K dB | K - K_phys | G2 seg p95 / max dB | G2 > 0 frac | implied eff att |
+|---|---|---|---|---|---|
+| 15 | +11.39 | +21.71 | +11.7 / +15.9 | 0.189 | 30.8 |
+| 20 | +4.36 | +14.69 | +13.4 / +16.5 | 0.162 | 30.7 |
+| 26 | -3.73 | +6.59 | +15.7 / +17.7 | 0.189 | 30.8 |
+| 31 | -10.60 | -0.28 | +17.4 / +19.0 | 0.189 | 30.8 |
+
+Two things worth stating plainly. **The unphysical-reflectivity fraction is
+insensitive to A** (0.162-0.189, no trend): it is a property of the median
+anchoring, not of the attenuation. And **`implied_eff_att` is 30.7-30.8 at
+every value** -- it is a data quantity (K - K_phys divided by 2 H_med) that
+does not know what A the run used, so it is not independent evidence for
+A = 31; it is the same single measurement re-expressed.
+
+### The sweep table (sim vs measured, per pass)
+
+| att dB/km | K dB | K-K_phys | G2>0 frac | pass | bed window sim / meas | tail slope sim / meas | excess +2 us | guard |
+|---|---|---|---|---|---|---|---|---|
+| **15** | +11.39 | +21.71 | 0.189 | low | -46.4 / -54.3 | -7.01 / -8.22 | -14.4 | FAIL +4 |
+| | | | | mid | -43.4 / -46.0 | -4.90 / -5.15 | +7.6 | ok +22 |
+| | | | | high | -43.0 / -46.1 | -2.91 / -3.17 | +11.1 | ok +27 |
+| **20** | +4.36 | +14.69 | 0.162 | low | -53.0 / -54.3 | -7.25 / -8.22 | -20.2 | FAIL -4 |
+| | | | | mid | -49.9 / -46.0 | -4.81 / -5.15 | +0.8 | ok +15 |
+| | | | | high | -49.5 / -46.1 | -2.72 / -3.17 | +4.0 | ok +20 |
+| **26** | -3.73 | +6.59 | 0.189 | low | -60.7 / -54.3 | -7.54 / -8.22 | -23.3 | FAIL -13 |
+| | | | | mid | -56.4 / -46.0 | -4.68 / -5.15 | -6.7 | FAIL +7 |
+| | | | | high | -56.0 / -46.1 | -2.52 / -3.17 | -4.0 | ok +12 |
+| **31** | -10.60 | -0.28 | 0.189 | low | -67.3 / -54.3 | -7.74 / -8.22 | -24.0 | FAIL -21 |
+| | | | | mid | -60.8 / -46.0 | -4.58 / -5.15 | -12.2 | FAIL +1 |
+| | | | | high | -60.9 / -46.1 | -2.36 / -3.17 | -10.3 | FAIL +5 |
+
+| att dB/km | 30 km bed - surface returns (bed window) | bed peak over mid-column | bed window | mid-column |
+|---|---|---|---|---|
+| 15 | **+12.72** | +6.40 | -41.4 | -33.9 |
+| 20 | **+6.19** | +2.90 | -45.6 | -34.0 |
+| 26 | **-1.14** | +0.91 | -49.9 | -34.0 |
+| 31 | **-7.41** | -0.20 | -52.5 | -34.0 |
+
+### What the progression says
+
+* **The measured bed BRIGHTNESS is reproduced at att ~ 17-21 dB/km, not
+  31.** Interpolating the bed-window level onto the measured value gives
+  **17.0 (mid), 17.4 (high), 21.0 (low) dB/km** -- a tight, mutually
+  consistent bracket from three independent altitudes. At 31 dB/km the
+  simulated bed sits 13-15 dB below measured; at 15 it sits 3-8 dB above.
+* **The tail SLOPE is a weak discriminator and it pulls the other way.**
+  Mean |slope misfit| over the three passes is 0.57 / 0.59 / 0.60 / 0.62
+  dB/us at 15 / 20 / 26 / 31 -- essentially flat. Within it the low pass
+  improves monotonically with attenuation (1.21 -> 0.48 dB/us, the
+  obliquity term of the T2 finding) while mid and high degrade (0.25 ->
+  0.57 and 0.26 -> 0.81). Level, not shape, is what this sweep resolves.
+* **The tail excess at bed+2 us nulls at att ~ 21 (mid) and ~ 23 (high)**
+  (+7.6 -> -12.2 and +11.1 -> -10.3 across the sweep), consistent with the
+  bed-window crossings. The low pass never nulls (-14 to -24 dB at every
+  value) because its tail is surface-clutter dominated in the sim at every
+  attenuation (guard +4 dB at att 15, -21 dB at att 31).
+* **The tail stops being a BED measurement as attenuation rises.** The
+  mid/high guards go from ok (+22 / +27 dB of bed-over-surface margin at
+  15) through ok (+15 / +20 at 20) to FAIL (+1 / +5 at 31). Any tail metric
+  quoted at 26-31 dB/km is therefore partly a surface-clutter metric --
+  which is exactly what the T5 fit had to work around.
+* **The 30 km verdict crosses zero inside the sweep**, at **att ~ 25
+  dB/km**: the bed-minus-surface-returns margin in the bed window is
+  **+12.7 / +6.2 / -1.1 / -7.4 dB** at 15 / 20 / 26 / 31, and the bed peak
+  over mid-column clutter goes +6.4 / +2.9 / +0.9 / -0.2 dB. The
+  stratospheric design answer is therefore decided by precisely the
+  parameter this sweep shows to be unresolved -- and the brightness
+  evidence (17-21) sits on the VISIBLE side of that crossing while the
+  K = K_phys argument (30.7) sits on the invisible side.
+
+**The tension in one line:** matching the measured bed brightness wants
+att ~ 17-21 dB/km, while making the mapping's absolute chain
+self-consistent (K = K_phys) wants ~30.7 -- a ~10-13 dB absolute-level
+disagreement that the median anchoring silently absorbs. Nothing in this
+sweep resolves which is wrong (the surface model, the system constants and
+the true attenuation are degenerate here); a level-preserving variant
+(A = 31 with K pinned at its A = 15 value) separates them and is still the
+cheapest next test.
+
+### Figures
+
+`outputs/basal_clutter/hypothesis_tests/att_sweep_strip.png` -- the MID
+pass across all four values plus the measured panel, cropped from the four
+radargram figures (identical layout, grey scale and twtt axis, so they can
+be flipped between directly). The bed arcs fade monotonically while the
+upper-column surface clutter is unchanged, which is the whole story in one
+image. Per-value `radargrams.png` / `decomposition.png` / `bed_tail.png`
+share the same scales and layout across the four dirs.
+
+Timings: att20 1965.4 s and att26 1965.0 s wall (low ~1042 / mid ~527 /
+high ~138 / syn30km ~257 s each), i.e. 32.8 min per value, matching the
+existing endpoints to ~2%; att26 was interrupted once and resumed from its
+chunk cache with no loss. Pilot-projection: the cost is geometry-driven and
+was taken from the identically-configured `t2_att31` run rather than spent
+again, after a 30 s pilot smoke confirmed the unsplit path still runs at a
+non-default attenuation post-T5. Suite 289 unit green; ruff clean.
