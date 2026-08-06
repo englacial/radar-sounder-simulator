@@ -1206,3 +1206,129 @@ variants still get their own `--out-name` directory by convention. Tests:
 profile shape untouched, median mode bit-identical, deficit override,
 unknown mode raises, composition with the T1 roughness guard). Suite 292
 unit green; ruff clean.
+
+## The level-anchored family: A20 / A26 / A31 with bed brightness matched (2026-08-06)
+
+Level anchoring run at the lower attenuations -- the "moderate attenuation +
+measured bed brightness" combination. Same `--anchor level` machinery, full
+50 km, four passes, DEMOGORGN bed, matched processing, unsplit;
+`hypothesis_tests/att20_klevel/` and `att26_klevel/` (radargrams /
+decomposition / bed_tail / metrics / run_config), mirrored to
+`outputs/verification/basal_clutter_att2{0,6}_klevel/`.
+
+### D per member, and the contamination correction the A31 run taught us
+
+The A31 level run missed its target by -2.5 dB because the deficit had been
+read off a bed window that was ~3 dB surface-return contaminated: raising K
+lifts only the BED layer, so the window moves less than D. Both new members
+therefore use a **contamination-aware deficit**, solved analytically per
+pass from the recorded bed-window decomposition,
+
+    bed * 10^(D/10) + surface = measured   ->   D_clean = 10 log10((P_meas
+    - P_surf) / P_bed)
+
+and then the median over the three real passes. No extra simulation was
+needed for this refinement (it is a closed form on numbers already on
+record), so the one allowed iteration was not spent.
+
+| member | contamination in the reference window (low/mid/high) | D_clean per pass | **D used** | median-of-deficits (naive) |
+|---|---|---|---|---|
+| att20_klevel | -0.01 / +0.22 / +0.23 dB (clean) | -1.28 / +4.11 / +3.56 | **+3.56** | +3.34 |
+| att26_klevel | +0.00 / +1.18 / +1.20 dB | +6.39 / +11.63 / +11.03 | **+11.03** | +9.84 |
+| att31_klevel (already run) | +0.04 / +3.32 / +2.71 dB | +13.02 / +18.15 / +17.44 | 14.8 (naive) | +14.74 |
+
+The correction works: **median bed-window residual +0.07 dB (att20_klevel)
+and +0.04 dB (att26_klevel)**, against -2.50 for the naive A31 run. Applying
+the same rule to A31 would want D = +17.4 dB (not 14.8), which would push
+its implied median reflectivity from +1.9 to +4.6 dB and its unphysical
+fraction from 0.541 to 0.595 -- i.e. the A31 refutation below is if anything
+understated. That refinement was not run (the conclusion does not turn on
+it).
+
+### The family table
+
+| member | D dB | K dB | med G2 | p95 G2 | G2>0 frac | pass | bed-win residual | slope sim/meas | excess +2 us | guard |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **A20 median (reference)** | -- | +4.36 | -12.9 | +13.4 | 0.162 | low | +1.27 | -7.25 / -8.22 | -20.2 | FAIL -4 |
+| | | | | | | mid | -3.91 | -4.81 / -5.15 | +0.8 | ok +15 |
+| | | | | | | high | -3.34 | -2.72 / -3.17 | +4.0 | ok +20 |
+| | | | | | | **summary** | median -3.34 | mean abs 0.59 | | |
+| **A20 level** | 3.56 | +7.92 | -9.3 | +16.9 | 0.270 | low | +4.83 | -7.25 / -8.22 | -17.7 | FAIL -0 |
+| | | | | | | mid | -0.48 | -4.81 / -5.15 | +4.3 | ok +19 |
+| | | | | | | high | +0.07 | -2.72 / -3.17 | +7.6 | ok +24 |
+| | | | | | | **summary** | median +0.07 | mean abs 0.59 | | |
+| **A26 level** | 11.03 | +7.30 | -1.8 | +26.7 | 0.459 | low | +4.64 | -7.54 / -8.22 | -18.6 | FAIL -2 |
+| | | | | | | mid | -0.56 | -4.68 / -5.15 | +4.0 | ok +18 |
+| | | | | | | high | +0.04 | -2.52 / -3.17 | +7.0 | ok +23 |
+| | | | | | | **summary** | median +0.04 | mean abs 0.60 | | |
+| **A31 level** | 14.8 | +4.20 | +1.9 | +32.2 | 0.541 | low | +1.78 | -7.74 / -8.22 | -20.8 | FAIL -6 |
+| | | | | | | mid | -3.21 | -4.58 / -5.15 | +1.2 | ok +16 |
+| | | | | | | high | -2.50 | -2.36 / -3.17 | +3.9 | ok +20 |
+| | | | | | | **summary** | median -2.50 | mean abs 0.62 | | |
+
+| member | 30 km bed - surface returns | bed peak over mid-column |
+|---|---|---|
+| A20 median (reference) | **+6.19** | +2.90 |
+| A20 level | **+9.75** | +4.57 |
+| A26 level | **+9.89** | +4.68 |
+| A31 level | **+7.39** | +3.51 |
+
+### The physicality axis
+
+| member | median \|Gamma\|^2 | p95 | fraction > 0 dB | reading |
+|---|---|---|---|---|
+| A20 median (reference) | -12.9 dB | +13.4 | 0.162 | Fresnel prior by construction |
+| **A20 level** | **-9.3 dB** | +16.9 | **0.270** | **physical: 4.7 dB below unity** |
+| A26 level | -1.8 dB | +26.7 | 0.459 | bright but still sub-unity |
+| A31 level | +1.9 dB | +32.2 | 0.541 | **impossible as pure reflectivity** |
+
+A clean monotone gradient, as predicted. **The unphysical fraction crosses
+one half between A26 (0.459) and A31 (0.541)** -- linearly, at
+**att ~ 28.5 dB/km**. Above that attenuation, matching the measured bed
+brightness requires most of the line to reflect more power than it receives.
+
+### The bed WINDOW and the bed TAIL want different K
+
+Worth stating because it is the one new physical result here. Level
+anchoring fixes the bed window (residuals -0.5 / +0.1 dB at mid/high) but
+makes the tail excess at bed+2 us WORSE: A20 goes from +0.8 / +4.0
+(median-anchored) to +4.3 / +7.6 dB (level-anchored), and A26 behaves
+identically. The window is dominated by the near-nadir specular apex and the
+tail by off-nadir returns, so a single K cannot satisfy both: the simulated
+bed's near-nadir-to-off-nadir ratio is **~3.5 dB too flat**. That is exactly
+the angular-reflectivity residual T5 was built to attack, now measured
+independently of the attenuation choice, and it is the reason a T5 split
+composed on top of A20 level anchoring is the natural next configuration
+(not run).
+
+### Verdict
+
+**A20 level anchoring (att 20 dB/km, K = +7.92 dB) is the best member.** It
+is the only configuration that satisfies all three requirements at once: it
+matches the measured bed brightness (median residual **+0.07 dB**, mid/high
+within 0.5 dB), it ties for the best tail-shape agreement in the family
+(mean |slope misfit| **0.59 dB/us**, the same as every other member -- the
+obliquity term simply cannot separate 20 from 31 dB/km at 4-28 deg), and it
+is the only level-matched member whose implied bed reflectivity stays
+comfortably physical (**median -9.3 dB**, 27% of samples above 0 dB versus
+46% at A26 and 54% at A31). A26 level is a defensible second -- equally good
+on level and shape, but it needs a bed whose median reflectivity is -1.8 dB,
+i.e. within 2 dB of a perfect mirror over half the line, which no
+independent evidence in this study supports. A31 level is refuted on
+physicality and is also the worst on level (median residual -2.50 dB) and
+shape (0.62 dB/us). The honest caveats on the winner: the LOW pass still
+overshoots by +4.8 dB and its tail stays surface-clutter-limited (guard
+-0.4 dB), 27% of the RSSNR-mapped samples are still unphysical at the bright
+end, and the window-versus-tail disagreement above means A20 level buys the
+bed level at the cost of ~3.5 dB of tail excess relative to A20 median. The
+30 km design margin under the winner is **+9.75 dB** (bed peak over
+mid-column +4.57), the most optimistic of the family and 17 dB above the
+median-anchored A31 verdict that the earlier sweep produced.
+
+Timings: att20_klevel 1961.4 s (32.7 min; low 1040.7 / mid 525.7 / high
+138.0 / syn30km 256.9), att26_klevel 1982.1 s (33.0 min; 1053.6 / 532.2 /
+137.1 / 259.2) -- att26_klevel was interrupted once and resumed from its
+chunk cache. Projection basis: seven identically-shaped 50 km runs at
+32.6-33.0 min (+-2%), so no separate pilot was spent. No new plumbing was
+needed (`--anchor level --level-deficit-db D` already existed); suite 292
+unit green, ruff clean.
