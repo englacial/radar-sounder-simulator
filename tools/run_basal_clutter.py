@@ -202,6 +202,29 @@ PASSES[SYN30_KEY] = {
     "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
     "synthetic_msl_m": SYN30_MSL_M}
 
+# Synthetic ORBITAL pass (--add-500km): the same construction at 500 km, i.e.
+# a low-Earth-orbit sounder flying this line with the 2016 airborne system
+# parameters. Everything scales with the geometry: the cross-track reach that
+# keeps clutter coverage out to nadir-bed + MARGIN_US grows to ~45 km, the
+# beta = 0.5 Fresnel facet spacing to ~200 m, and the alias-limited aperture
+# at the product posting to ~27 km. The 3.3 ms window origin exercises the
+# f64 path/phase machinery far outside its airborne range -- a 2-trace pilot
+# checks the nadir delays and the first-call phase before the full run.
+SYN500_KEY = "syn500km"
+SYN500_MSL_M = 500000.0
+PASSES[SYN500_KEY] = {
+    "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
+    "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
+    "synthetic_msl_m": SYN500_MSL_M,
+    # build_facets strides the DEM by ONE integer for both axes, and the
+    # +-45 km scene window is anisotropic (~37 m x ~21 m pixels), so the
+    # beta = 0.5 spacing (333 m) builds 450 m facets along x and trips the
+    # Fresnel-zone LPA check (ratio 1.35). Requesting 0.7x snaps the stride
+    # down one notch and brings the built facets back under the limit;
+    # measured in the 2-trace pilot. Cache-safe: only this new pass.
+    "facet_spacing_scale": 0.7}
+SYNTHETIC_KEYS = (SYN30_KEY, SYN500_KEY)
+
 MEASURED_CAVEATS = (
     "Measured references are CSARP_standard. Scout pitfalls recorded: the "
     "low pass composites 1/3/10 us waveforms vs 3/10 us on the high passes "
@@ -1161,7 +1184,8 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
     reach = derive_reach(h_max, dbs_max, d_min)
 
     lam = C / f0
-    spacing = rac.facet_spacing(lam, r_min, thick_med)
+    spacing = rac.facet_spacing(lam, r_min, thick_med) * spec.get(
+        "facet_spacing_scale", 1.0)
     bed_fill = np.where(np.isfinite(bot_sub), bot_sub, np.nanmax(bot_sub))
     rc_sim, rc_frame, b0 = radar_grid(params, surf, bed_fill, dt, t0f,
                                       oversample, window)
@@ -2066,7 +2090,8 @@ def fig_bed_tail(out, preps, analyses, metrics, keys=None, ablation=None):
 def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         surf_rough=True, out_root=None, force=False, make_report=True,
         picked_bed=False, gamma_rssnr=False, processing="none",
-        add_30km=False, bed_ablation=False, demogorgn_bed=False,
+        add_30km=False, add_500km=False, bed_ablation=False,
+        demogorgn_bed=False,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
         bed_rough_extra_db=0.0, passes=None, spec=None,
@@ -2090,7 +2115,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     if demogorgn_bed and picked_bed:
         raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
                          "follow-up, not wired (clean three-way ablation)")
-    order = ORDER + ([SYN30_KEY] if add_30km else [])
+    order = (ORDER + ([SYN30_KEY] if add_30km else [])
+             + ([SYN500_KEY] if add_500km else []))
     if passes:
         unknown = [k for k in passes if k not in order]
         if unknown:
@@ -2284,28 +2310,38 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "threshold": None, "op": "record", "pass": True,
         "per_pass_s": {k: round(sims[k]["wall_s"], 1) for k in order},
         "note": rec}
-    if add_30km and SYN30_KEY in order:
-        a30 = analyses[SYN30_KEY]
-        d30 = a30["decomposition"]
-        bed_over_clutter = round(d30["bed"]["bed_rel_surf_db"]
-                                 - d30["surface"]["bed_rel_surf_db"], 2)
-        metrics["syn30km_bed_visibility"] = {
+    for skey in [k for k in SYNTHETIC_KEYS if k in order]:
+        asy = analyses[skey]
+        dsy = asy["decomposition"]
+        bed_over_clutter = round(dsy["bed"]["bed_rel_surf_db"]
+                                 - dsy["surface"]["bed_rel_surf_db"], 2)
+        ps = preps[skey]
+        metrics[f"{skey}_bed_visibility"] = {
             "value": bed_over_clutter, "threshold": None, "op": "record",
             "pass": True,
             "bed_over_surface_clutter_in_bed_window_db": bed_over_clutter,
             "bedpeak_over_midcol_db": round(
-                -a30["sim"]["scout_midcol_over_bedpeak_db"], 2),
-            "bed_rel_surf_db": a30["sim"]["bed_rel_surf_db"],
-            "midcol_rel_surf_db": a30["sim"]["midcol_rel_surf_db"],
-            "decomposition_db": d30, "midcol_verdict": a30["verdict"],
-            "agl_med_m": round(preps[SYN30_KEY]["h_med"], 0),
-            "note": "KEY DELIVERABLE (30 km prediction, clutter-limited "
-            "analysis -- no receiver-noise model): bed-borne minus "
-            "surface-borne power in the BED window (median dB; > 0 means "
-            "the bed beats the surface clutter arriving at the same "
-            "delay), plus bed peak over mid-column clutter (the scout "
-            "contrast metric, sign-flipped). Best-model config: picked "
-            "bed + RSSNR gamma. " + rec}
+                -asy["sim"]["scout_midcol_over_bedpeak_db"], 2),
+            "bed_rel_surf_db": asy["sim"]["bed_rel_surf_db"],
+            "midcol_rel_surf_db": asy["sim"]["midcol_rel_surf_db"],
+            "decomposition_db": dsy, "midcol_verdict": asy["verdict"],
+            "agl_med_m": round(ps["h_med"], 0),
+            "geometry": {"ct_reach_m": round(ps["reach"]["ct_m"], 0),
+                         "facet_spacing_m": round(ps["spacing"], 2),
+                         "t0_us": round(ps["rc_sim"].t0 * 1e6, 2),
+                         "n_samples_sim": ps["rc_sim"].n_samples,
+                         **({"aperture_m": procs[skey]["chain"]["aperture_m"],
+                             "aperture_traces":
+                                 procs[skey]["chain"]["aperture_traces"]}
+                            if skey in procs else {})},
+            "note": f"KEY DELIVERABLE ({skey} prediction, clutter-limited "
+            "analysis -- no receiver-noise model and no link budget): "
+            "bed-return minus surface-return power in the BED window "
+            "(median dB; > 0 means the bed beats the surface clutter "
+            "arriving at the same delay), plus bed peak over mid-column "
+            "clutter (the scout contrast metric, sign-flipped). Same scene, "
+            "reflectivity model and processing as the measured passes of "
+            "this run. " + rec}
     if bed_ablation:
         for pr, an, label, sm in ab_rows:
             slug = "demogorgn" if "DEMOGORGN" in label else "bedmachine"
@@ -2559,7 +2595,11 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
            if proc else "")
         + (f" 30 KM: synthetic smooth pass at {SYN30_MSL_M:.0f} m constant "
            "ellipsoidal height on the same line (prediction only -- no "
-           "measured data)." if add_30km else ""))
+           "measured data)." if add_30km else "")
+        + (f" 500 KM: synthetic ORBITAL pass at {SYN500_MSL_M:.0f} m on the "
+           "same line and the same 2016 system parameters -- the reach, "
+           "facet spacing and alias-limited aperture all follow the "
+           "geometry (prediction only)." if add_500km else ""))
     doc = {"case": case, "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "metrics": metrics, "notes": notes}
@@ -2701,6 +2741,13 @@ def main():
                     f"{SYN30_MSL_M:.0f} m constant ellipsoidal height on "
                     "the same line (same 2016 system params, roll 0): a "
                     "prediction panel -- no measured data exists")
+    ap.add_argument("--add-500km", action="store_true",
+                    help="add a SYNTHETIC orbital pass at "
+                    f"{SYN500_MSL_M:.0f} m constant ellipsoidal height on "
+                    "the same line (same 2016 system params, roll 0); the "
+                    "reach (~45 km), facet spacing (~200 m) and "
+                    "alias-limited aperture (~27 km) follow from the "
+                    "geometry -- a prediction panel, no measured data")
     ap.add_argument("--bed-ablation", action="store_true",
                     help="with --picked-bed: also simulate every pass with "
                     "the BEDMACHINE and DEMOGORGN beds (identical "
@@ -2781,7 +2828,8 @@ def main():
         surf_rough=not args.smooth_surface, out_root=args.out,
         force=args.force, picked_bed=args.picked_bed,
         gamma_rssnr=args.gamma_from_rssnr, processing=args.processing,
-        add_30km=args.add_30km, bed_ablation=args.bed_ablation,
+        add_30km=args.add_30km, add_500km=args.add_500km,
+        bed_ablation=args.bed_ablation,
         demogorgn_bed=args.demogorgn_bed, demogorgn_seed=args.demogorgn_seed,
         companion=not args.no_companion, out_name=args.out_name,
         antenna=args.antenna,

@@ -426,3 +426,44 @@ def test_level_anchor_composes_with_the_bed_roughness_guard(monkeypatch):
                                  bed_rough_sigma=0.05, extra_db=-1.0)
     want = (rbc.LEVEL_ANCHOR_DEFICIT_DB - rbc.bed_rough_nadir_db(0.05) - 1.0)
     assert both["k_db"] == pytest.approx(base["k_db"] + want, abs=0.02)
+
+
+# ------------------------------------------------- syn500km orbital pass
+
+def test_syn500km_pass_entry_follows_the_syn30km_pattern():
+    """The orbital pass reuses the LOW pass's line and picks, flies it at a
+    constant 500 km ellipsoidal height, and carries the cache-safe facet
+    spacing scale that keeps the built facets inside the Fresnel-zone LPA
+    limit on the anisotropic wide-reach scene grid."""
+    s30, s500 = rbc.PASSES[rbc.SYN30_KEY], rbc.PASSES[rbc.SYN500_KEY]
+    assert rbc.SYN500_MSL_M == 500000.0
+    assert s500["synthetic_msl_m"] == rbc.SYN500_MSL_M
+    for k in ("param_frame", "rev", "pilot", "full"):
+        assert s500[k] == s30[k]
+    assert s500["pilot"] == rbc.PASSES["low"]["pilot"]
+    assert s500["full"] == rbc.PASSES["low"]["full"]
+    # only the orbital pass carries the spacing scale (cache safety)
+    assert s500["facet_spacing_scale"] == pytest.approx(0.7)
+    assert "facet_spacing_scale" not in s30
+    for k in ("low", "mid", "high"):
+        assert "facet_spacing_scale" not in rbc.PASSES[k]
+    assert rbc.SYNTHETIC_KEYS == (rbc.SYN30_KEY, rbc.SYN500_KEY)
+    assert rbc.SYN500_KEY not in rbc.ORDER
+
+
+def test_syn500km_geometry_scales_as_expected():
+    """Derived reach and facet spacing at 500 km: the surface interface
+    binds the reach (its target delay spans the whole ice column) and the
+    bed's in-ice Fresnel zone sets the spacing."""
+    h, dbs, d = 5.0e5, 10.6e-6, 500.0
+    r = rbc.derive_reach(h, dbs, d)
+    assert r["ct_m"] == pytest.approx(r["surface_reach_m"])
+    assert 40e3 < r["ct_m"] < 50e3
+    assert r["bed_reach_m"] < r["surface_reach_m"]
+    lam = C / rbc.FC_HZ
+    sp = rac.facet_spacing(lam, h, 683.0) * 0.7
+    assert 200.0 < sp < 260.0
+    # aperture at the orbital bed range, product posting
+    L, th = rbc.alias_limited_aperture(lam, 14.85, 5.007e5)
+    assert 25e3 < L < 28e3
+    assert th == pytest.approx(1.522, abs=0.01)

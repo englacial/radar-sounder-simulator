@@ -1332,3 +1332,103 @@ chunk cache. Projection basis: seven identically-shaped 50 km runs at
 32.6-33.0 min (+-2%), so no separate pilot was spent. No new plumbing was
 needed (`--anchor level --level-deficit-db D` already existed); suite 292
 unit green, ruff clean.
+
+## A 500 km orbital pass on the A20 level-anchored model (2026-08-06)
+
+`--add-500km` adds `syn500km`, the syn30km construction re-flown at a
+constant 500,000 m ellipsoidal height (same line, same picks, same 2016
+system parameters, roll 0). Run on the winning configuration ONLY -- A = 20,
+`--anchor level --level-deficit-db 3.56` (the recorded K = +7.92 dB, reused
+not re-derived), DEMOGORGN bed, matched processing, unsplit -- with the four
+existing passes replaying from cache, so
+`hypothesis_tests/att20_klevel/` now carries five simulated panels in
+`radargrams.png` / `decomposition.png` / `bed_tail.png` and a
+`syn500km_bed_visibility` metric beside `syn30km_bed_visibility`.
+
+### Derived geometry (actuals)
+
+| quantity | syn30km | **syn500km** |
+|---|---|---|
+| median AGL | 29,858 m | **499,858 m** |
+| cross-track reach (surface-bound) | +-11,241 m | **+-45,214 m** (bed reach 21,215 m) |
+| facet spacing (beta = 0.5) | 81.9 m | **233.05 m** |
+| facets / interface / chunk | 91 k | **158 k** (17 chunks) |
+| window origin t0 | 196.65 us | **3332.14 us** |
+| n_samples (sim grid) | 4211 | 4216 |
+| alias-limited aperture | 1647 m / 112 traces | **26,618 m / 1793 traces** (half-angle 1.522 deg) |
+| hann azimuth resolution | 21.4 m | 21.4 m |
+| DEM window | -- | 4323 x 3814 (66 MB/interface), pixels ~37 x ~21 m |
+
+### Pilot (2 traces) -- the checks that mattered
+
+* **Fresnel/LPA validity FAILED first time and was fixed.** The beta = 0.5
+  spacing (332.9 m) built **450 m** facets because `build_facets` strides
+  the DEM by ONE integer for both axes and this wide-reach window is
+  anisotropic (~37 x ~21 m pixels) -- ratio 1.35 over the in-ice limit
+  (332.8 m), with the warning fired. The pass now carries
+  `facet_spacing_scale = 0.7` (request 233.05 m), which snaps the stride
+  down one notch and clears the check: **second pilot emitted no warnings
+  at all**. The scale is attached to this pass only, so no existing cache
+  moved.
+* **Phase precision at 3.3 ms is a non-issue.** The phase argument is
+  2*k0*opl ~ **3.98e6 rad**, where the f64 ulp is **4.7e-10 rad** -- nine
+  orders of margin. Empirically the coherent sum is intact: peak-to-median
+  power in the layer response is **38.7 dB (surface)** and **58.6 dB (bed)**;
+  a decohering phase path would flatten both. Fields finite, dropped
+  fraction 1.0e-3, 2-trace simulate 1.1 s.
+* **Focuser memory is fine at a 1793-trace aperture**: `focused_sar` loops
+  per output trace and its transients are (n_ap x n_bins) ~ 24 MB each, a
+  few hundred MB peak, freed each iteration -- no chunking needed.
+* **One honest processing caveat**: the alias guard fires by **0.3%** --
+  the aperture is sized at the median BED range but the guard checks the
+  minimum (surface) range, where lambda/(4 sin theta) = 14.809 m against
+  the 14.858 m posting. Recorded in the config
+  (`surface_alias_ratio` 1.0, focuser warning kept).
+
+### The 500 km verdict: the margin does NOT survive to orbit
+
+| | syn30km | **syn500km** |
+|---|---|---|
+| bed returns - surface returns, bed window | **+9.75 dB** | **-26.37 dB** |
+| bed-window surface returns | -55.43 | **-33.24** (+22.2) |
+| bed-window bed returns | -45.68 | **-59.61** (-13.9) |
+| mid-column (surface-borne) | -33.97 | -27.22 |
+| bed peak over mid-column | +4.57 | +2.75 (see caveat) |
+
+**At 500 km the bed sits 26 dB BENEATH the surface clutter arriving at the
+same delay** -- a 36 dB collapse from the 30 km case, and it comes from both
+ends: the co-arriving surface clutter rises **+22 dB** while the bed return
+falls **-14 dB**. The mechanism is geometric and unavoidable: the delay-to-
+cross-track mapping flattens with altitude, so the annulus of surface that
+lands in the bed window grows enormously (the surface reach needed to cover
+the bed delay goes 11 -> 45 km), while the bed's return is quasi-specular
+and only pays the extra spreading. The `bed peak over mid-column` row must
+NOT be read as bed visibility here: the decomposition shows the peak inside
+the bed window is surface clutter (-33.2 dB) sitting 26 dB above the actual
+bed return (-59.6 dB), so that metric is measuring clutter at this altitude.
+
+**Verdict: on this line, with this system, a 500 km orbital sounder is
+clutter-limited to the point of blindness at the bed** -- unlike 30 km,
+which retained a ~10 dB margin. Closing 26 dB would need real cross-track
+discrimination (a much larger antenna aperture or multi-phase-centre clutter
+suppression), not more transmit power; and this is still a purely
+clutter-limited analysis, so the thermal link budget at 500 km (another
+~+35 dB of two-way spreading loss vs 30 km) is an additional, separate
+constraint.
+
+Structural caveat, not new: the BED layer's dropped-power fraction is
+0.245 at 500 km -- bed facets are simulated over the SURFACE-driven reach
+(45 km) while bed arrivals beyond the bed reach (21 km) fall past the
+window end. The same effect is larger at 30 km (0.309) and present at the
+high pass (0.024), so it is a property of the reach construction, not of
+the orbital geometry, and it does not touch the bed WINDOW itself.
+
+Timings: syn500km simulation **396.0 s** (6.6 min, 17 chunks, 158 k
+facets/interface) against a ~5 min projection; DEM/BedMachine/DEMOGORGN
+fetches at the +-45 km reach took **194 s** on first call (one-time, cached
+thereafter; 66 MB per interface grid, 44.2 MB of chunk cache for the pass);
+the four existing passes replayed from cache and the run re-did their
+processing. Tests: 2 added (`tests/test_basal_hypotheses.py`: the pass entry
+follows the syn30km pattern and carries the cache-safe spacing scale that no
+other pass has; the derived reach/spacing/aperture scaling at 500 km).
+Suite 294 unit green; ruff clean.
