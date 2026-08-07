@@ -162,31 +162,65 @@ BED_ROUGH_VALIDITY = (
 
 N_TRACES_PILOT = 48
 N_TRACES_FULL = 240        # same ~210 m sim trace spacing as the pilot
+N_TRACES_EXT = 335         # 69.7 km at the same ~208 m sim trace spacing
 
 # Pass table (claude_notes/basal_clutter_scout.md). Slices are half-open
 # slow_time indices into each FULL frame; "rev" passes fly the line backwards
-# (slices reversed to align with increasing anchor s). "full" parts are
-# listed in increasing-s order after reversal. param_frame: cached
+# (slices reversed to align with increasing anchor s). "full"/"extended"
+# parts are listed in increasing-s order after reversal. param_frame: cached
 # mcords_params provenance (identical system within a segment).
+#
+# EXTENDED (anchor s = 0 -> 69.7 km, 2026-08-07): the study segment grown
+# up-track to the anchor start and down-track to the GROUNDING LINE (scout:
+# grounded ice ends at s = 69.7 km; beyond it BedMachine's "bed" is the
+# seafloor under a cavity, not the reflector the radar sees, so the segment
+# stops there). Slices derived from nav by projecting every candidate frame
+# onto the anchor polyline (claude_notes/extended_segment_slices.py); the
+# extension pulls in ONE new frame per high pass (mid _007, and more of the
+# already-used high _005/_004), all with matching twtt grids and 100%
+# populated bottom picks.
 PASSES = {
     "low": {
         "agl_med_m": 442.0, "rev": False, "param_frame": "20161105_05_005",
         "pilot": [("20161105_05_005", (2020, 2693))],
         "full": [("20161105_05_005", (1212, 3333)),
-                 ("20161105_05_006", (0, 1244))]},
+                 ("20161105_05_006", (0, 1244))],
+        "extended": [("20161105_05_005", (0, 3333)),
+                     ("20161105_05_006", (0, 1359))]},
     "mid": {
         "agl_med_m": 9150.0, "rev": True, "param_frame": "20161028_05_006",
         "pilot": [("20161028_05_006", (858, 1532))],
         "full": [("20161028_05_006", (0, 2341)),
-                 ("20161028_05_005", (2308, 3337))]},
+                 ("20161028_05_005", (2308, 3337))],
+        "extended": [("20161028_05_007", (0, 216)),
+                     ("20161028_05_006", (0, 3337)),
+                     ("20161028_05_005", (2194, 3337))]},
     "high": {
         "agl_med_m": 10684.0, "rev": True, "param_frame": "20161031_07_005",
         "pilot": [("20161031_07_005", (337, 1011))],
         "full": [("20161031_07_005", (0, 1820)),
-                 ("20161031_07_004", (1786, 3336))]},
+                 ("20161031_07_004", (1786, 3336))],
+        "extended": [("20161031_07_005", (0, 3033)),
+                     ("20161031_07_004", (1671, 3336))]},
 }
 ORDER = ["low", "mid", "high"]
-S0_KM = {"pilot": 30.0, "full": 18.0}   # anchor s at segment start (display)
+SEGMENTS = ("pilot", "full", "extended")
+S0_KM = {"pilot": 30.0, "full": 18.0, "extended": 0.0}   # display origin
+# The RSSNR K anchoring stays on the segment it was calibrated on: the
+# extended run REUSES the established 50 km mapping (K = K_median(full) + D)
+# rather than re-deriving the median on the longer line, so the extended
+# results are directly comparable to the recorded att20_klevel family. The
+# resulting bed-window level residuals on the new extent are reported, not
+# re-anchored.
+K_ANCHOR_SEGMENT = {"extended": "full"}
+# Default location of the SINGLE-TRACE decomposition (--trace-decomp-s,
+# anchor along-track km). s = 31.0 km is the scout's documented deep trough:
+# "one wide bright hyperbola from the deep trough at s ~ 31 km", inside the
+# 30-40 km window whose per-km bed relief is the highest on the grounded part
+# of the line (mean 103 m/km) -- structured, resolvable off-nadir bed
+# clutter. The chosen s, the per-pass trace indices, the measured mid-column
+# percentile there and the per-trace guard are all recorded.
+DECOMP_S_KM = {"pilot": 35.0, "full": 31.0, "extended": 31.0}
 
 # Synthetic stratospheric pass (--add-30km): the LOW pass's line geometry and
 # picks re-flown as a SMOOTH trajectory at constant SYN30_MSL_M ellipsoidal
@@ -200,6 +234,7 @@ SYN30_MSL_M = 30000.0
 PASSES[SYN30_KEY] = {
     "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
     "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
+    "extended": PASSES["low"]["extended"],
     "synthetic_msl_m": SYN30_MSL_M}
 
 # Synthetic ORBITAL pass (--add-500km): the same construction at 500 km, i.e.
@@ -215,6 +250,7 @@ SYN500_MSL_M = 500000.0
 PASSES[SYN500_KEY] = {
     "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
     "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
+    "extended": PASSES["low"]["extended"],
     "synthetic_msl_m": SYN500_MSL_M,
     # build_facets strides the DEM by ONE integer for both axes, and the
     # +-45 km scene window is anisotropic (~37 m x ~21 m pixels), so the
@@ -624,7 +660,8 @@ def bed_rough_nadir_db(sigma_m, f0=FC_HZ, eps_ice=None):
 
 
 def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
-                      extra_db=0.0, anchor="median", level_deficit_db=None):
+                      extra_db=0.0, anchor="median", level_deficit_db=None,
+                      k_anchor_segment=None):
     """Fetch + map: the shared anchor G2(s) profile dict (rssnr_gamma_profile
     output + fetch provenance), on the anchor along-track axis ``axis``
     (ref_bed_picks).
@@ -643,7 +680,12 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
     sx, sy = tr.transform(d["lon"], d["lat"])
     s_smp = project_to_track(sx, sy, axis["x"], axis["y"], axis["s"])
     thick = C / (2.0 * np.sqrt(axis["eps_ice"])) * (d["btw"] - d["stw"])
-    seg_lo, seg_hi = segment_s_range(axis, segment)
+    # K is anchored on ``k_anchor_segment`` (default: the run's own segment).
+    # The extended run pins it to the 50 km "full" segment so the mapping --
+    # and therefore K -- is bit-identical to the recorded att20_klevel family
+    # while the SCENE covers 0-69.7 km (K_ANCHOR_SEGMENT).
+    k_seg = k_anchor_segment or segment
+    seg_lo, seg_hi = segment_s_range(axis, k_seg)
     shift = ((-bed_rough_nadir_db(bed_rough_sigma) + extra_db)
              if bed_rough_sigma else 0.0)
     lvl = 0.0
@@ -670,6 +712,23 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
             "the nadir bed window back onto the baseline once the added "
             "INCOHERENT term is counted (recorded, not tuned per pass)"}
     prof["anchor"] = anchor
+    prof["k_anchor_segment"] = k_seg
+    if k_seg != segment:
+        run_lo, run_hi = segment_s_range(axis, segment)
+        m = prof["ok"] & (prof["s"] >= run_lo) & (prof["s"] <= run_hi)
+        gr = prof["g2_db"][m]
+        prof["g2_run_seg_db"] = {
+            "seg_s_km": [round(run_lo / 1e3, 2), round(run_hi / 1e3, 2)],
+            "n_seg": int(m.sum()),
+            "g2_pos_frac_seg": round(float((gr > 0).mean()), 3),
+            **{kk: round(float(vv), 1) for kk, vv in
+               [("min", gr.min()), ("p5", np.percentile(gr, 5)),
+                ("med", np.median(gr)), ("p95", np.percentile(gr, 95)),
+                ("max", gr.max())]},
+            "note": f"|Gamma_bed|^2 over the RUN segment ({segment}); K "
+            f"itself stays anchored on '{k_seg}' so the mapping matches the "
+            "recorded family. The headline g2_seg_db block is the K-anchor "
+            "segment's."}
     if anchor == "level":
         prof["level_anchor"] = {
             "deficit_db": round(lvl, 2),
@@ -1655,12 +1714,15 @@ def bed_tail_entry(key, p, a, sources):
         "SHAPE past the bed, not the window level. recorded only"}
 
 
-def analyze_pass(p, sim, proc=None):
+def analyze_pass(p, sim, proc=None, trace_s_km=None):
     """Per-pass sim-vs-measured clutter metrics + per-interface (surface- vs
     bed-borne) decomposition + profiles for the figures. ``proc``
     (process_standard output) analyzes the PROCESSED powers on the same
     lattice; a synthetic pass (p['synthetic']) skips every measured-side
-    quantity (no measured data exists at that geometry)."""
+    quantity (no measured data exists at that geometry). ``trace_s_km``
+    (anchor along-track km) additionally records the SINGLE-TRACE variant of
+    the decomposition at the nearest trace -- same curves, one slow-time
+    location instead of the ensemble average."""
     tw, dtf = sim["twtt"], p["rc_frame"].dt
     if proc is not None:
         P, Ps, Pb = proc["P"], proc["Ps"], proc["Pb"]
@@ -1743,9 +1805,51 @@ def analyze_pass(p, sim, proc=None):
                   if not k.startswith("_")}
         meas_prof = _prof_db(m_meas)
 
+    # ---- single-trace decomposition (same curves, ONE slow-time location)
+    tprofs = tinfo = None
+    if trace_s_km is not None:
+        s0 = S0_KM[p["segment"]]
+        i = int(np.argmin(np.abs(s0 + p["s_sim"] / 1e3 - trace_s_km)))
+        sl = slice(i, i + 1)
+        tprofs = {k: rel_mean_profile(A[sl], tw, dtf, t_s[sl], spk[sl])
+                  for k, A in (("sim_total", P), ("sim_surface", Ps),
+                               ("sim_bed", Pb))}
+        gb = _wmean(Pb[sl], tw, dtf, t_b[sl] - BED_LO_US * 1e-6,
+                    t_b[sl] + BED_HI_US * 1e-6)
+        gs = _wmean(Ps[sl], tw, dtf, t_b[sl] - BED_LO_US * 1e-6,
+                    t_b[sl] + BED_HI_US * 1e-6)
+        tinfo = {"requested_s_km": round(float(trace_s_km), 3),
+                 "sim_trace_index": i,
+                 "sim_s_km": round(float(s0 + p["s_sim"][i] / 1e3), 3),
+                 "agl_m": round(float(p["surf_sim"][i] * C / 2.0), 0),
+                 "bed_below_surface_us": round(float(
+                     (t_b[i] - t_s[i]) * 1e6), 2),
+                 "bed_window_bed_minus_surface_returns_db": round(float(
+                     10.0 * np.log10(max(float(gb[0]), 1e-300)
+                                     / max(float(gs[0]), 1e-300))), 2),
+                 "note": "single-trace decomposition location; the guard is "
+                 "this trace's own bed-window sim bed returns minus sim "
+                 "surface returns (>= 10 dB = the bed window is a bed "
+                 "measurement here)"}
+        if m_meas is not None:
+            j = int(np.argmin(np.abs(s0 + p["s_m"] / 1e3 - trace_s_km)))
+            jl = slice(j, j + 1)
+            tprofs["measured"] = rel_mean_profile(
+                meas[jl], p["tw_m"], p["dt"], p["surf"][jl],
+                m_meas["_spk"][jl])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                mid_db = 10.0 * np.log10(m_meas["_mid"] / m_meas["_spk"])
+            ok = np.isfinite(mid_db)
+            tinfo.update({
+                "measured_trace_index": j,
+                "measured_s_km": round(float(s0 + p["s_m"][j] / 1e3), 3),
+                "measured_midcol_rel_surf_db": round(float(mid_db[j]), 2),
+                "measured_midcol_percentile": round(float(
+                    (mid_db[ok] < mid_db[j]).mean()), 3)})
     with np.errstate(divide="ignore", invalid="ignore"):
         blp = 10.0 * np.log10(bedlayer_bed / spk)
     return {"gate": gate, "sim": clean, "meas": cleanm,
+            "trace_profs": tprofs, "trace_info": tinfo,
             "sim_bed_prof_db": _prof_db(m_sim),
             "meas_bed_prof_db": meas_prof,
             "sim_bedlayer_prof_db": np.where(np.isfinite(blp), blp, np.nan),
@@ -2031,6 +2135,59 @@ def fig_decomposition(out, preps, analyses, keys=None, ablation=None):
     return fp
 
 
+def fig_decomposition_trace(out, preps, analyses, keys=None):
+    """SINGLE-TRACE variant of fig_decomposition: the same measured / sim
+    total / sim surface-borne / sim bed-borne curves at ONE slow-time
+    location (``--trace-decomp-s``, recorded per pass in the config) instead
+    of the trace ensemble average. Single-trace curves are speckly BY
+    CONSTRUCTION -- that is the point: it shows what one sounding looks like
+    rather than the ensemble mean the tail/level metrics are built on."""
+    keys = [k for k in (keys or ORDER) if analyses[k]["trace_profs"]]
+    if not keys:
+        return None
+    series = [("measured", "measured", dict(color="black", lw=1.2)),
+              ("sim_total", "sim total", dict(color="tab:blue", lw=1.1)),
+              ("sim_surface", "sim surface returns",
+               dict(color="tab:orange", lw=1.0, ls="--")),
+              ("sim_bed", "sim bed returns",
+               dict(color="tab:green", lw=1.0, ls="-."))]
+    fig, axs = plt.subplots(1, len(keys), figsize=(5.2 * len(keys), 4.8),
+                            sharey=True, squeeze=False)
+    for k, key in enumerate(keys):
+        ax, a = axs[0, k], analyses[key]
+        ti = a["trace_info"]
+        for pk, label, st in series:
+            if pk in a["trace_profs"]:
+                ax.plot(*a["trace_profs"][pk], label=label, **st)
+        tb = ti["bed_below_surface_us"]
+        ax.axvspan(1.0, tb - MID_HI_US, color="tab:blue", alpha=0.06,
+                   label="mid-column window" if k == 0 else None)
+        ax.axvspan(tb - BED_LO_US, tb + BED_HI_US, color="tab:green",
+                   alpha=0.08, label="bed-return window" if k == 0 else None)
+        ax.axvline(tb, color="0.5", lw=0.8, ls=":")
+        ax.set_xlim(-1.0, 13.5)
+        ax.set_ylim(-110, 5)
+        ax.grid(alpha=0.3)
+        ax.set_title(f"{key} ({preps[key]['h_med']:.0f} m AGL)  s = "
+                     f"{ti['sim_s_km']:.2f} km, trace {ti['sim_trace_index']}"
+                     f"\nbed at {tb:.2f} us; bed-window bed - surface returns"
+                     f" {ti['bed_window_bed_minus_surface_returns_db']:+.1f}"
+                     " dB", fontsize=9)
+        ax.set_xlabel("twtt below surface returns (us)")
+        if k == 0:
+            ax.set_ylabel("dB rel own surface-return peak (single trace)")
+            ax.legend(fontsize=8, loc="upper right")
+    fig.suptitle("SINGLE-TRACE decomposition, anchor s = "
+                 f"{analyses[keys[0]]['trace_info']['requested_s_km']:.2f} km"
+                 "\n(one sounding per pass, not the trace ensemble mean)",
+                 fontsize=10)
+    fig.tight_layout()
+    fp = out / "decomposition_trace.png"
+    fig.savefig(fp, dpi=130)
+    plt.close(fig)
+    return fp
+
+
 def fig_bed_tail(out, preps, analyses, metrics, keys=None, ablation=None):
     """Per pass: BED-REFERENCED ensemble mean-power profiles -- measured vs
     each bed source's sim total, plus the sim surface-return curve (the
@@ -2095,7 +2252,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
         bed_rough_extra_db=0.0, passes=None, spec=None,
-        anchor="median", level_deficit_db=None):
+        anchor="median", level_deficit_db=None, trace_decomp_s_km=None):
     proc = processing == "standard"
     if out_name and (companion and gamma_rssnr or bed_ablation):
         raise ValueError("--out-name relocates the case directory; the "
@@ -2122,8 +2279,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         if unknown:
             raise ValueError(f"unknown pass(es) {unknown}; have {order}")
         order = [k for k in order if k in passes]
-    n_traces = n_traces or (N_TRACES_PILOT if segment == "pilot"
-                            else N_TRACES_FULL)
+    n_traces = n_traces or {"pilot": N_TRACES_PILOT, "full": N_TRACES_FULL,
+                            "extended": N_TRACES_EXT}[segment]
+    ts_km = (DECOMP_S_KM[segment] if trace_decomp_s_km is None
+             else float(trace_decomp_s_km))
     tag = case_tag(picked_bed, gamma_rssnr, proc, demogorgn_bed)
     out = Path(out_root or OUT_DEFAULT) / (out_name or (segment + tag))
     out.mkdir(parents=True, exist_ok=True)
@@ -2143,7 +2302,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                  else None,
                                  extra_db=bed_rough_extra_db,
                                  anchor=anchor,
-                                 level_deficit_db=level_deficit_db)
+                                 level_deficit_db=level_deficit_db,
+                                 k_anchor_segment=K_ANCHOR_SEGMENT.get(
+                                     segment))
+        if gmap["k_anchor_segment"] != segment:
+            print(f"K anchored on the '{gmap['k_anchor_segment']}' segment "
+                  f"(s {gmap['seg_s_km']} km), NOT re-derived on "
+                  f"'{segment}': the established mapping is reused",
+                  flush=True)
         if anchor == "level":
             la = gmap["level_anchor"]
             print(f"level anchoring: K_median {la['k_median_db']} -> K_level "
@@ -2203,7 +2369,16 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                   f"{ch['half_angle_deg']:.2f} deg), {ch['n_looks_sim']} "
                   f"looks, mocomp dz rms {ch['mocomp']['dz_rms_m']} m",
                   flush=True)
-        analyses[key] = analyze_pass(p, sims[key], proc=procs.get(key))
+        analyses[key] = analyze_pass(p, sims[key], proc=procs.get(key),
+                                     trace_s_km=ts_km)
+        ti = analyses[key]["trace_info"]
+        print(f"  single-trace decomposition at s = {ti['sim_s_km']:.2f} km "
+              f"(sim trace {ti['sim_trace_index']}"
+              + (f", measured trace {ti['measured_trace_index']}"
+                 if "measured_trace_index" in ti else "")
+              + f"): bed-window bed - surface returns "
+              f"{ti['bed_window_bed_minus_surface_returns_db']:+.1f} dB",
+              flush=True)
 
     # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
     corr_stats = corr_series = None
@@ -2435,7 +2610,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 "g2_seg_db", "n_samples", "n_seg", "n_censored",
                 "censored_floor_db", "seg_s_km", "med_sample_spacing_m",
                 "att_db_per_km", "g2_pos_frac_seg",
-                "implied_eff_att_db_per_km")},
+                "implied_eff_att_db_per_km", "k_anchor_segment")},
+            **({"g2_run_seg_db": gmap["g2_run_seg_db"]}
+               if "g2_run_seg_db" in gmap else {}),
             "snapshot_id": RSSNR_SNAPSHOT,
             "note": "median-anchored K (dB): |Gamma_bed|^2 = 2*A*H - RSSNR "
             "+ K; K - K_phys is the absolute-chain gap the anchoring "
@@ -2491,6 +2668,11 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "gerekos_validity": BED_ROUGH_VALIDITY,
             "gamma_double_count_guard": gmap["bed_rough_guard"]
             if gamma_rssnr else None}),
+        "trace_decomp_s_km": ts_km,
+        "segment_s_km": [round(v / 1e3, 2)
+                         for v in segment_s_range(axis, segment)]
+        if axis else None,
+        "k_anchor_segment": (gmap or {}).get("k_anchor_segment"),
         "passes": {}, "measured_caveats": MEASURED_CAVEATS}
     if demogorgn_bed:
         config["demogorgn"] = {**preps[order[0]]["aux"]["demogorgn"],
@@ -2511,6 +2693,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "cross-track constant; H(x) from the DATASET's surface/bed "
             "twtts (self-consistent with its RSSNR), not the DEM")
         config["rssnr_gamma"]["anchor"] = anchor
+        config["rssnr_gamma"]["k_anchor_segment"] = gmap["k_anchor_segment"]
+        if "g2_run_seg_db" in gmap:
+            config["rssnr_gamma"]["g2_run_seg_db"] = gmap["g2_run_seg_db"]
         if anchor == "level":
             config["rssnr_gamma"]["level_anchor"] = gmap["level_anchor"]
         config["rssnr_gamma"]["shared_field"] = (
@@ -2555,6 +2740,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "synthetic": p["synthetic"]}
         if proc:
             config["passes"][key]["processing"] = procs[key]["chain"]
+        if analyses[key]["trace_info"]:
+            config["passes"][key]["trace_decomposition"] = \
+                analyses[key]["trace_info"]
     if segment == "pilot":
         config["full_projection"] = {
             k: {"wall_s_projected": round(sims[k]["wall_s"] * 5.0, 1),
@@ -2619,6 +2807,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                               ablation=ab_fig),
             fig_bed_tail(out, preps, analyses, metrics, keys=order,
                          ablation=ab_fig)]
+    ftr = fig_decomposition_trace(out, preps, analyses, keys=order)
+    if ftr is not None:
+        figs.insert(2, ftr)
     if gamma_rssnr and corr_stats is not None:
         syn = None
         if add_30km and SYN30_KEY in order:
@@ -2693,7 +2884,11 @@ def _report(out, case, config, metrics, notes, figs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--segment", choices=["pilot", "full"], default="pilot")
+    ap.add_argument("--segment", choices=list(SEGMENTS), default="pilot",
+                    help="study segment: 'pilot' 10 km, 'full' 50 km "
+                    "(s 18-68), 'extended' 69.7 km (s 0 -> the grounding "
+                    "line; the RSSNR K stays anchored on the 'full' segment "
+                    "so the established mapping is reused verbatim)")
     ap.add_argument("--n-traces", type=int, default=None,
                     help=f"sim traces (default {N_TRACES_PILOT} pilot / "
                     f"{N_TRACES_FULL} full)")
@@ -2822,6 +3017,15 @@ def main():
                     "(2 -> 7.43 m, doubling the alias-limited aperture and "
                     "the simulation cost); measured data untouched. "
                     "Requires --processing standard")
+    ap.add_argument("--trace-decomp-s", type=float, default=None,
+                    metavar="S_KM",
+                    help="anchor along-track position (km) of the "
+                    "SINGLE-TRACE decomposition figure (default "
+                    f"{DECOMP_S_KM['full']:g} km on full/extended: the "
+                    "scout's deep trough with the brightest structured bed "
+                    "clutter). The nearest trace of every pass is used and "
+                    "recorded per pass in the config; changing it only "
+                    "re-does the analysis, never the simulations")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     run(segment=args.segment, n_traces=args.n_traces, att=args.att,
@@ -2837,6 +3041,7 @@ def main():
         posting_div=args.posting_div, passes=args.passes,
         bed_rough_extra_db=args.bed_rough_extra_db,
         anchor=args.anchor, level_deficit_db=args.level_deficit_db,
+        trace_decomp_s_km=args.trace_decomp_s,
         spec=(None if args.specular_fraction is None
               else (args.specular_fraction, args.spec_tilt_deg,
                     args.diffuse_exponent)))

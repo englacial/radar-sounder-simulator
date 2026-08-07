@@ -467,3 +467,155 @@ def test_syn500km_geometry_scales_as_expected():
     L, th = rbc.alias_limited_aperture(lam, 14.85, 5.007e5)
     assert 25e3 < L < 28e3
     assert th == pytest.approx(1.522, abs=0.01)
+
+
+# --------------------------------------------- EXTENDED segment (0-69.7 km)
+
+def test_extended_segment_table_is_a_superset_of_the_full_segment():
+    """Every pass gains an 'extended' entry whose parts CONTAIN the full
+    segment's parts of the same frame (the study window only grows), in
+    increasing-s order, with matching trace counts across the triplet."""
+    assert rbc.SEGMENTS == ("pilot", "full", "extended")
+    counts = {}
+    for key in rbc.ORDER:
+        ext = rbc.PASSES[key]["extended"]
+        full = dict(rbc.PASSES[key]["full"])
+        assert ext, key
+        for fid, (a, b) in ext:
+            assert 0 <= a < b, (key, fid)
+            if fid in full:
+                fa, fb = full[fid]
+                assert a <= fa and b >= fb, (key, fid)   # only grows
+        # the extension adds at most one new frame per pass
+        assert len(set(dict(ext)) - set(full)) <= 1
+        counts[key] = sum(b - a for _, (a, b) in ext)
+    n = np.array(list(counts.values()), float)
+    assert (n.max() - n.min()) / n.mean() < 0.002       # 4692/4696/4698
+    # the synthetic passes re-fly the LOW pass line on every segment
+    for skey in rbc.SYNTHETIC_KEYS:
+        for seg in rbc.SEGMENTS:
+            assert rbc.PASSES[skey][seg] == rbc.PASSES["low"][seg]
+    # every segment is fully parameterised
+    for seg in rbc.SEGMENTS:
+        assert seg in rbc.S0_KM and seg in rbc.DECOMP_S_KM
+    assert rbc.S0_KM["extended"] == 0.0
+    assert rbc.N_TRACES_EXT > rbc.N_TRACES_FULL
+
+
+def test_extended_cache_names_are_distinct_from_the_full_segment():
+    """The segment is part of the chunk cache name AND key, so the extended
+    run cannot collide with (or silently reuse) the 50 km caches."""
+    p_full = _p()
+    p_ext = {**_p(), "segment": "extended"}
+    n_full = rbc.chunk_rid(p_full, 0, 20.0, True)
+    n_ext = rbc.chunk_rid(p_ext, 0, 20.0, True)
+    assert n_full != n_ext
+    assert "_full_" in n_full and "_extended_" in n_ext
+    rows = np.arange(10)
+    assert rbc.chunk_meta(p_ext, 0, rows, 1, 10, 20.0, True)["segment"] \
+        == "extended"
+
+
+def test_extended_k_anchor_reuses_the_full_segment_mapping(monkeypatch):
+    """The extended run must NOT re-derive K on the longer line: with
+    k_anchor_segment='full' the mapped profile is bit-identical to the 50 km
+    run's, and the run-segment statistics are recorded separately."""
+    axis = _fake_rssnr(monkeypatch)
+    monkeypatch.setattr(rbc, "segment_s_range",
+                        lambda ref, seg: {"full": (18e3, 68e3),
+                                          "extended": (0.0, 69.7e3)}[seg])
+    full = rbc.build_rssnr_gamma(axis, "full", 20.0, anchor="level",
+                                 level_deficit_db=3.56)
+    ext = rbc.build_rssnr_gamma(axis, "extended", 20.0, anchor="level",
+                                level_deficit_db=3.56,
+                                k_anchor_segment="full")
+    assert ext["k_db"] == full["k_db"]
+    assert np.array_equal(ext["g2_db"], full["g2_db"])
+    assert ext["k_anchor_segment"] == "full"
+    assert ext["seg_s_km"] == full["seg_s_km"]
+    # the run segment's own statistics are recorded, not used for K
+    assert ext["g2_run_seg_db"]["seg_s_km"] == [0.0, 69.7]
+    assert ext["g2_run_seg_db"]["n_seg"] > full["n_seg"]
+    assert "g2_run_seg_db" not in full
+    # ... and re-deriving on the extended segment WOULD move K (why we don't)
+    naive = rbc.build_rssnr_gamma(axis, "extended", 20.0, anchor="level",
+                                  level_deficit_db=3.56)
+    assert naive["k_anchor_segment"] == "extended"
+    assert naive["k_db"] != full["k_db"]
+    assert rbc.K_ANCHOR_SEGMENT["extended"] == "full"
+
+
+# ------------------------------------------- single-trace decomposition
+
+def _synthetic_pass(n_tr=6, n_s=900, t_s_us=3.0, dbs_us=9.0):
+    """Minimal synthetic-pass (p, sim) pair: clean surface and bed impulses
+    on separate layers, no measured side (p['synthetic'] set)."""
+    dt, t0 = 20.202e-9, 0.0
+    tw = t0 + np.arange(n_s) * dt
+    t_s = np.full(n_tr, t_s_us * 1e-6)
+    t_b = t_s + dbs_us * 1e-6
+    field = np.zeros((n_tr, n_s, 2), np.complex64)
+    for j, w in enumerate([0.05, 0.3, 1.0, 0.5, 0.2]):
+        field[:, int(round(t_s_us * 1e-6 / dt)) - 2 + j, 0] = w
+        field[:, int(round((t_s_us + dbs_us) * 1e-6 / dt)) - 2 + j, 1] = \
+            0.02 * w
+    sim = {"field": field, "twtt": tw,
+           "nadir": np.column_stack([t_s, t_b])}
+    rc = RadarConfig(dt=dt, n_samples=n_s, t0=t0, f0=rbc.FC_HZ,
+                     waveform=WaveformConfig(kind="chirp", bandwidth=50e6,
+                                             pulse_length=1e-5,
+                                             window="hann"),
+                     antenna=AntennaConfig(kind="array", n_elements=5,
+                                           spacing_lam=0.5,
+                                           roll_source="nav"))
+    s = np.linspace(0.0, 5000.0, n_tr)
+    p = {"key": "syn30km", "segment": "extended", "rc_frame": rc,
+         "spacing": 10.0, "surf_sim": t_s, "s_sim": s, "s_m": s,
+         "surf": t_s, "bot": t_b, "tw_m": tw, "dt": dt,
+         "synthetic": {"agl_med_m": 30000.0}, "h_med": 30000.0,
+         "thick_med": 700.0}
+    return p, sim
+
+
+def test_single_trace_decomposition_records_a_parameterised_location():
+    p, sim = _synthetic_pass()
+    a = rbc.analyze_pass(p, sim, trace_s_km=3.0)
+    ti, tp = a["trace_info"], a["trace_profs"]
+    assert ti["requested_s_km"] == 3.0
+    # nearest sim trace to 3.0 km on a 0..5 km, 6-trace grid = index 3
+    assert ti["sim_trace_index"] == 3
+    assert ti["sim_s_km"] == pytest.approx(3.0, abs=0.6)
+    assert "measured" not in tp                  # synthetic: no measured data
+    assert ti["bed_below_surface_us"] == pytest.approx(9.0, abs=0.05)
+    # the bed window is pure bed returns here -> a very large guard margin
+    assert ti["bed_window_bed_minus_surface_returns_db"] > 10.0
+    # the curves are the per-interface fields at that one trace
+    for k in ("sim_total", "sim_surface", "sim_bed"):
+        rel, db = tp[k]
+        assert rel[0] == pytest.approx(-1.5, abs=0.05)
+        assert len(rel) == len(db)
+    rel, sdb = tp["sim_surface"]
+    _, bdb = tp["sim_bed"]
+    assert rel[int(np.argmax(sdb))] == pytest.approx(0.0, abs=0.05)
+    assert rel[int(np.argmax(bdb))] == pytest.approx(9.0, abs=0.05)
+    # the location is a parameter: moving it moves the trace
+    a2 = rbc.analyze_pass(p, sim, trace_s_km=0.0)
+    assert a2["trace_info"]["sim_trace_index"] == 0
+    # ... and omitting it costs nothing
+    a3 = rbc.analyze_pass(p, sim)
+    assert a3["trace_info"] is None and a3["trace_profs"] is None
+    assert a3["sim"]["bed_rel_surf_db"] == a["sim"]["bed_rel_surf_db"]
+
+
+def test_fig_decomposition_trace_renders_and_names_the_location(tmp_path):
+    p, sim = _synthetic_pass()
+    a = rbc.analyze_pass(p, sim, trace_s_km=3.0)
+    fp = rbc.fig_decomposition_trace(tmp_path, {"syn30km": p},
+                                     {"syn30km": a}, keys=["syn30km"])
+    assert fp is not None and fp.exists() and fp.name \
+        == "decomposition_trace.png"
+    # passes without the single-trace analysis are skipped, not crashed on
+    a0 = rbc.analyze_pass(p, sim)
+    assert rbc.fig_decomposition_trace(tmp_path, {"syn30km": p},
+                                       {"syn30km": a0},
+                                       keys=["syn30km"]) is None

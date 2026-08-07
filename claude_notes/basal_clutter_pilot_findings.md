@@ -1553,3 +1553,212 @@ invocation (both sides pure cache replay, 0 re-simulations). Tests: suite
 **294 unit green**, ruff clean on the changed file
 (`claude_notes/high_bed_comparison.py`; no tool/source changes were needed --
 every knob this used already existed).
+
+## EXTENDED segment: s = 0 -> 69.7 km, full five-pass set at the winning A20 level-anchored settings (2026-08-07)
+
+The study window grown in both directions -- up-track to the anchor start
+(s = 0) and down-track to the **grounding line** (s = 69.7 km; the scout's
+quirk 1: beyond it BedMachine's "bed" is the seafloor under a cavity, so the
+segment stops there) -- and the whole current-best configuration re-run on
+it, with every chunk cached under a distinct segment tag so the plotting can
+be iterated without re-simulating.
+
+    uv run python tools/run_basal_clutter.py --segment extended \
+      --demogorgn-bed --gamma-from-rssnr --processing standard \
+      --add-30km --add-500km --no-companion --anchor level \
+      --level-deficit-db 3.56 --att 20 --out outputs/basal_clutter \
+      --out-name extended
+
+Deliverables in `outputs/basal_clutter/extended/`: `radargrams.png` (2 x 5,
+measured over sim, 0-69.7 km), `decomposition.png` (ensemble),
+**`decomposition_trace.png` (NEW: single-trace variant)**, `bed_tail.png`,
+`metrics.json`, `run_config.json`, `report.html`; metrics + all four figures
+mirrored to `outputs/verification/basal_clutter_extended/`. 305 MB of chunk
+cache in `extended/runs/` (115 chunks = 5 passes x 23).
+
+### Coverage / slice verification (derived from nav, not assumed)
+
+`claude_notes/extended_segment_slices.py` projects every candidate frame of
+each flight onto the anchor polyline (the same `project_to_track` machinery
+`prep_pass` uses) and cuts the s in [0, 69.7] km window:
+
+| pass | parts (increasing s after reversal) | traces | coverage | offset med/max | joins | picks |
+|---|---|---|---|---|---|---|
+| low | `_005 (0, 3333)`, `_006 (0, 1359)` | 4692 | 0.00 -> 69.70 km | 0 m (it IS the anchor) | +30.7 m | 100 % |
+| mid (rev) | **`_007 (0, 216)`**, `_006 (0, 3337)`, `_005 (2194, 3337)` | 4696 | 0.00 -> 69.69 km | 10-23 / 30 m | +32.7, +32.4 m | 100 % |
+| high (rev) | `_005 (0, 3033)`, `_004 (1671, 3336)` | 4698 | 0.01 -> 69.70 km | 9-13 / 23 m | +34.1 m | 100 % |
+
+* **Only ONE new frame is needed** (`20161028_05_007`, 216 traces): the high
+  pass's extension lives entirely inside the already-used `_005`/`_004`
+  (`_005` runs s 45 -> 0 over its 3336 traces), and the low pass's inside
+  `_005`/`_006`. `20161031_07_006` covers s -54 .. -4.5 km (off-window),
+  `20161028_05_004` s 102-152 km, `20161031_07_003/_002` s 94-194 km -- all
+  correctly excluded.
+* Every frame's twtt grid matches its pass's, bottom picks are 100 %
+  populated, part joins are one-trace gaps (+31..34 m, the same as the 50 km
+  segment's), trace counts agree to **0.13 %** across the triplet, and the
+  extended parts **contain** the 50 km parts frame-for-frame (unit-tested:
+  the window only grows).
+* Independent check that the slicing is right: the MEASURED bed-return tail
+  slopes recomputed over the s 18-68 km sub-range of the extended run
+  reproduce the recorded 50 km values **exactly** (-8.22 / -5.15 / -3.17
+  dB/us, low/mid/high).
+
+### The mapping was reused, not re-derived
+
+`--segment extended` pins the RSSNR K anchoring to the **`full` segment**
+(new `K_ANCHOR_SEGMENT`, printed at run start and recorded in
+`run_config.k_anchor_segment` / `rssnr_gamma.k_anchor_segment`): K_median
++4.36 + D 3.56 = **K = +7.92 dB**, bit-identical to `att20_klevel`. The
+implied reflectivity over the NEW extent is recorded separately
+(`g2_run_seg_db`): median **-8.6 dB**, 21.2 % above 0 dB over s 0-69.7 km,
+against -9.3 dB / 27.0 % over s 18-68 km -- the longer line is slightly MORE
+physical, not less.
+
+### Level residuals on the extended segment (honest, not re-anchored)
+
+| pass | measured bed window | sim | residual (extended) | residual (50 km) |
+|---|---|---|---|---|
+| low | -57.93 | -53.81 | **+4.12** | +4.83 |
+| mid | -49.19 | -50.13 | **-0.94** | -0.48 |
+| high | -48.84 | -50.65 | **-1.81** | +0.07 |
+| **median** | | | **-0.94 (gate <= 2 dB: PASS)** | +0.07 |
+
+The extension adds a **thick-ice, dim-bed, low-relief** zone (the scout's
+s 5-15 km "featureless uniform haze"): the MEASURED bed window drops 3.4-3.7
+dB and the simulated one drops 4.4-4.6 dB, so the residuals move by -1 to
+-1.9 dB and the median stays inside the 2 dB gate. **The 50 km-calibrated
+mapping transfers to the longer line without adjustment**, which is the real
+test of the level anchor. Mid-column clutter and the altitude trend move the
+same modest amount: measured high-low **+17.4 dB** (was +19.8 on the 50 km
+window), simulated +25.8 (was +27.7), error **+8.4 dB** (was +7.9) -- the
+sim's known over-prediction of the altitude step is unchanged in character.
+
+### Standard metric table (extended, DEMOGORGN bed, A20, K +7.92)
+
+| pass | AGL | midcol meas/sim | bed window meas/sim | tail slope meas/sim | excess +1/+2/+3 us | guard | cov |
+|---|---|---|---|---|---|---|---|
+| low | 447 m | -53.2 / -71.5 | -57.9 / -53.8 | -8.25 / -6.18 (bed-only -7.32) | -17.8 / -17.9 / -14.2 | **FAIL -1.0** | 1.00 |
+| mid | 9080 m | -36.2 / -46.3 | -49.2 / -50.1 | -4.76 / **-4.73** | +10.1 / +2.2 / +5.5 | ok +20.2 | 0.997 |
+| high | 10610 m | -35.8 / -45.8 | -48.8 / -50.7 | -3.66 / **-1.23** | +11.0 / +3.5 / +18.5 | ok +23.2 | 1.00 |
+| syn30km | 29786 m | -- / -35.8 | -- / -51.3 | -- / -0.70 | -- | ok +10.2 | 1.00 |
+| syn500km | 499786 m | -- / -28.5 | -- / -59.1 | -- / -0.79 | -- | FAIL -20.8 | 1.00 |
+
+Prediction panels: **syn30km bed - surface returns in the bed window
++7.12 dB** (was +9.75 on the 50 km segment; bed peak over mid-column +5.75)
+and **syn500km -24.74 dB** (was -26.37). Both verdicts survive the longer
+line -- 30 km retains a useful margin, 500 km is clutter-blind at the bed --
+but the 30 km margin is **2.6 dB smaller** once the dim-bed thick-ice zone
+is included, i.e. the design margin is segment-dependent and the 50 km
+number was the optimistic end.
+
+### Where the extension changed the tail (`claude_notes/extended_tail_split.py`)
+
+Bed-referenced statistics split into the legacy 50 km sub-range and the two
+new pieces (sim / measured level at bed+2 us, dB rel own surface peak):
+
+| pass | zone | sim slope | sim +2 us | meas slope | meas +2 us | excess |
+|---|---|---|---|---|---|---|
+| low | s < 18 km (NEW) | -5.96 | -91.9 | -8.71 | -90.3 | **-1.6** |
+| low | s 18-68 (legacy) | -6.21 | -82.9 | -8.22 | -65.2 | -17.8 |
+| mid | s < 18 km (NEW) | -3.09 | -64.0 | -4.27 | -59.1 | **-4.9** |
+| mid | s 18-68 (legacy) | -4.77 | -43.8 | -5.15 | -46.0 | +2.2 |
+| high | s < 18 km (NEW) | -3.01 | -61.5 | -3.47 | -58.7 | **-2.8** |
+| high | s 18-68 (legacy) | -1.55 | -43.3 | -3.17 | -47.0 | +3.8 |
+
+* **The sim's tail excess flips sign in the new zone.** Over the deep-ice,
+  dim-bed up-track section the simulation runs 1.6-4.9 dB COLD at bed+2 us
+  on all three passes, against +2..+4 dB HOT over the legacy window -- and
+  the low pass, whose -18 dB tail deficit has been the study's standing
+  anomaly, is within **1.6 dB** of measured there. The deficit is therefore
+  not a global property of the surface-clutter model: it is specific to the
+  thin-ice, high-relief part of the line.
+* **The high pass's whole-segment slope (-1.23) is not a stable statistic.**
+  Over the identical legacy sub-range it reads -1.55 here against -2.72 in
+  the 50 km run, because (a) the derived cross-track reach is a
+  SEGMENT-level quantity -- the extension's thicker ice widens it for every
+  trace (high 6943 -> 7415 m, low 2529 -> 2904 m, syn500km 45.2 -> 49.1 km),
+  admitting more late off-nadir bed returns, and (b) the ensemble mean at
+  bed+2 us is carried by the brightest 5 % of traces (0.66-0.85 in sim,
+  0.53-0.77 measured). Cross-segment tail-slope comparisons at high altitude
+  are therefore NOT like-for-like; the measured side, which has no reach
+  parameter, does reproduce exactly.
+
+### The single-trace decomposition (NEW figure, parameterised location)
+
+`--trace-decomp-s S_KM` (default `DECOMP_S_KM` = 31.0 km on full/extended)
+adds `decomposition_trace.png`: the same measured / sim-total / sim-surface-
+returns / sim-bed-returns curves at ONE slow-time location instead of the
+trace ensemble mean. The chosen s, the per-pass sim AND measured trace
+indices, the trace's AGL and bed delay, the per-trace guard and the measured
+mid-column percentile are recorded in
+`run_config.passes.<key>.trace_decomposition`.
+
+| pass | sim trace | measured trace | s (km) | AGL | bed below surface | bed-window bed - surface returns | measured midcol percentile |
+|---|---|---|---|---|---|---|---|
+| low | 2087 | 2087 | 31.002 | 491 m | 8.86 us | **+49.5 dB** | 0.05 |
+| mid | 2088 | 2088 | 30.996 | 9039 m | 8.88 us | **+21.3 dB** | 0.18 |
+| high | 2090 | 2090 | 31.000 | 10565 m | 8.92 us | **+27.3 dB** | 0.32 |
+| syn30km | 2087 | -- | 31.002 | 29739 m | 9.04 us | **+14.3 dB** | -- |
+| syn500km | 2087 | -- | 31.002 | 499739 m | 9.24 us | **+1.1 dB** | -- |
+
+Why s = 31.0 km is defensible: it is the scout's documented **deep trough**
+("one wide bright hyperbola from the deep trough at s ~ 31 km") inside the
+30-40 km window with the highest per-km bed relief on the grounded line
+(mean 103 m/km), the bed there sits 8.86-9.24 us below the surface against a
+segment median of ~8.1 us (i.e. genuinely a trough), and **every real pass
+satisfies the bed-window guard with room to spare** (+21 to +49 dB). Its
+measured mid-column is NOT the segment's brightest (5th/18th/32nd percentile
+low/mid/high) -- recorded rather than hidden; a brightest-clutter location
+is one `--trace-decomp-s` away and costs no simulation.
+
+What the single trace shows that the ensemble does not:
+
+* At **low** the sim total is the sim surface returns everywhere except a
+  single 40 dB-tall specular spike at the bed -- one sounding is a spike on
+  a background, not the smooth decaying tail the ensemble mean draws. The
+  measured trace has a second bright return ~1.4 us past its bed (an
+  off-nadir bed feature the sim does not reproduce), which is what the
+  ensemble buries.
+* At **mid/high** the sim bed returns rise out of the surface returns ~2 us
+  BEFORE the bed and stay 20-27 dB above them through the bed window, with
+  three or four resolved peaks between bed and bed+3 us: at one trace the
+  "tail" is visibly a handful of discrete off-nadir arcs, which is exactly
+  the concentration diagnostic above, seen directly.
+* At **syn30km** the bed returns only overtake the surface returns ~1.5 us
+  before the bed (+14.3 dB in the window), and at **syn500km** they never
+  really do (+1.1 dB): the orbital panel shows a bed buried in surface
+  clutter at a single sounding, which is the 500 km verdict without any
+  ensemble averaging.
+
+### Mechanics, timings, tests
+
+* New: `SEGMENTS`/`PASSES[*]["extended"]`, `S0_KM`/`DECOMP_S_KM`/
+  `N_TRACES_EXT` entries, `K_ANCHOR_SEGMENT`, `build_rssnr_gamma(
+  k_anchor_segment=...)` + `g2_run_seg_db`, `analyze_pass(trace_s_km=...)`
+  -> `trace_profs`/`trace_info`, `fig_decomposition_trace`,
+  `--segment extended`, `--trace-decomp-s`. The segment is part of the chunk
+  cache NAME and KEY, so no 50 km cache could be reused or clobbered
+  (unit-tested); all pre-existing caches stayed valid.
+* Simulation wall **3830.7 s (63.8 min)**: low 1654.7 (23 x 71.5 s), mid
+  740.9, high 357.5, syn30km 358.6, syn500km 719.1. Full first invocation
+  ~80 min including one-time DEM fetches and processing; against the ~54 min
+  linear projection, the overshoot is the wider derived reach (+7-15 % per
+  pass) and the deeper fast-time windows, both consequences of the thicker
+  ice the extension adds.
+* One-time fetches for the new bounds: **162 MB** (REMA 32 m dominates:
+  13.4 + 17.3 + 17.8 + 23.1 + **87.2** MB, the last for syn500km's +-49 km
+  reach; BedMachine and DEMOGORGN tiles are 0.1-0.7 MB each at 500 m
+  posting).
+* **Cache-only replay verified**: re-running the identical command replayed
+  all 115 chunks (`skip-exists`) and reproduced every metric bit-identically
+  in **19 min**, all of it processing -- so plotting iterations need no
+  simulation. Most of that is syn500km's 1793-trace-aperture focuser; adding
+  `--passes low mid high` cuts a plotting iteration to ~6 min.
+* Tests: **299 unit green** (5 added in `tests/test_basal_hypotheses.py`:
+  the extended table is a superset of the full segment with matching trace
+  counts and synthetic-pass inheritance; extended cache names/keys are
+  distinct; the K anchor reuses the full-segment mapping bit-identically and
+  re-deriving it WOULD move K; the single-trace decomposition records a
+  parameterised location, guard and profiles and costs nothing when unused;
+  the figure renders and skips passes without it). Ruff clean.
