@@ -1432,3 +1432,124 @@ processing. Tests: 2 added (`tests/test_basal_hypotheses.py`: the pass entry
 follows the syn30km pattern and carries the cache-safe spacing scale that no
 other pass has; the derived reach/spacing/aperture scaling at 500 km).
 Suite 294 unit green; ruff clean.
+
+## HIGH-pass bed-source comparison: picked bed vs DEMOGORGN under the winning A20 level-anchored mapping (2026-08-07)
+
+The bed-source question re-asked on the ONE configuration that survived the
+level-anchoring campaign, and on the high pass only (20161031_07, 10684 m
+AGL). The DEMOGORGN side already existed (`hypothesis_tests/att20_klevel`);
+the missing side was run fresh:
+
+    uv run python tools/run_basal_clutter.py --segment full --picked-bed \
+      --gamma-from-rssnr --processing standard --no-companion \
+      --anchor level --level-deficit-db 3.56 --att 20 --passes high \
+      --out <hyp> --out-name high_pbed_klevel
+
+`--passes high` is the tool's own pass restriction, so nothing else was
+simulated. The level anchor was **reused verbatim, not re-derived**: both
+runs' `run_config.rssnr_gamma.k_db` = **+7.92 dB** (K_median 4.36 + D 3.56),
+same A = 20 dB/km, same 49.524 m facets, same ±6.9 km reach, same 4226-sample
+window, same matched chain (627 m aperture / 43 traces / 3 looks). The RSSNR
+gamma field is anchor-line-derived and bed-DEM-independent, so the only
+difference between the two simulations is **bed topography**.
+
+Composed to `outputs/basal_clutter/hypothesis_tests/high_bed_comparison/`
+(`radargrams.png` = measured / picked bed / DEMOGORGN triptych on one
+surface-referenced twtt axis and one [-90, +5] dB scale; `bed_tail.png` =
+(a) tail overlay, (b) per-interface guard context; `metrics.json`), mirrored
+to `outputs/verification/basal_clutter_high_bed_comparison/`. Composition
+script: `claude_notes/high_bed_comparison.py` (pure cache replay).
+
+### The table (measured high pass = the reference column)
+
+| quantity | measured | picked bed | DEMOGORGN seed 0 |
+|---|---|---|---|
+| bed-return window level (dB rel own surface-return peak) | **-46.11** | -45.35 (**+0.76**) | -46.04 (**+0.07**) |
+| mid-column clutter | -34.76 | -43.23 | -43.60 |
+| bed-window decomposition: bed / surface returns | -- | -45.46 / -72.25 | -46.12 / -71.95 |
+| nadir bed offset vs this pass's own picks | -- | +0.157 us (+13.2 m) | +0.140 us (+11.8 m) |
+| **tail slope (dB/us, Theil-Sen, bed+0.5..+3.5)** | **-3.17** | -3.62 (misfit **0.45**) | -2.72 (misfit **0.45**) |
+| tail slope (dB/deg, refracted bed incidence) | -1.65 | -1.98 | -1.51 |
+| bed-returns-only slope (dB/us) | -- | -3.62 | -2.72 |
+| **excess at bed+1 / +2 / +3 us (dB)** | -- | **+12.3 / +13.6 / +9.2** | **+7.5 / +7.6 / +18.3** |
+| guard (min sim bed - surface returns in window) | -- | +25.8 ok | +23.5 ok |
+| record coverage / measured floor margin | 1.00 / +25.3 dB (not floor-limited) | 1.00 | 1.00 |
+| **bed-brightness r vs measured (1 km smoothed)** | -- | **+0.764** | **+0.783** |
+| same, bed-borne layer only | -- | +0.755 | +0.783 |
+| post-bed sample contrast p90-p50 / p99-p50 (dB) | 11.07 / 18.79 | 21.45 / 37.88 | 19.43 / 36.12 |
+| top-5%-of-traces share of the ensemble mean at +1/+2/+3 us | 0.40 / 0.52 / 0.39 | 0.83 / 0.90 / 0.84 | 0.89 / 0.79 / **0.98** |
+
+### Reading
+
+* **Tail metrics: DEMOGORGN wins on level, and the two TIE on shape.** The
+  |slope misfit| is **0.45 dB/us for both**, with opposite signs (picked bed
+  decays too fast, DEMOGORGN too slowly), so the decay SHAPE does not
+  discriminate the bed sources at this altitude any more than 20-vs-31 dB/km
+  did. What does separate them is the tail LEVEL: at bed+1 and +2 us the
+  picked bed sits **+12.3 / +13.6 dB** above measured against DEMOGORGN's
+  **+7.5 / +7.6 dB** -- a consistent ~6 dB of extra off-nadir bed return,
+  which is exactly the signature expected of the picked bed's cross-track
+  INERT residual (every along-track bed feature becomes a full cross-track
+  ridge). **The cross-track-ridge tail artifact survives the new mapping.**
+* **The +3 us column must not be read as a tail level.** New diagnostic
+  (`tail_concentration`): 84 % (picked) and **98 %** (DEMOGORGN) of the
+  ensemble mean at bed+3 us comes from the brightest 5 % of traces --
+  DEMOGORGN's apparent +18.3 dB excess is essentially ONE bright arc at
+  s = 57.75 km, not a raised tail. Measured is 0.39-0.52 at every delay,
+  i.e. a genuinely broad tail. The robust slope and the +1/+2 us excesses
+  are the fair comparison points; this also explains the earlier campaign's
+  erratic +3 us numbers (+21.7 dB for DEMOGORGN at high).
+* **Brightness correlation: DEMOGORGN wins, +0.783 vs +0.764** -- the
+  historical ordering (0.78 vs 0.76 in the different-mapping era) reproduces
+  almost to the third digit. The story holds. Both are far above the
+  BedMachine value (+0.66) recorded in the three-way ablation; the shared
+  RSSNR field, not the topography, still carries most of the along-track
+  pattern.
+* **The bed-WINDOW level is not a fair discriminator here and is reported as
+  such.** D = 3.56 dB was solved on the DEMOGORGN median-anchored run and the
+  high pass is the one that set that median, so DEMOGORGN's +0.07 dB residual
+  is largely by construction. The informative half is the picked bed's
+  **+0.76 dB with the identical reflectivity field**: the ridged bed puts
+  ~0.7 dB more power into the bed window and ~6 dB more into the off-apex
+  tail, i.e. its excess is overwhelmingly off-apex, as the 2026-08-03
+  analysis argued.
+* **Visual arc texture: picked bed is denser, DEMOGORGN is cleaner, neither
+  is measured-like.** The triptych at s = 30-40 km shows the picked bed
+  filling the column with many overlapping, beaded hyperbolic arcs over a
+  brighter background; DEMOGORGN gives fewer, sharper, better-separated arcs
+  with darker gaps; the measured panel is neither -- a fine-grained jagged
+  "mountain range" of short features hugging the bed band with no long clean
+  arcs. The numbers agree: the measured post-bed field is by far the least
+  peaked (p99-p50 = 18.8 dB vs 37.9 / 36.1 dB), and the picked bed is the
+  most peaked AND the brightest at the top end (p99 -21.7 vs -24.8 dB).
+  Part of the sim-vs-measured peakedness gap is the known looks mismatch
+  (3 sim looks vs the product's 6-11) and is not a bed-source statement; the
+  picked-bed-vs-DEMOGORGN difference (2.0 dB in p90-p50) is, since both sims
+  share the processing.
+* Mid-column is bed-source-insensitive to **0.37 dB** (-43.23 vs -43.60) and
+  surface-borne in both, re-confirming the study's central decomposition
+  result on the current configuration.
+* Honest note on the nadir bed: the picked bed sits **+13.2 m deep** at the
+  high pass even though it is built from radar picks -- those are the LOW
+  pass's picks, and the scout's 6 % cross-pass pick-thickness spread is what
+  remains. DEMOGORGN's +11.8 m is its own thickness-convention scatter. The
+  two are within 1.4 m of each other, so neither comparison above is driven
+  by a bed-registration difference.
+
+### Verdict
+
+**DEMOGORGN remains the better bed source at the high pass under the current
+mapping**: it wins the brightness correlation (+0.783 vs +0.764), it is 6 dB
+closer on the tail level at +1/+2 us, and it ties on tail shape. The picked
+bed's only advantage is its denser arc field, which is closer to the measured
+arc DENSITY but comes with the cross-track-ridge level artifact and the
+most-peaked post-bed statistics of the three datasets. Nothing here changes
+the `att20_klevel` configuration; the earlier ablation's story is intact.
+
+Timings: picked-bed high-pass simulation **137.7 s** (17 chunks, ~8 s each;
+43 MB of chunk cache), full tool invocation ~5.2 min including frame/DEM
+prep, matched processing, analysis and figures; composition ~50 s per
+invocation (both sides pure cache replay, 0 re-simulations). Tests: suite
+**294 unit green**, ruff clean on the changed file
+(`claude_notes/high_bed_comparison.py`; no tool/source changes were needed --
+every knob this used already existed).
