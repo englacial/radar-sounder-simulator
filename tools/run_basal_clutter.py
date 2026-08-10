@@ -1167,6 +1167,7 @@ def apply_hybrid_bed(base, fsub, ct_m, seed, axis):
 #  g6 delay-and-sum channel combine is already inside the sim's array
 #     pattern (M22); no per-channel processing to combine.
 PROC_TAG = "_proc"
+FIG_WIDTH_SCALE = 1.0   # --fig-width-scale: radargram panel width multiplier
 N_LOOKS_SIM = 3
 CHUNK_M_PROC = 3000.0    # fine-posting chunks: ~200 traces/chunk (memory)
 REAL_CHAIN_2016 = {
@@ -2411,7 +2412,7 @@ def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
 
 
 def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
-                   gl_s_km=None):
+                   gl_s_km=None, w_scale=1.0):
     """Measured (top) vs simulated per pass, shared surface-referenced twtt
     axis and one shared dB-rel-surface color scale. A synthetic pass has no
     measured data: its top panel is a placeholder. ``ablation`` = list of
@@ -2425,7 +2426,7 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
     s0 = S0_KM[segment]
     nrow = 2 + len(ablation)
     fig, axs = plt.subplots(nrow, len(keys),
-                            figsize=(5.4 * len(keys), 4.4 * nrow),
+                            figsize=(5.4 * len(keys) * w_scale, 4.4 * nrow),
                             sharey=True, squeeze=False)
     for k, key in enumerate(keys):
         p, a = preps[key], analyses[key]
@@ -3354,7 +3355,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               if bed_ablation else None)
     figs = [fig_radargrams(out, preps, analyses, segment, keys=order,
                            ablation=ab_fig,
-                           gl_s_km=GL_S_KM if hybrid else None),
+                           gl_s_km=GL_S_KM if hybrid else None,
+                           w_scale=FIG_WIDTH_SCALE),
             fig_decomposition(out, preps, analyses, keys=order,
                               ablation=ab_fig),
             fig_bed_tail(out, preps, analyses, metrics, keys=order,
@@ -3580,6 +3582,9 @@ def main():
                     "(2 -> 7.43 m, doubling the alias-limited aperture and "
                     "the simulation cost); measured data untouched. "
                     "Requires --processing standard")
+    ap.add_argument("--fig-width-scale", type=float, default=1.0,
+                    help="radargram figure width multiplier "
+                    "(plot-iteration knob; cache-replay safe)")
     ap.add_argument("--trace-decomp-s", type=float, default=None,
                     nargs="+", metavar="S_KM",
                     help="anchor along-track position(s) (km) of the "
@@ -3592,6 +3597,8 @@ def main():
                     "it only re-does the analysis, never the simulations")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
+    global FIG_WIDTH_SCALE
+    FIG_WIDTH_SCALE = args.fig_width_scale
     run(segment=args.segment, n_traces=args.n_traces, att=args.att,
         surf_rough=not args.smooth_surface, out_root=args.out,
         force=args.force, picked_bed=args.picked_bed,
