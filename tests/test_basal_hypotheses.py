@@ -475,7 +475,7 @@ def test_extended_segment_table_is_a_superset_of_the_full_segment():
     """Every pass gains an 'extended' entry whose parts CONTAIN the full
     segment's parts of the same frame (the study window only grows), in
     increasing-s order, with matching trace counts across the triplet."""
-    assert rbc.SEGMENTS == ("pilot", "full", "extended")
+    assert rbc.SEGMENTS == ("pilot", "full", "extended", "full_line")
     counts = {}
     for key in rbc.ORDER:
         ext = rbc.PASSES[key]["extended"]
@@ -619,3 +619,217 @@ def test_fig_decomposition_trace_renders_and_names_the_location(tmp_path):
     assert rbc.fig_decomposition_trace(tmp_path, {"syn30km": p},
                                        {"syn30km": a0},
                                        keys=["syn30km"]) is None
+
+
+# ---------------------------- FULL_LINE segment + hybrid bed (0-148.45 km)
+
+def test_full_line_segment_table_spans_the_whole_line():
+    """Every pass gains a 'full_line' entry that CONTAINS its 'extended'
+    parts (the window only grows through the GL), in increasing-s order
+    after reversal, with trace counts matching across the triplet."""
+    counts = {}
+    for key in rbc.ORDER:
+        line = rbc.PASSES[key]["full_line"]
+        ext = dict(rbc.PASSES[key]["extended"])
+        for fid, (a, b) in line:
+            assert 0 <= a < b, (key, fid)
+            if fid in ext:
+                ea, eb = ext[fid]
+                assert a <= ea and b >= eb, (key, fid)   # only grows
+        counts[key] = sum(b - a for _, (a, b) in line)
+    n = np.array(list(counts.values()), float)
+    assert 9990 < n.min() and n.max() < 10010          # 9993/10004/10006
+    assert (n.max() - n.min()) / n.mean() < 0.002
+    for skey in rbc.SYNTHETIC_KEYS:
+        assert rbc.PASSES[skey]["full_line"] == rbc.PASSES["low"]["full_line"]
+    assert rbc.S0_KM["full_line"] == 0.0
+    assert rbc.K_ANCHOR_SEGMENT["full_line"] == "full"
+    assert rbc.N_TRACES_LINE > rbc.N_TRACES_EXT
+    # the default single-trace decomposition pair: one grounded, one floating
+    lo, hi = rbc.DECOMP_S_KM["full_line"]
+    assert lo < rbc.GL_S_KM < hi
+    # blend geometry: the ramp starts AT the GL (grounded side pure DEMOGORGN)
+    assert 2.0 <= rbc.GL_RAMP_KM <= 5.0
+    assert rbc.GL_S_KM == 69.7
+
+
+def test_full_line_cache_names_and_keys_are_distinct():
+    """Segment name AND the hybrid marker separate the full_line caches from
+    every earlier run; the baseline names stay byte-identical (p without a
+    'hybrid' key -> no suffix, no meta key)."""
+    p_base = _p()
+    p_line = {**_p(), "segment": "full_line", "hybrid": True}
+    rid_b = rbc.chunk_rid(p_base, 0, 20.0, True)
+    rid_l = rbc.chunk_rid(p_line, 0, 20.0, True)
+    assert rid_b != rid_l
+    assert "_full_line_" in rid_l and "_hyb" in rid_l
+    assert "_hyb" not in rid_b
+    rows = np.arange(10)
+    m_b = rbc.chunk_meta(p_base, 0, rows, 1, 10, 20.0, True)
+    m_l = rbc.chunk_meta(p_line, 0, rows, 1, 10, 20.0, True)
+    assert "hybrid_bed" not in m_b
+    assert m_l["hybrid_bed"]["gl_s_km"] == rbc.GL_S_KM
+    assert m_l["hybrid_bed"]["ramp_km"] == rbc.GL_RAMP_KM
+    assert m_l["segment"] == "full_line"
+
+
+def test_full_line_k_anchor_reuses_the_full_mapping_with_zone_stats(
+        monkeypatch):
+    """K stays pinned to the 50 km 'full' segment (bit-identical profile);
+    the zone-aware physicality block judges grounded samples vs 0 dB and
+    floating samples vs the ice-seawater Fresnel ceiling."""
+    axis = _fake_rssnr(monkeypatch)
+    monkeypatch.setattr(rbc, "segment_s_range",
+                        lambda ref, seg: {"full": (18e3, 68e3),
+                                          "full_line": (0.0, 148.45e3)}[seg])
+    full = rbc.build_rssnr_gamma(axis, "full", 20.0, anchor="level",
+                                 level_deficit_db=3.56)
+    line = rbc.build_rssnr_gamma(axis, "full_line", 20.0, anchor="level",
+                                 level_deficit_db=3.56,
+                                 k_anchor_segment="full",
+                                 zone_gl_km=rbc.GL_S_KM)
+    assert line["k_db"] == full["k_db"]
+    assert np.array_equal(line["g2_db"], full["g2_db"])
+    assert line["k_anchor_segment"] == "full"
+    z = line["g2_zones_db"]
+    from soundersim.physics import fresnel_normal
+    want_ceil = 20.0 * np.log10(abs(
+        fresnel_normal(rac.EPS_ICE, rbc.EPS_SEAWATER)))
+    assert z["floating_ceiling_db"] == pytest.approx(want_ceil, abs=0.01)
+    assert z["grounded_fresnel_anchor_db"] == pytest.approx(-12.86, abs=0.05)
+    assert z["grounded"]["n"] >= 3
+    assert 0.0 <= z["grounded"]["frac_above_0db"] <= 1.0
+    assert (z["grounded"]["frac_above_seawater_ceiling"]
+            >= z["grounded"]["frac_above_0db"])
+    # the fake dataset stops at 60 km: the floating zone must degrade
+    # gracefully to a counted too-few-samples record, never crash
+    assert z["floating"]["n"] == 0 and "note" in z["floating"]
+    assert "g2_zones_db" not in full
+
+
+def test_picks_bed_nn_skips_gaps_and_clamps_edges():
+    axis = {"s": np.array([0.0, 10.0, 20.0, 30.0]),
+            "bed": np.array([1.0, np.nan, 3.0, 4.0])}
+    got = rbc.picks_bed_nn(axis, np.array([-5.0, 4.0, 9.0, 11.0, 26.0, 99.0]))
+    # finite picks at s = 0/20/30 -> nearest-FINITE selection, edge-clamped
+    assert np.array_equal(got, [1.0, 1.0, 1.0, 3.0, 4.0, 4.0])
+
+
+def test_zone_g2_stats_judges_each_zone_against_its_own_ceiling():
+    n = 200
+    s = np.linspace(0.0, 148.45e3, n)
+    g2 = np.where(s < rbc.GL_S_KM * 1e3, -10.0, -2.0)   # floating brighter
+    gmap = {"s": s, "g2_db": g2, "ok": np.ones(n, bool),
+            "g2_const_db": -12.86}
+    z = rbc.zone_g2_stats(gmap, 0.0, 148.45e3)
+    assert z["grounded"]["med"] == pytest.approx(-10.0)
+    assert z["floating"]["med"] == pytest.approx(-2.0)
+    assert z["grounded"]["frac_above_0db"] == 0.0
+    # -2 dB beats the ~-3.5 dB seawater ceiling but not 0 dB
+    assert z["floating"]["frac_above_seawater_ceiling"] == 1.0
+    assert z["floating"]["frac_above_0db"] == 0.0
+    assert z["floating"]["med_minus_zone_ceiling_db"] == pytest.approx(
+        1.5, abs=0.1)
+    assert z["grounded"]["n_total"] == z["grounded"]["n"]
+    assert z["grounded"]["qc_pass_frac"] == 1.0
+
+
+def test_apply_hybrid_bed_blends_demogorgn_into_the_floating_picks(
+        monkeypatch):
+    """Synthetic straight-line scene: pure DEMOGORGN before the GL, pure
+    picks past GL + ramp, linear in between; clearance/clamp and the
+    blend-zone step recorded; the DEMOGORGN fetch is restricted to the
+    grounded(+ramp) track."""
+    from types import SimpleNamespace
+
+    from affine import Affine
+    from pyproj import Transformer
+
+    gl_m = rbc.GL_S_KM * 1e3
+    ramp_m = rbc.GL_RAMP_KM * 1e3
+    x0, y0 = -1.45e6, -5.6e5              # Amundsen-ish EPSG:3031 corner
+    step = 500.0
+    nx, ny = 300, 5                       # 150 km x 2.5 km scene
+    tr = Affine(step, 0.0, x0, 0.0, -step, y0)
+    xs = x0 + (np.arange(nx) + 0.5) * step
+    yc = y0 - (ny // 2 + 0.5) * step
+    s_ax = xs - xs[0]
+    axis = {"x": xs, "y": np.full(nx, yc), "s": s_ax,
+            "bed": np.full(nx, -600.0)}
+    axis["bed"][nx - 3] = np.nan          # one floating pick gap
+    surface = np.zeros((ny, nx), np.float32) + 100.0
+    base = SimpleNamespace(dems=[surface, np.zeros((ny, nx), np.float32)],
+                           transform=tr, crs="EPSG:3031", params={})
+    inv = Transformer.from_crs("EPSG:3031", "EPSG:4326", always_xy=True)
+    lon, lat = inv.transform(xs, np.full(nx, yc))
+    import xarray as xr
+    fsub = xr.Dataset({"Latitude": ("slow_time", lat),
+                       "Longitude": ("slow_time", lon)})
+    seen = {}
+
+    def fake_fetch(bounds, pad_m=0.0, seed=0, **kw):
+        seen["bounds"] = bounds
+        seen["pad_m"] = pad_m
+        dgn = np.full((ny, nx), -500.0, np.float32)
+        return dgn, tr, "EPSG:3031", {"posting_m": 500.0,
+                                      "returned_datum": "test"}
+
+    import soundersim.opr as opr
+    monkeypatch.setattr(opr, "fetch_demogorgn_window", fake_fetch)
+    st = rbc.apply_hybrid_bed(base, fsub, 600.0, 0, axis)
+    bed = np.asarray(base.dems[1], np.float64)
+    s_pix = np.broadcast_to(xs - xs[0], (ny, nx))
+    assert np.allclose(bed[s_pix < gl_m - step], -500.0, atol=1e-3)
+    assert np.allclose(bed[s_pix > gl_m + ramp_m + step], -600.0, atol=1e-3)
+    mid = (s_pix > gl_m + 0.3 * ramp_m) & (s_pix < gl_m + 0.7 * ramp_m)
+    assert (bed[mid] > -600.0).all() and (bed[mid] < -500.0).all()
+    # recorded stats
+    h = st["hybrid"]
+    assert h["gl_s_km"] == rbc.GL_S_KM and h["ramp_km"] == rbc.GL_RAMP_KM
+    assert h["blend_zone_dgn_minus_picks_m"]["med"] == pytest.approx(
+        100.0, abs=1.0)
+    assert h["clearance_m"]["min"] > 0 and st["bed_clamp_frac"] == 0.0
+    # floating zone INCLUDES the ramp, whose start still sits near the
+    # DEMOGORGN level: min clearance ~600 m (ramp start), median ~700 (picks)
+    assert 595.0 <= h["clearance_m"]["floating_min"] <= 700.0
+    assert h["clearance_m"]["floating_med"] == pytest.approx(700.0, abs=5.0)
+    assert h["floating_picks"]["gap_frac"] > 0
+    assert st["seed_id"] == 0
+    # the DEMOGORGN fetch saw only the grounded(+ramp+2km) track
+    fx, _ = Transformer.from_crs("EPSG:4326", "EPSG:3031",
+                                 always_xy=True).transform(
+        [seen["bounds"][0], seen["bounds"][2]],
+        [seen["bounds"][1], seen["bounds"][3]])
+    assert max(fx) - xs[0] <= gl_m + ramp_m + 2000.0 + step
+    assert h["demogorgn_fetch_track_max_s_km"] <= rbc.GL_S_KM \
+        + rbc.GL_RAMP_KM + 2.1
+
+
+def test_analyze_pass_accepts_multiple_trace_locations():
+    p, sim = _synthetic_pass()
+    a = rbc.analyze_pass(p, sim, trace_s_km=[1.0, 4.0])
+    assert len(a["trace_info_list"]) == 2
+    assert a["trace_info"] == a["trace_info_list"][0]
+    assert a["trace_profs"] is a["trace_profs_list"][0]
+    assert a["trace_info_list"][0]["requested_s_km"] == 1.0
+    assert a["trace_info_list"][1]["requested_s_km"] == 4.0
+    assert a["trace_info_list"][0]["sim_trace_index"] \
+        != a["trace_info_list"][1]["sim_trace_index"]
+    # scalar stays a one-element list (backward-compatible figure/config)
+    a1 = rbc.analyze_pass(p, sim, trace_s_km=3.0)
+    assert len(a1["trace_info_list"]) == 1
+
+
+def test_fig_decomposition_trace_fans_out_multi_locations(tmp_path):
+    p, sim = _synthetic_pass()
+    a = rbc.analyze_pass(p, sim, trace_s_km=[1.0, 4.0])
+    fp = rbc.fig_decomposition_trace(tmp_path, {"syn30km": p},
+                                     {"syn30km": a}, keys=["syn30km"])
+    assert fp is not None and fp.exists()
+
+
+def test_run_rejects_full_line_without_the_hybrid_bed():
+    with pytest.raises(ValueError, match="HYBRID"):
+        rbc.run(segment="full_line")
+    with pytest.raises(ValueError, match="ablation"):
+        rbc.run(segment="full_line", demogorgn_bed=True, bed_ablation=True)

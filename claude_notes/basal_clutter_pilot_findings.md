@@ -1762,3 +1762,194 @@ What the single trace shows that the ensemble does not:
   re-deriving it WOULD move K; the single-trace decomposition records a
   parameterised location, guard and profiles and costs nothing when unused;
   the figure renders and skips passes without it). Ruff clean.
+
+## FULL LINE: s = 0 -> 148.45 km across the grounding line, HIGH pass only (2026-08-10)
+
+The study window grown across the GL to the whole overlapping line, with a
+HYBRID bed (grounded DEMOGORGN + floating radar-picked shelf base) -- the
+first simulation of the FLOATING part, where BedMachine/DEMOGORGN report
+the SEAFLOOR under the cavity, not the reflector the radar sees (scout
+quirk 1). STAGED by design: the HIGH pass (20161031_07, 10,763 m AGL over
+this window) only; low/mid/synthetic passes deliberately not simulated.
+
+    uv run python tools/run_basal_clutter.py --segment full_line \
+      --demogorgn-bed --gamma-from-rssnr --processing standard \
+      --no-companion --anchor level --level-deficit-db 3.56 --att 20 \
+      --passes high --out outputs/basal_clutter --out-name full_line
+
+Deliverables in `outputs/basal_clutter/full_line/` (radargrams with the GL
+marked / decomposition / **decomposition_zones (NEW: grounded-vs-floating
+ensemble split)** / decomposition_trace (NEW: two panels, grounded s=31 +
+floating s=120) / bed_tail / metrics / run_config / report.html), figures +
+metrics mirrored to `outputs/verification/basal_clutter_full_line/`. 128 MB
+of chunk cache (49 chunks) in `full_line/runs/`.
+
+### Slice verification (derived from nav, not assumed)
+
+`claude_notes/full_line_slices.py` (same projection machinery as the
+extended work) over every candidate frame; window s in [0, 148.45] km:
+
+| pass | parts (increasing s after reversal) | traces | coverage | offset med/max | joins | picks (floating) |
+|---|---|---|---|---|---|---|
+| low | `_005 (0,3333)`, `_006 (0,3333)`, `_007 (0,3327)` | 9993 | 0.00 -> 148.44 km | 0 (IS the anchor) | +30.7, +26.4 m | 100 % (100 %) |
+| mid (rev) | `_007 (0,216)`, `_006 (0,3337)`, `_005 (0,3337)`, `_004 (223,3337)` | 10004 | 0.00 -> 148.44 | 12-23 / 30 m | +32.7, +32.4, +32.7 m | 100 % (100 %) |
+| high (rev) | `_005 (0,3033)`, `_004 (0,3336)`, `_003 (0,3340)`, `_002 (3044,3341)` | 10006 | 0.01 -> 148.44 | 5-13 / 23 m | +34.1, +28.8, +29.1 m | 100 % (100 %) |
+
+Trace counts agree to 0.13 %; every twtt grid matches its pass's; every
+full_line part CONTAINS its extended part (window only grows; unit-tested);
+`20161031_07_006` (s -54..-4.5 km) correctly excluded. All frames were
+already in `outputs/cache/` from the 07-31 scout -- no new frame downloads.
+
+### The HYBRID bed and its guards
+
+`s < 69.7 km` = DEMOGORGN seed 0, bit-identical source/snapshot to the
+extended run; `s > 73.7 km` = the LOW pass's radar basal picks (the
+established pick reference), NEAREST-NEIGHBour in anchor s and **constant
+cross-track -- the accepted flat-ish shelf-base approximation, stated
+plainly: the 1-D picks supply no cross-track relief, and unlike the
+grounded picked-bed residual there is no valid 2-D DEM to preserve under
+the shelf**. Linear blend over the 4 km ramp GL -> GL+4 (grounded side
+stays pure DEMOGORGN). Chunks spanning the GL crop the scene-level hybrid,
+so their facets are built from the blended grid.
+
+* **Blend step at the GL**: nadir (on-track) DEMOGORGN - picks = med
+  **-17.4 m**, rms 28.3, |max| 67.9 m over 269 track samples -- the
+  documented ~10-20 m offset class the ramp absorbs. (The full cross-track
+  blend-zone stat reads -162 med / 308 rms m, but that conflates
+  DEMOGORGN's genuine 2-D relief with the cross-track-constant picks;
+  both are recorded.)
+* **Min-clearance guard PASSES with no clamping**: min (REMA surface -
+  hybrid bed) = **+239.2 m grounded / +453.2 m floating** (floating median
+  720 m); clamp fraction 0.000000 in both zones.
+* DEMOGORGN fetched over the grounded(+ramp+2 km) track only (max s
+  75.69 km) -- no seafloor data touched; nodata_fill 0.66 of the SCENE grid
+  is the zero-weight floating area filled by nearest-edge (recorded).
+* Floating pick coverage: 5306/5306 axis picks finite (gap frac 0.0000).
+
+### QC coverage over the floating stretch
+
+`zone_qc_coverage`: bottom picks 100 % on both zones of the high pass
+(4699 grounded / 5307 floating measured traces); RSSNR anchor samples
+**52 grounded / 59 floating, qc_pass_frac 1.000 in both** (the pinned
+snapshot's cached arrays cover the full line, med spacing ~1.37 km).
+
+### Mapping reused verbatim + ZONE-AWARE physicality
+
+`K_ANCHOR_SEGMENT["full_line"] = "full"`: K_median +4.36 + D 3.56 =
+**K = +7.92 dB, bit-identical to att20_klevel** (unit-tested). New
+`g2_zones_db` judges the implied |Gamma_bed|^2 against each zone's own
+Fresnel ceiling (grounded: rock anchor -12.86 dB, hard bound 0 dB;
+floating: ice->seawater **-3.5 dB**, a genuine ceiling for a specular
+ice-ocean interface):
+
+| zone | n | med G2 | p5..p95 | frac > 0 dB | frac > -3.5 dB |
+|---|---|---|---|---|---|
+| grounded | 52 | **-8.6 dB** | -25.9 .. +14.7 | 0.212 | 0.385 |
+| floating | 59 | **+12.3 dB** | -3.7 .. +19.7 | **0.881** | **0.932** |
+
+**The floating-side mapping is unphysical as a pure reflectivity** -- 93 %
+of the shelf sits above the ice-seawater ceiling and the median implied
+reflectivity is +12 dB. Read below for why the received-level test still
+passes: on the shelf the RSSNR-mapped gamma must be read as an EFFECTIVE
+brightness (it absorbs the specular-vs-diffuse spreading difference the
+mapping's diffuse normalization assumes away), not as a Fresnel
+coefficient.
+
+### The zone-split table (THE deliverable; dB rel own surface-return peak)
+
+| quantity | grounded (s 0-69.7) | floating (s 69.7-148.4) |
+|---|---|---|
+| bed-window level: sim / measured | -50.71 / -48.84 | **-26.25 / -28.13** |
+| **bed-window residual (sim - meas)** | **-1.88 dB** | **+1.88 dB** |
+| mid-column: sim / measured (residual) | -45.6 / -35.8 (-9.8) | -48.5 / -35.4 (-13.0) |
+| decomposition: surface / bed returns in bed window | -74.5 / -50.8 | -76.4 / -26.25 |
+| tail slope sim / measured (dB/us) | -1.54 / -3.66 | -1.72 / **-6.61** |
+| tail excess at +1 / +2 / +3 us | +4.7 / +4.3 / +17.3 | +8.4 / **+11.2** / +18.4 |
+| tail guard (min bed - surface returns) | ok +24.4 dB | ok +39.9 dB |
+| measured floor | -75.7 | -75.5 |
+
+Whole-line: `rssnr_level_anchor` median residual **+1.98 dB (gate <= 2:
+PASS, high pass only in this run)**; surface gate 0.35 bins PASS; measured
+tail not floor-limited (+27 dB margin at bed+3 us).
+
+### Reading: the specular-regime test
+
+1. **The fixed K reproduces the floating shelf-base brightness within
+   +1.9 dB.** The measured shelf base is **20.7 dB brighter** than the
+   grounded bed window (-28.1 vs -48.8) and the sim tracks that step
+   (22.6 dB, -26.2 vs -50.7) with the grounded-calibrated K = +7.92 dB
+   reused verbatim -- no re-anchoring, no per-zone adjustment. The
+   grounded and floating residuals are symmetric (-1.9 / +1.9 dB), i.e.
+   the single constant splits the difference between the regimes almost
+   perfectly on this line. That is the study's specular-regime answer:
+   **the RSSNR + level-anchored mapping transfers across the grounding
+   line at the received-power level.**
+2. **...but NOT at the reflectivity level.** The implied G2 needed for
+   that agreement is +12 dB median on the shelf (93 % above the
+   ice-seawater ceiling): the mapping's diffuse-spreading normalization is
+   wrong for a specular interface, and the gamma field silently absorbs
+   the difference. Both facts are recorded; quoting either alone would
+   mislead.
+3. **The floating tail is the new open misfit.** Measured decay past the
+   shelf base is -6.61 dB/us (much steeper than the grounded -3.66 --
+   the specular signature); the sim decays at only -1.72 dB/us and runs
+   +11.2 dB hot at bed+2 us, with the guard at +39.9 dB confirming this
+   is genuine simulated bed-return energy, not surface clutter. Two
+   recorded artifact sources: the NN interpolation makes the shelf base a
+   ~15 m along-track staircase, and the cross-track-constant extension
+   turns every along-track feature into a full-reach ridge (the picked-bed
+   ridge artifact, now on the floating side) -- both inject off-nadir bed
+   energy a real quasi-planar shelf base would not return. The grounded
+   excesses (+4.3 dB at +2 us) are consistent with the extended run's
+   (+3.5 at the same reach caveat class).
+4. Mid-column stays **surface-borne** in both zones (decomposition
+   separation > 35 dB) and under-predicted by ~10-13 dB at this pass --
+   the same character as the extended run's high-pass midcol (-10.0 dB);
+   the floating zone is 3 dB worse, consistent with the missing
+   volume/crevasse scattering of a real shelf.
+5. **Single-trace decompositions** (recorded in run_config): grounded
+   s = 31.00 km (trace 2090, bed 8.91 us, guard +23.7 dB, measured midcol
+   percentile 0.28) and floating **s = 120.00 km** (trace 8089, bed
+   6.23 us, guard **+44.7 dB**, percentile 0.79). s = 120 is defensibly
+   floating: past the last BedMachine mask flicker at 110 km, mid-shelf.
+   The floating sounding is the specular picture directly: a sharp bright
+   base rising ~45 dB above the co-arriving surface returns, against the
+   grounded trough's multi-peak arc cluster.
+
+### Timings, fetches, mechanics
+
+* Simulation wall **750.1 s** (12.5 min; 49 chunks x ~15.2 s, ~120.5 k
+  facets/interface, 855 sim samples/chunk) -- inside the 6-10 min sim
+  estimate's ballpark once the 49-vs-projected-chunk count is counted;
+  full tool invocation **16 min 49 s** wall (pilot chunk replayed from
+  cache; processing 632 m / 44-trace aperture, 3 looks; peak RSS 5.7 GB).
+  One-chunk pilot first (16.2 s incl JAX compile; projection 13.2 min --
+  landed at 12.5).
+* One-time DEM fetches (pilot prep, 307.8 s incl fetch): **61 MB REMA
+  32 m** (scene grid 4782 x 3331, ~64 MB/interface in memory), two
+  BedMachine windows and one grounded-only DEMOGORGN window < 1 MB each at
+  500 m posting. Frames: zero new downloads (cached since the scout).
+* The known LPA facet warnings (`ratio 1.03/1.43`) fire on every chunk --
+  **identical strings to the recorded att20_klevel and extended high-pass
+  caches** (verified from those runs' diag JSONs): a pre-existing property
+  of the high pass's 49.5 m facets on this DEM stack, kept unchanged for
+  comparability with the recorded family, not a new regression.
+* Cache safety: segment name AND a `_hyb` marker are in the chunk cache
+  file names, and a `hybrid_bed` block (GL, ramp) is in the cache KEY --
+  no pre-existing cache could be reused or clobbered (unit-tested; the
+  baseline `_p()` names reproduce byte-identically).
+* Tests: **327 green** (`pytest tests -q`: 327 passed, 24 network-marked
+  deselected; the unit suite grows 299 -> 308), 9 added in
+  `tests/test_basal_hypotheses.py` (full_line
+  table containment + trace-count parity; cache name/key distinctness;
+  K pinned to 'full' with zone stats + graceful no-sample zones; picks NN
+  gap-skipping; zone_g2_stats ceilings; hybrid blend weights/clearance/
+  restricted DEMOGORGN fetch on a synthetic scene; multi-location trace
+  decomposition; figure fan-out; full_line CLI rejections). One
+  PRE-EXISTING stale assertion fixed in
+  `tests/integration/test_basal_clutter.py` (PASSES-keys list had not
+  been updated for the 08-06 syn500km addition; verified failing on the
+  pre-change tree). Ruff clean.
+
+STOPPED HERE by design: low/mid/syn passes on the full line await user
+review of the high-pass result.

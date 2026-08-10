@@ -163,6 +163,7 @@ BED_ROUGH_VALIDITY = (
 N_TRACES_PILOT = 48
 N_TRACES_FULL = 240        # same ~210 m sim trace spacing as the pilot
 N_TRACES_EXT = 335         # 69.7 km at the same ~208 m sim trace spacing
+N_TRACES_LINE = 714        # 148.45 km at the same ~208 m sim trace spacing
 
 # Pass table (claude_notes/basal_clutter_scout.md). Slices are half-open
 # slow_time indices into each FULL frame; "rev" passes fly the line backwards
@@ -179,6 +180,17 @@ N_TRACES_EXT = 335         # 69.7 km at the same ~208 m sim trace spacing
 # extension pulls in ONE new frame per high pass (mid _007, and more of the
 # already-used high _005/_004), all with matching twtt grids and 100%
 # populated bottom picks.
+#
+# FULL_LINE (anchor s = 0 -> 148.45 km, 2026-08-10): the WHOLE overlapping
+# line, grounding line included (GL at s = 69.7 km; grounded ice before it,
+# floating shelf beyond -- scout quirk 1). Slices re-derived from nav with
+# the same projection machinery (scratchpad full_line_slices.py, results
+# recorded in claude_notes/basal_clutter_pilot_findings.md): every pass
+# covers 0.00/0.01 -> 148.44 km with 100% populated bottom picks (floating
+# stretch included), matching twtt grids, one-trace part joins (+26..+34 m)
+# and lateral offsets med <= 23 m / max 30 m. The floating side is simulated
+# against the HYBRID bed (see apply_hybrid_bed), never against BedMachine's
+# seafloor.
 PASSES = {
     "low": {
         "agl_med_m": 442.0, "rev": False, "param_frame": "20161105_05_005",
@@ -186,7 +198,10 @@ PASSES = {
         "full": [("20161105_05_005", (1212, 3333)),
                  ("20161105_05_006", (0, 1244))],
         "extended": [("20161105_05_005", (0, 3333)),
-                     ("20161105_05_006", (0, 1359))]},
+                     ("20161105_05_006", (0, 1359))],
+        "full_line": [("20161105_05_005", (0, 3333)),
+                      ("20161105_05_006", (0, 3333)),
+                      ("20161105_05_007", (0, 3327))]},
     "mid": {
         "agl_med_m": 9150.0, "rev": True, "param_frame": "20161028_05_006",
         "pilot": [("20161028_05_006", (858, 1532))],
@@ -194,33 +209,57 @@ PASSES = {
                  ("20161028_05_005", (2308, 3337))],
         "extended": [("20161028_05_007", (0, 216)),
                      ("20161028_05_006", (0, 3337)),
-                     ("20161028_05_005", (2194, 3337))]},
+                     ("20161028_05_005", (2194, 3337))],
+        "full_line": [("20161028_05_007", (0, 216)),
+                      ("20161028_05_006", (0, 3337)),
+                      ("20161028_05_005", (0, 3337)),
+                      ("20161028_05_004", (223, 3337))]},
     "high": {
         "agl_med_m": 10684.0, "rev": True, "param_frame": "20161031_07_005",
         "pilot": [("20161031_07_005", (337, 1011))],
         "full": [("20161031_07_005", (0, 1820)),
                  ("20161031_07_004", (1786, 3336))],
         "extended": [("20161031_07_005", (0, 3033)),
-                     ("20161031_07_004", (1671, 3336))]},
+                     ("20161031_07_004", (1671, 3336))],
+        "full_line": [("20161031_07_005", (0, 3033)),
+                      ("20161031_07_004", (0, 3336)),
+                      ("20161031_07_003", (0, 3340)),
+                      ("20161031_07_002", (3044, 3341))]},
 }
 ORDER = ["low", "mid", "high"]
-SEGMENTS = ("pilot", "full", "extended")
-S0_KM = {"pilot": 30.0, "full": 18.0, "extended": 0.0}   # display origin
+SEGMENTS = ("pilot", "full", "extended", "full_line")
+S0_KM = {"pilot": 30.0, "full": 18.0, "extended": 0.0,
+         "full_line": 0.0}                               # display origin
 # The RSSNR K anchoring stays on the segment it was calibrated on: the
 # extended run REUSES the established 50 km mapping (K = K_median(full) + D)
 # rather than re-deriving the median on the longer line, so the extended
 # results are directly comparable to the recorded att20_klevel family. The
 # resulting bed-window level residuals on the new extent are reported, not
-# re-anchored.
-K_ANCHOR_SEGMENT = {"extended": "full"}
-# Default location of the SINGLE-TRACE decomposition (--trace-decomp-s,
-# anchor along-track km). s = 31.0 km is the scout's documented deep trough:
-# "one wide bright hyperbola from the deep trough at s ~ 31 km", inside the
-# 30-40 km window whose per-km bed relief is the highest on the grounded part
-# of the line (mean 103 m/km) -- structured, resolvable off-nadir bed
-# clutter. The chosen s, the per-pass trace indices, the measured mid-column
-# percentile there and the per-trace guard are all recorded.
-DECOMP_S_KM = {"pilot": 35.0, "full": 31.0, "extended": 31.0}
+# re-anchored. The full-line run pins to the same 50 km mapping for the same
+# reason: K = +7.92 dB reused verbatim, never re-derived.
+K_ANCHOR_SEGMENT = {"extended": "full", "full_line": "full"}
+# Default location(s) of the SINGLE-TRACE decomposition (--trace-decomp-s,
+# anchor along-track km; a tuple means one figure panel per location).
+# s = 31.0 km is the scout's documented deep trough: "one wide bright
+# hyperbola from the deep trough at s ~ 31 km", inside the 30-40 km window
+# whose per-km bed relief is the highest on the grounded part of the line
+# (mean 103 m/km) -- structured, resolvable off-nadir bed clutter. The
+# full-line segment adds s = 120.0 km, a FLOATING location: past the last
+# BedMachine mask flicker at s = 110 km (unambiguously afloat), mid-shelf,
+# where the basal reflector is the smooth ice-ocean interface -- the
+# specular-regime counterpart to the grounded trough. The chosen s, the
+# per-pass trace indices, the measured mid-column percentile there and the
+# per-trace guard are all recorded.
+DECOMP_S_KM = {"pilot": 35.0, "full": 31.0, "extended": 31.0,
+               "full_line": (31.0, 120.0)}
+# Grounding line + hybrid-bed blend (full_line segment). GL from the
+# BedMachine mask (scout: grounded ice ends at s = 69.7 km); the blend ramp
+# runs GL -> GL + GL_RAMP_KM so the grounded side stays pure DEMOGORGN
+# (bit-identical bed source to the extended run) and the ~10-20 m
+# DEMOGORGN-vs-picks nadir offset and texture change cannot step at the GL.
+GL_S_KM = 69.7
+GL_RAMP_KM = 4.0
+EPS_SEAWATER = 80.0        # floating basal reflector: ice -> seawater
 
 # Synthetic stratospheric pass (--add-30km): the LOW pass's line geometry and
 # picks re-flown as a SMOOTH trajectory at constant SYN30_MSL_M ellipsoidal
@@ -235,6 +274,7 @@ PASSES[SYN30_KEY] = {
     "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
     "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
     "extended": PASSES["low"]["extended"],
+    "full_line": PASSES["low"]["full_line"],
     "synthetic_msl_m": SYN30_MSL_M}
 
 # Synthetic ORBITAL pass (--add-500km): the same construction at 500 km, i.e.
@@ -251,6 +291,7 @@ PASSES[SYN500_KEY] = {
     "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
     "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
     "extended": PASSES["low"]["extended"],
+    "full_line": PASSES["low"]["full_line"],
     "synthetic_msl_m": SYN500_MSL_M,
     # build_facets strides the DEM by ONE integer for both axes, and the
     # +-45 km scene window is anisotropic (~37 m x ~21 m pixels), so the
@@ -659,9 +700,52 @@ def bed_rough_nadir_db(sigma_m, f0=FC_HZ, eps_ice=None):
     return float(-(sigma_m * 2.0 * k_ice) ** 2 * 10.0 / np.log(10.0))
 
 
+def zone_g2_stats(gmap, run_lo, run_hi, gl_km=GL_S_KM):
+    """ZONE-AWARE implied-reflectivity physicality (full_line): the mapped
+    |Gamma_bed|^2 judged against each zone's OWN Fresnel ceiling -- grounded
+    traces vs the ice->rock anchor (the -12.9 dB Fresnel constant the median
+    anchoring used) with 0 dB as the hard physical bound, floating traces vs
+    the ice->SEAWATER coefficient (~-3.5 dB), which is a genuine CEILING for
+    a specular ice-ocean interface (nothing at the shelf base can beat it)."""
+    ceil_f = float(20.0 * np.log10(abs(
+        fresnel_normal(rac.EPS_ICE, EPS_SEAWATER))))
+    gl_m = gl_km * 1e3
+    out = {"gl_s_km": gl_km, "floating_ceiling_db": round(ceil_f, 2),
+           "grounded_fresnel_anchor_db": gmap["g2_const_db"],
+           "note": "implied |Gamma_bed|^2 per zone under the run's K. "
+           "Grounded: fraction above 0 dB is the unphysical fraction "
+           "(established diagnostic), the ice->rock Fresnel anchor is the "
+           "reference level. Floating: the ice->seawater Fresnel "
+           "coefficient IS the physical ceiling (specular ice-ocean "
+           "interface); fractions above it and above 0 dB are both "
+           "recorded. recorded only"}
+    for name, lo, hi in (("grounded", run_lo, min(gl_m, run_hi)),
+                         ("floating", max(gl_m, run_lo), run_hi)):
+        m_all = (gmap["s"] >= lo) & (gmap["s"] <= hi)
+        m = gmap["ok"] & m_all
+        if m.sum() < 3:
+            out[name] = {"n": int(m.sum()), "note": "too few samples"}
+            continue
+        g = gmap["g2_db"][m]
+        out[name] = {
+            "n": int(m.sum()), "n_total": int(m_all.sum()),
+            "qc_pass_frac": round(float(gmap["ok"][m_all].mean()), 3),
+            "s_km": [round(lo / 1e3, 2), round(hi / 1e3, 2)],
+            **{k: round(float(v), 1) for k, v in
+               [("min", g.min()), ("p5", np.percentile(g, 5)),
+                ("med", np.median(g)), ("p95", np.percentile(g, 95)),
+                ("max", g.max())]},
+            "frac_above_0db": round(float((g > 0.0).mean()), 3),
+            "frac_above_seawater_ceiling": round(
+                float((g > ceil_f).mean()), 3),
+            "med_minus_zone_ceiling_db": round(float(
+                np.median(g) - (0.0 if name == "grounded" else ceil_f)), 1)}
+    return out
+
+
 def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
                       extra_db=0.0, anchor="median", level_deficit_db=None,
-                      k_anchor_segment=None):
+                      k_anchor_segment=None, zone_gl_km=None):
     """Fetch + map: the shared anchor G2(s) profile dict (rssnr_gamma_profile
     output + fetch provenance), on the anchor along-track axis ``axis``
     (ref_bed_picks).
@@ -729,6 +813,10 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
             f"itself stays anchored on '{k_seg}' so the mapping matches the "
             "recorded family. The headline g2_seg_db block is the K-anchor "
             "segment's."}
+    if zone_gl_km is not None:
+        run_lo, run_hi = segment_s_range(axis, segment)
+        prof["g2_zones_db"] = zone_g2_stats(prof, run_lo, run_hi,
+                                            gl_km=zone_gl_km)
     if anchor == "level":
         prof["level_anchor"] = {
             "deficit_db": round(lvl, 2),
@@ -890,6 +978,146 @@ def apply_demogorgn_bed(base, fsub, ct_m, seed):
             "posting_m": meta["posting_m"], "datum": meta["returned_datum"],
             "nodata_fill_frac": round(fill, 6),
             "bed_clamp_frac": round(clamp, 6), "note": DGN_NOTE}
+
+
+# ========================================================================
+# HYBRID bed (full_line segment): grounded DEMOGORGN + floating radar-picked
+# shelf base, blended across the grounding line
+# ========================================================================
+# Beyond the GL the radar's basal reflector is the ICE-OCEAN interface;
+# BedMachine/DEMOGORGN report the SEAFLOOR under the cavity there (scout
+# quirk 1), so neither may supply the floating "bed". The floating base is
+# instead the LOW pass's radar basal picks (the established pick reference,
+# load_bottom_pick machinery), nearest-neighbour-interpolated in anchor
+# along-track s and extended cross-track as a constant. PLAINLY RECORDED
+# APPROXIMATION: the shelf base is modeled as flat-ish cross-track (no
+# basal crevasses/channels; the 1-D picks cannot supply cross-track relief,
+# so unlike the grounded picked-bed residual there is no 2-D DEM to
+# preserve). The grounded side (s < GL) is the DEMOGORGN realization
+# EXACTLY as in the extended run; the two grids are blended over
+# GL -> GL + GL_RAMP_KM so the documented ~10-20 m DEMOGORGN-vs-picks nadir
+# offset and the texture change do not step at the GL. Chunks spanning the
+# GL crop this scene-level hybrid, so their facets are built from the
+# blended grid.
+HYBRID_BED_NOTE = (
+    "HYBRID bed (full_line): s < GL (69.7 km) = DEMOGORGN realization "
+    "(seed recorded; identical source/snapshot to the extended run), "
+    "s > GL + ramp = LOW-pass radar basal picks (ice-ocean interface), "
+    "nearest-neighbour in anchor s and constant cross-track (flat-ish "
+    "shelf-base approximation, recorded); linear blend over the ramp. "
+    "BedMachine/DEMOGORGN report the SEAFLOOR beyond the GL, not the shelf "
+    "base the radar sees, and are never used there.")
+
+
+def picks_bed_nn(axis, s_q):
+    """Nearest-neighbour (in anchor along-track s) radar-picked bed
+    elevation at query positions ``s_q`` (m). Pick gaps are skipped (the
+    nearest FINITE pick wins); edge-clamped."""
+    ok = np.isfinite(axis["bed"])
+    s_f, b_f = axis["s"][ok], axis["bed"][ok]
+    j = np.clip(np.searchsorted(s_f, s_q), 1, len(s_f) - 1)
+    left = (np.asarray(s_q) - s_f[j - 1]) < (s_f[j] - np.asarray(s_q))
+    return b_f[np.where(left, j - 1, j)]
+
+
+def apply_hybrid_bed(base, fsub, ct_m, seed, axis):
+    """Replace the base scene's bed DEM with the HYBRID grounded-DEMOGORGN /
+    floating-picks grid (module-section comment). DEMOGORGN is fetched over
+    the grounded(+ramp) part of the track only -- its values carry zero
+    weight beyond GL + ramp, so the floating stretch needs no seafloor
+    fetch. Returns recorded stats (superset of apply_demogorgn_bed's)."""
+    from soundersim.opr import (DEMOGORGN_SNAPSHOT, fetch_demogorgn_window,
+                                fill_nodata_nearest)
+
+    gl_m, ramp_m = GL_S_KM * 1e3, GL_RAMP_KM * 1e3
+    dem = np.asarray(base.dems[0], np.float64)
+    tr = Transformer.from_crs("EPSG:3031", base.crs, always_xy=True)
+    rx, ry = tr.transform(axis["x"], axis["y"])
+    ny, nx = dem.shape
+    cols, rows = np.meshgrid(np.arange(nx) + 0.5, np.arange(ny) + 0.5)
+    px, py = base.transform * (cols.ravel(), rows.ravel())
+    s_pix = project_to_track(px, py, rx, ry, axis["s"]).reshape(dem.shape)
+
+    # DEMOGORGN window: grounded track + ramp + 2 km margin only
+    lat, lon = rac._lonlat(fsub)
+    tr4 = Transformer.from_crs("EPSG:4326", base.crs, always_xy=True)
+    nx_, ny_ = tr4.transform(lon, lat)
+    s_nav = project_to_track(nx_, ny_, rx, ry, axis["s"])
+    m_g = s_nav <= gl_m + ramp_m + 2000.0
+    if not m_g.any():
+        raise RuntimeError("hybrid bed: no traces on the grounded side")
+    bounds = (float(lon[m_g].min()), float(lat[m_g].min()),
+              float(lon[m_g].max()), float(lat[m_g].max()))
+    dgn, tr_d, crs_d, meta = fetch_demogorgn_window(
+        bounds, pad_m=ct_m + 600.0, seed=seed)
+    dgn_grid = rac.resample_to_grid(dgn, tr_d, crs_d, dem.shape,
+                                    base.transform, base.crs)
+    dgn_grid, fill = fill_nodata_nearest(dgn_grid)   # fills OUTSIDE the
+    # grounded fetch window too -- those pixels carry zero blend weight
+
+    pick_grid = picks_bed_nn(axis, s_pix.ravel()).reshape(dem.shape)
+    w = np.clip((gl_m + ramp_m - s_pix) / ramp_m, 0.0, 1.0)  # 1 = DEMOGORGN
+    bed_new = w * dgn_grid + (1.0 - w) * pick_grid
+
+    grounded = s_pix < gl_m
+    floating = ~grounded
+    blend = (s_pix >= gl_m) & (s_pix <= gl_m + ramp_m)
+    step = dgn_grid[blend] - pick_grid[blend]        # what the ramp absorbs
+    # nadir-only step: the same difference sampled ON the anchor track in
+    # the blend s-range (the cross-track-inclusive stat above also carries
+    # DEMOGORGN's 2-D relief against the cross-track-constant picks)
+    mb = (axis["s"] >= gl_m) & (axis["s"] <= gl_m + ramp_m)
+    step_nad = (sample_dem(dgn_grid, base.transform, rx[mb], ry[mb])
+                - picks_bed_nn(axis, axis["s"][mb]))
+    clear = dem - bed_new
+    clamp = float((bed_new > dem - 0.1).mean())
+    base.dems[1] = np.minimum(bed_new, dem - 0.1).astype(np.float32)
+    base.params["bed_source"] = HYBRID_BED_NOTE
+
+    ok_f = np.isfinite(axis["bed"]) & (axis["s"] >= gl_m)
+    return {"seed_id": int(seed), "snapshot_id": DEMOGORGN_SNAPSHOT,
+            "posting_m": meta["posting_m"], "datum": meta["returned_datum"],
+            "nodata_fill_frac": round(fill, 6),
+            "bed_clamp_frac": round(clamp, 6),
+            "hybrid": {
+                "gl_s_km": GL_S_KM, "ramp_km": GL_RAMP_KM,
+                "grounded_source": f"DEMOGORGN seed {int(seed)} "
+                                   f"(snapshot {DEMOGORGN_SNAPSHOT})",
+                "floating_source": "LOW-pass radar basal picks, NN in "
+                                   "anchor s, constant cross-track",
+                "demogorgn_fetch_track_max_s_km": round(
+                    float(s_nav[m_g].max()) / 1e3, 2),
+                "blend_zone_dgn_minus_picks_m": {
+                    "med": round(float(np.median(step)), 1),
+                    "rms": round(float(np.sqrt(np.mean(step ** 2))), 1),
+                    "absmax": round(float(np.abs(step).max()), 1),
+                    "note": "over the FULL cross-track blend zone: includes "
+                    "DEMOGORGN's 2-D relief vs the cross-track-constant "
+                    "picks, not just the nadir offset"},
+                "blend_zone_nadir_dgn_minus_picks_m": {
+                    "med": round(float(np.median(step_nad)), 1),
+                    "rms": round(float(np.sqrt(np.mean(step_nad ** 2))), 1),
+                    "absmax": round(float(np.abs(step_nad).max()), 1),
+                    "n": int(mb.sum()),
+                    "note": "sampled ON the anchor track in the blend "
+                    "s-range: the nadir step the ramp absorbs"},
+                "clearance_m": {
+                    "min": round(float(clear.min()), 1),
+                    "grounded_min": round(float(clear[grounded].min()), 1),
+                    "floating_min": round(float(clear[floating].min()), 1),
+                    "floating_med": round(float(
+                        np.median(clear[floating])), 1),
+                    "clamp_frac_grounded": round(float(
+                        (bed_new > dem - 0.1)[grounded].mean()), 6),
+                    "clamp_frac_floating": round(float(
+                        (bed_new > dem - 0.1)[floating].mean()), 6)},
+                "floating_picks": {"n": int(ok_f.sum()),
+                                   "gap_frac": round(float(
+                                       1.0 - ok_f.sum()
+                                       / max((axis["s"] >= gl_m).sum(), 1)),
+                                       5)},
+                "note": HYBRID_BED_NOTE},
+            "note": HYBRID_BED_NOTE}
 
 
 # ========================================================================
@@ -1164,7 +1392,7 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
 
 def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
               fine_posting=False, dgn_seed=None, posting_div=1,
-              spec_diffuse=None):
+              spec_diffuse=None, hybrid=False):
     """Slice (+reverse) the pass's frames onto the common window, derive the
     reach and grids, and build the base scene (REMA + BedMachine, cached).
     ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene;
@@ -1258,9 +1486,17 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
     if dgn_seed is not None and ref is not None:
         raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
                          "follow-up, not wired (clean three-way ablation)")
-    aux["demogorgn"] = (apply_demogorgn_bed(base, fsub_sim, reach["ct_m"],
-                                            dgn_seed)
-                        if dgn_seed is not None else None)
+    if hybrid:
+        if dgn_seed is None or axis is None:
+            raise ValueError("the hybrid bed needs a DEMOGORGN seed AND the "
+                             "anchor pick axis (--demogorgn-bed on the "
+                             "full_line segment)")
+        aux["demogorgn"] = apply_hybrid_bed(base, fsub_sim, reach["ct_m"],
+                                            dgn_seed, axis)
+    else:
+        aux["demogorgn"] = (apply_demogorgn_bed(base, fsub_sim,
+                                                reach["ct_m"], dgn_seed)
+                            if dgn_seed is not None else None)
     aux["picked_bed"] = apply_picked_bed(base, ref) if ref else None
     aux["rssnr_gamma"] = (apply_rssnr_gamma(base, axis or ref, gmap,
                                             spec_diffuse)
@@ -1292,7 +1528,7 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
             "posting_div": posting_div,
             "picked_bed": bool(ref), "gamma_rssnr": bool(gmap),
             "proc": bool(fine_posting), "synthetic": synth_note,
-            "dgn": dgn_seed is not None,
+            "dgn": dgn_seed is not None, "hybrid": bool(hybrid),
             "h_med": float(np.nanmedian(agl)), "thick_med": thick_med,
             "tw_m": tw_ref}
 
@@ -1394,6 +1630,7 @@ def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
     return (f"{p['key']}_{p['segment']}"
             f"{case_tag(p['picked_bed'], p['gamma_rssnr'], p['proc'], p['dgn'])}"
             f"_c{ci:02d}"
+            + ("_hyb" if p.get("hybrid") else "")
             + ("_srough" if surf_rough else "")
             + (f"_att{att:g}" if att != rac.ATT_DB_PER_KM else "")
             + ("" if antenna == ANT_DEFAULT else f"_ant{antenna}")
@@ -1418,6 +1655,10 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
             **({"demogorgn_seed": p["aux"]["demogorgn"]["seed_id"],
                 "demogorgn_snapshot": p["aux"]["demogorgn"]["snapshot_id"]}
                if p["dgn"] else {}),
+            **({"hybrid_bed": {"gl_s_km": GL_S_KM, "ramp_km": GL_RAMP_KM,
+                               "floating": "low-pass picks, NN in anchor s, "
+                                           "constant cross-track"}}
+               if p.get("hybrid") else {}),
             "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
             "reversed": p["rev"], "chunk": ci, "n_chunks": n_chunks,
             "rows": [int(rows[0]), int(rows[-1])], "n_traces_total": n,
@@ -1805,11 +2046,14 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
                   if not k.startswith("_")}
         meas_prof = _prof_db(m_meas)
 
-    # ---- single-trace decomposition (same curves, ONE slow-time location)
-    tprofs = tinfo = None
-    if trace_s_km is not None:
+    # ---- single-trace decomposition (same curves, ONE slow-time location
+    # each; ``trace_s_km`` may be a scalar or a list -- the full_line
+    # segment records a grounded AND a floating location)
+    tprofs_l, tinfo_l = [], []
+    for ts1 in ([] if trace_s_km is None else np.atleast_1d(trace_s_km)):
+        ts1 = float(ts1)
         s0 = S0_KM[p["segment"]]
-        i = int(np.argmin(np.abs(s0 + p["s_sim"] / 1e3 - trace_s_km)))
+        i = int(np.argmin(np.abs(s0 + p["s_sim"] / 1e3 - ts1)))
         sl = slice(i, i + 1)
         tprofs = {k: rel_mean_profile(A[sl], tw, dtf, t_s[sl], spk[sl])
                   for k, A in (("sim_total", P), ("sim_surface", Ps),
@@ -1818,7 +2062,7 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
                     t_b[sl] + BED_HI_US * 1e-6)
         gs = _wmean(Ps[sl], tw, dtf, t_b[sl] - BED_LO_US * 1e-6,
                     t_b[sl] + BED_HI_US * 1e-6)
-        tinfo = {"requested_s_km": round(float(trace_s_km), 3),
+        tinfo = {"requested_s_km": round(ts1, 3),
                  "sim_trace_index": i,
                  "sim_s_km": round(float(s0 + p["s_sim"][i] / 1e3), 3),
                  "agl_m": round(float(p["surf_sim"][i] * C / 2.0), 0),
@@ -1832,7 +2076,7 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
                  "surface returns (>= 10 dB = the bed window is a bed "
                  "measurement here)"}
         if m_meas is not None:
-            j = int(np.argmin(np.abs(s0 + p["s_m"] / 1e3 - trace_s_km)))
+            j = int(np.argmin(np.abs(s0 + p["s_m"] / 1e3 - ts1)))
             jl = slice(j, j + 1)
             tprofs["measured"] = rel_mean_profile(
                 meas[jl], p["tw_m"], p["dt"], p["surf"][jl],
@@ -1846,10 +2090,19 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
                 "measured_midcol_rel_surf_db": round(float(mid_db[j]), 2),
                 "measured_midcol_percentile": round(float(
                     (mid_db[ok] < mid_db[j]).mean()), 3)})
+        tprofs_l.append(tprofs)
+        tinfo_l.append(tinfo)
+    tprofs = tprofs_l[0] if tprofs_l else None
+    tinfo = tinfo_l[0] if tinfo_l else None
     with np.errstate(divide="ignore", invalid="ignore"):
         blp = 10.0 * np.log10(bedlayer_bed / spk)
     return {"gate": gate, "sim": clean, "meas": cleanm,
             "trace_profs": tprofs, "trace_info": tinfo,
+            "trace_profs_list": tprofs_l or None,
+            "trace_info_list": tinfo_l or None,
+            "Ps": Ps, "Pb": Pb, "t_b": t_b, "twtt_sim": tw,
+            "spk_sim": m_sim["_spk"], "spk_meas":
+                (None if m_meas is None else m_meas["_spk"]),
             "sim_bed_prof_db": _prof_db(m_sim),
             "meas_bed_prof_db": meas_prof,
             "sim_bedlayer_prof_db": np.where(np.isfinite(blp), blp, np.nan),
@@ -1861,6 +2114,159 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
                 (p["bot"] - p["surf"]))) * 1e6, 2),
             "profs": profs, "bed_profs": bed_profs, "tail_cov": tail_cov,
             "P": P, "t_s": t_s, "meas_arr": meas}
+
+
+# ========================================================================
+# ZONE-SPLIT analysis (full_line): grounded vs floating sub-windows
+# ========================================================================
+# TERMINOLOGY (user-set): "surface returns" = the surface-borne layer,
+# "bed returns" = the basal-layer returns -- on the floating side the
+# "bed" is the ice-ocean shelf base. All levels dB rel each trace's OWN
+# surface-return peak, as everywhere in this tool.
+def zone_analysis(p, a, gl_km=GL_S_KM):
+    """Grounded/floating split of the standard per-pass metrics: clutter
+    windows, decomposition, bed-referenced tail (slope/excess/guard) and the
+    bed-window level residual vs measured -- each zone judged only against
+    its own traces. Returns {zone: {"metrics": ..., "profs": ...,
+    "bed_profs": ...}}; the key science number is the floating bed-window
+    residual (does the fixed K reproduce the shelf-base brightness?)."""
+    s0 = S0_KM[p["segment"]]
+    tw, dtf = a["twtt_sim"], p["rc_frame"].dt
+    P, Ps, Pb = a["P"], a["Ps"], a["Pb"]
+    t_s, t_b, spk = a["t_s"], a["t_b"], a["spk_sim"]
+    meas = a["meas_arr"]
+    s_sim_km = s0 + p["s_sim"] / 1e3
+    s_m_km = s0 + p["s_m"] / 1e3
+    lo_us, hi_us = TAIL_FIT_US
+    out = {}
+    for name, zlo, zhi in (("grounded", -1e9, gl_km),
+                           ("floating", gl_km, 1e9)):
+        ms = (s_sim_km >= zlo) & (s_sim_km < zhi)
+        if ms.sum() < 5:
+            out[name] = {"metrics": {"n_traces_sim": int(ms.sum()),
+                                     "note": "too few traces"}}
+            continue
+        msim = clutter_metrics(P[ms], tw, dtf, t_s[ms], t_b[ms])
+        dec = {}
+        for lname, Pl in (("surface_returns", Ps), ("bed_returns", Pb)):
+            mid = _wmean(Pl[ms], tw, dtf, t_s[ms] + MID_LO_US * 1e-6,
+                         t_b[ms] - MID_HI_US * 1e-6)
+            bed = _wmean(Pl[ms], tw, dtf, t_b[ms] - BED_LO_US * 1e-6,
+                         t_b[ms] + BED_HI_US * 1e-6)
+            dec[lname] = {
+                "midcol_rel_surf_db": round(_med_db_rel(mid, msim["_spk"]), 2),
+                "bed_rel_surf_db": round(_med_db_rel(bed, msim["_spk"]), 2)}
+        profs = {
+            "sim_total": rel_mean_profile(P[ms], tw, dtf, t_s[ms], spk[ms]),
+            "sim_surface": rel_mean_profile(Ps[ms], tw, dtf, t_s[ms],
+                                            spk[ms]),
+            "sim_bed": rel_mean_profile(Pb[ms], tw, dtf, t_s[ms], spk[ms])}
+        bed_profs = {
+            "sim_total": rel_mean_profile(P[ms], tw, dtf, t_b[ms], spk[ms],
+                                          *TAIL_PROF_US),
+            "sim_surface": rel_mean_profile(Ps[ms], tw, dtf, t_b[ms],
+                                            spk[ms], *TAIL_PROF_US),
+            "sim_bed": rel_mean_profile(Pb[ms], tw, dtf, t_b[ms], spk[ms],
+                                        *TAIL_PROF_US)}
+        rel, tot = bed_profs["sim_total"]
+        sur, bed_ = bed_profs["sim_surface"][1], bed_profs["sim_bed"][1]
+        mfit = (rel >= lo_us) & (rel <= hi_us)
+        marg = bed_[mfit] - sur[mfit]
+        j = int(np.argmin(marg))
+        met = {
+            "n_traces_sim": int(ms.sum()),
+            "s_km": [round(float(s_sim_km[ms].min()), 2),
+                     round(float(s_sim_km[ms].max()), 2)],
+            "sim": {k: round(v, 2) for k, v in msim.items()
+                    if not k.startswith("_")},
+            "decomposition_db": dec,
+            "tail": {
+                "sim_slope_db_per_us": round(
+                    tail_slope_db_per_us(rel, tot), 3),
+                "sim_bed_returns_slope_db_per_us": round(
+                    tail_slope_db_per_us(rel, bed_), 3),
+                "guard": {
+                    "min_bed_minus_surface_returns_db": round(
+                        float(marg[j]), 2),
+                    "at_us": round(float(rel[mfit][j]), 2),
+                    "threshold_db": TAIL_GUARD_DB,
+                    "pass": bool(marg[j] >= TAIL_GUARD_DB)}}}
+        if meas is not None:
+            mm = (s_m_km >= zlo) & (s_m_km < zhi)
+            mmeas = clutter_metrics(meas[mm], p["tw_m"], p["dt"],
+                                    p["surf"][mm], p["bot"][mm])
+            n_m = int(mm.sum())
+            floor = _wmean(meas[mm], p["tw_m"], p["dt"],
+                           np.full(n_m, p["tw_m"][-1]
+                                   - FLOOR_TAIL_LO_US * 1e-6),
+                           np.full(n_m, p["tw_m"][-1]
+                                   - FLOOR_TAIL_HI_US * 1e-6))
+            bed_profs["measured"] = rel_mean_profile(
+                meas[mm], p["tw_m"], p["dt"], p["bot"][mm], mmeas["_spk"],
+                *TAIL_PROF_US)
+            profs["measured"] = rel_mean_profile(
+                meas[mm], p["tw_m"], p["dt"], p["surf"][mm], mmeas["_spk"])
+            relm, dbm = bed_profs["measured"]
+            met["measured"] = {k: round(v, 2) for k, v in mmeas.items()
+                               if not k.startswith("_")}
+            met["measured"]["floor_rel_surf_db"] = round(
+                _med_db_rel(floor, mmeas["_spk"]), 2)
+            met["tail"]["meas_slope_db_per_us"] = round(
+                tail_slope_db_per_us(relm, dbm), 3)
+            met["tail"]["excess_db"] = {
+                f"+{t:g}us": round(_at_us(rel, tot, t) - _at_us(relm, dbm, t),
+                                   2) for t in TAIL_EXCESS_US}
+            met["bed_window_residual_db"] = round(
+                msim["bed_rel_surf_db"] - mmeas["bed_rel_surf_db"], 2)
+            met["midcol_residual_db"] = round(
+                msim["midcol_rel_surf_db"] - mmeas["midcol_rel_surf_db"], 2)
+        out[name] = {"metrics": met, "profs": profs, "bed_profs": bed_profs}
+    return out
+
+
+def fig_decomposition_zones(out, key, zres, gl_km=GL_S_KM,
+                            fname="decomposition_zones.png"):
+    """Trace-averaged decomposition of ONE pass split into the grounded and
+    floating sub-windows: measured vs sim total vs surface/bed returns,
+    surface-referenced, one panel per zone (fig_decomposition's series)."""
+    series = [("measured", "measured", dict(color="black", lw=1.8)),
+              ("sim_total", "sim total", dict(color="tab:blue", lw=1.4)),
+              ("sim_surface", "sim surface returns",
+               dict(color="tab:orange", lw=1.2, ls="--")),
+              ("sim_bed", "sim bed returns",
+               dict(color="tab:green", lw=1.2, ls="-."))]
+    zones = [z for z in ("grounded", "floating") if "profs" in zres.get(z, {})]
+    if not zones:
+        return None
+    fig, axs = plt.subplots(1, len(zones), figsize=(5.4 * len(zones), 4.8),
+                            sharey=True, squeeze=False)
+    for k, zn in enumerate(zones):
+        ax, z = axs[0, k], zres[zn]
+        for pk, label, st in series:
+            if pk in z["profs"]:
+                ax.plot(*z["profs"][pk], label=label, **st)
+        met = z["metrics"]
+        res = met.get("bed_window_residual_db")
+        ax.set_xlim(-1.0, 13.5)
+        ax.set_ylim(-110, 5)
+        ax.grid(alpha=0.3)
+        ax.set_title(
+            f"{key} {zn.upper()} (s {met['s_km'][0]:.0f}-"
+            f"{met['s_km'][1]:.0f} km, {met['n_traces_sim']} traces)"
+            + ("" if res is None
+               else f"\nbed-window sim - measured {res:+.2f} dB"),
+            fontsize=10)
+        ax.set_xlabel("twtt below surface returns (us)")
+        if k == 0:
+            ax.set_ylabel("dB rel own surface-return peak (mean power)")
+            ax.legend(fontsize=8, loc="upper right")
+    fig.suptitle(f"zone-split decomposition, GL at s = {gl_km:g} km "
+                 "(grounded rock bed vs floating ice-ocean shelf base)")
+    fig.tight_layout()
+    fp = out / fname
+    fig.savefig(fp, dpi=130)
+    plt.close(fig)
+    return fp
 
 
 # ========================================================================
@@ -2004,13 +2410,14 @@ def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
                  f" {p['spacing']:.1f} m facets)", fontsize=10)
 
 
-def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None):
+def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
+                   gl_s_km=None):
     """Measured (top) vs simulated per pass, shared surface-referenced twtt
     axis and one shared dB-rel-surface color scale. A synthetic pass has no
     measured data: its top panel is a placeholder. ``ablation`` = list of
     (preps, analyses, label) bed-source rows appended below the picked-bed
     row (row 2 is then labeled 'picked bed'): the clean bed-source
-    ablation."""
+    ablation. ``gl_s_km`` marks the grounding line on every panel."""
     keys = keys or ORDER
     ablation = ablation or []
     y_lo, y_hi = -1.0, 13.5
@@ -2049,6 +2456,14 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None):
         for r, (pr, an, label) in enumerate(ablation):
             _sim_radargram_panel(axs[2 + r, k], pr[key], an[key], key,
                                  f"({label})", s0, y_lo, y_hi, vmin, vmax)
+        if gl_s_km is not None:
+            for r in range(nrow):
+                ax_ = axs[r, k]
+                if ax_.get_images():
+                    ax_.axvline(gl_s_km, color="tab:red", lw=1.0, ls="--",
+                                alpha=0.85)
+                    ax_.text(gl_s_km, y_lo + 0.4, " GL", color="tab:red",
+                             fontsize=8, va="top")
         axs[nrow - 1, k].set_xlabel("anchor along-track s (km)")
     for r in range(nrow):
         axs[r, 0].set_ylabel("twtt below surface (us)")
@@ -2151,14 +2566,21 @@ def fig_decomposition_trace(out, preps, analyses, keys=None):
                dict(color="tab:orange", lw=1.0, ls="--")),
               ("sim_bed", "sim bed returns",
                dict(color="tab:green", lw=1.0, ls="-."))]
-    fig, axs = plt.subplots(1, len(keys), figsize=(5.2 * len(keys), 4.8),
+    # one panel per (pass, location): multi-location runs (full_line's
+    # grounded + floating pair) fan out into extra columns
+    panels = []
+    for key in keys:
+        a = analyses[key]
+        tps = a.get("trace_profs_list") or [a["trace_profs"]]
+        tis = a.get("trace_info_list") or [a["trace_info"]]
+        panels += [(key, tp, ti) for tp, ti in zip(tps, tis)]
+    fig, axs = plt.subplots(1, len(panels), figsize=(5.2 * len(panels), 4.8),
                             sharey=True, squeeze=False)
-    for k, key in enumerate(keys):
-        ax, a = axs[0, k], analyses[key]
-        ti = a["trace_info"]
+    for k, (key, tprofs, ti) in enumerate(panels):
+        ax = axs[0, k]
         for pk, label, st in series:
-            if pk in a["trace_profs"]:
-                ax.plot(*a["trace_profs"][pk], label=label, **st)
+            if pk in tprofs:
+                ax.plot(*tprofs[pk], label=label, **st)
         tb = ti["bed_below_surface_us"]
         ax.axvspan(1.0, tb - MID_HI_US, color="tab:blue", alpha=0.06,
                    label="mid-column window" if k == 0 else None)
@@ -2177,9 +2599,10 @@ def fig_decomposition_trace(out, preps, analyses, keys=None):
         if k == 0:
             ax.set_ylabel("dB rel own surface-return peak (single trace)")
             ax.legend(fontsize=8, loc="upper right")
+    s_list = sorted({round(ti["requested_s_km"], 2) for _, _, ti in panels})
     fig.suptitle("SINGLE-TRACE decomposition, anchor s = "
-                 f"{analyses[keys[0]]['trace_info']['requested_s_km']:.2f} km"
-                 "\n(one sounding per pass, not the trace ensemble mean)",
+                 + " / ".join(f"{v:.2f}" for v in s_list) + " km"
+                 "\n(one sounding per panel, not the trace ensemble mean)",
                  fontsize=10)
     fig.tight_layout()
     fp = out / "decomposition_trace.png"
@@ -2254,6 +2677,16 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         bed_rough_extra_db=0.0, passes=None, spec=None,
         anchor="median", level_deficit_db=None, trace_decomp_s_km=None):
     proc = processing == "standard"
+    hybrid = segment == "full_line"
+    if hybrid and not demogorgn_bed:
+        raise ValueError("--segment full_line spans the grounding line and "
+                         "uses the HYBRID bed (grounded DEMOGORGN + floating "
+                         "low-pass picks): run it with --demogorgn-bed "
+                         "(BedMachine/plain beds would model the SEAFLOOR "
+                         "beyond the GL)")
+    if hybrid and bed_ablation:
+        raise ValueError("--bed-ablation is not wired for the full_line "
+                         "hybrid segment")
     if out_name and (companion and gamma_rssnr or bed_ablation):
         raise ValueError("--out-name relocates the case directory; the "
                          "companion/ablation runs resolve their own sibling "
@@ -2280,15 +2713,18 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             raise ValueError(f"unknown pass(es) {unknown}; have {order}")
         order = [k for k in order if k in passes]
     n_traces = n_traces or {"pilot": N_TRACES_PILOT, "full": N_TRACES_FULL,
-                            "extended": N_TRACES_EXT}[segment]
+                            "extended": N_TRACES_EXT,
+                            "full_line": N_TRACES_LINE}[segment]
     ts_km = (DECOMP_S_KM[segment] if trace_decomp_s_km is None
-             else float(trace_decomp_s_km))
+             else trace_decomp_s_km)
+    ts_km = [float(v) for v in np.atleast_1d(ts_km)]
     tag = case_tag(picked_bed, gamma_rssnr, proc, demogorgn_bed)
     out = Path(out_root or OUT_DEFAULT) / (out_name or (segment + tag))
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
     case = f"{CASE_PREFIX}_{out_name or (segment + tag)}"
-    axis = ref_bed_picks() if (picked_bed or gamma_rssnr) else None
+    axis = (ref_bed_picks() if (picked_bed or gamma_rssnr or hybrid)
+            else None)
     ref = axis if picked_bed else None
     if picked_bed:
         print(f"picked bed: reference pass {ref['pass']} "
@@ -2304,7 +2740,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                  anchor=anchor,
                                  level_deficit_db=level_deficit_db,
                                  k_anchor_segment=K_ANCHOR_SEGMENT.get(
-                                     segment))
+                                     segment),
+                                 zone_gl_km=GL_S_KM if hybrid else None)
         if gmap["k_anchor_segment"] != segment:
             print(f"K anchored on the '{gmap['k_anchor_segment']}' segment "
                   f"(s {gmap['seg_s_km']} km), NOT re-derived on "
@@ -2334,12 +2771,26 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         p = prep_pass(key, segment, n_traces, ref=ref, gmap=gmap, axis=axis,
                       fine_posting=proc, posting_div=posting_div,
                       spec_diffuse=spec,
-                      dgn_seed=demogorgn_seed if demogorgn_bed else None)
+                      dgn_seed=demogorgn_seed if demogorgn_bed else None,
+                      hybrid=hybrid)
         if p["aux"]["demogorgn"]:
             d = p["aux"]["demogorgn"]
             print(f"  DEMOGORGN bed: seed {d['seed_id']}, snapshot "
                   f"{d['snapshot_id']}, clamp {d['bed_clamp_frac']:.4f}",
                   flush=True)
+            if "hybrid" in d:
+                h = d["hybrid"]
+                print(f"  HYBRID bed: GL {h['gl_s_km']} km, ramp "
+                      f"{h['ramp_km']} km; blend-zone DGN-picks "
+                      f"med {h['blend_zone_dgn_minus_picks_m']['med']} / rms "
+                      f"{h['blend_zone_dgn_minus_picks_m']['rms']} m; "
+                      f"clearance min grounded "
+                      f"{h['clearance_m']['grounded_min']} / floating "
+                      f"{h['clearance_m']['floating_min']} m (clamp "
+                      f"g {h['clearance_m']['clamp_frac_grounded']:.5f} / "
+                      f"f {h['clearance_m']['clamp_frac_floating']:.5f}); "
+                      f"floating picks n {h['floating_picks']['n']}, gaps "
+                      f"{h['floating_picks']['gap_frac']:.4f}", flush=True)
         if p["synthetic"]:
             print(f"  SYNTHETIC pass: {p['synthetic']['synthetic_msl_m']:.0f}"
                   f" m constant ellipsoidal height, roll 0, AGL med "
@@ -2371,14 +2822,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                   flush=True)
         analyses[key] = analyze_pass(p, sims[key], proc=procs.get(key),
                                      trace_s_km=ts_km)
-        ti = analyses[key]["trace_info"]
-        print(f"  single-trace decomposition at s = {ti['sim_s_km']:.2f} km "
-              f"(sim trace {ti['sim_trace_index']}"
-              + (f", measured trace {ti['measured_trace_index']}"
-                 if "measured_trace_index" in ti else "")
-              + f"): bed-window bed - surface returns "
-              f"{ti['bed_window_bed_minus_surface_returns_db']:+.1f} dB",
-              flush=True)
+        for ti in analyses[key]["trace_info_list"] or []:
+            print(f"  single-trace decomposition at s = {ti['sim_s_km']:.2f}"
+                  f" km (sim trace {ti['sim_trace_index']}"
+                  + (f", measured trace {ti['measured_trace_index']}"
+                     if "measured_trace_index" in ti else "")
+                  + f"): bed-window bed - surface returns "
+                  f"{ti['bed_window_bed_minus_surface_returns_db']:+.1f} dB",
+                  flush=True)
 
     # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
     corr_stats = corr_series = None
@@ -2568,6 +3019,94 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 f"{k} {'ok' if v['guard']['pass'] else 'FAIL'} "
                 f"({v['guard']['min_bed_minus_surface_returns_db']:+.1f} dB)"
                 for k, v in e["sim"].items()), flush=True)
+    # ---- ZONE SPLIT (full_line): grounded vs floating sub-windows ----
+    zone_results = {}
+    if hybrid:
+        for key in order:
+            zres = zone_analysis(preps[key], analyses[key])
+            zone_results[key] = zres
+            zmet = {zn: zres[zn]["metrics"] for zn in zres
+                    if "metrics" in zres[zn]}
+            fres = zmet.get("floating", {}).get("bed_window_residual_db")
+            metrics[f"zone_split_{key}"] = {
+                "value": float("nan") if fres is None else fres,
+                "threshold": None, "op": "record",
+                "pass": True, "gl_s_km": GL_S_KM, **zmet,
+                "note": "KEY DELIVERABLE (zone split): every standard metric "
+                "computed separately over the grounded (s < GL) and "
+                "floating (s > GL) traces -- windows, decomposition "
+                "(surface returns vs bed returns), bed-referenced tail "
+                "slope/excess/guard, and the bed-window level residual "
+                "(sim - measured, dB). 'value' is the FLOATING bed-window "
+                "residual: does the fixed K (+7.92 dB, anchored on the "
+                "grounded 50 km segment) reproduce the shelf-base "
+                "brightness -- the specular-regime test. recorded only"}
+            for zn, zm in zmet.items():
+                if "sim" not in zm:
+                    continue        # too-few-traces zone: recorded, no print
+                res = zm.get("bed_window_residual_db")
+                g = zm["tail"]["guard"]
+                print(f"  zone {key}/{zn}: bed window sim "
+                      f"{zm['sim']['bed_rel_surf_db']:+.1f}"
+                      + (f" meas {zm['measured']['bed_rel_surf_db']:+.1f} "
+                         f"(residual {res:+.2f} dB)"
+                         if "measured" in zm else "")
+                      + f"; tail slope sim "
+                      f"{zm['tail']['sim_slope_db_per_us']:+.2f}"
+                      + (f" meas {zm['tail']['meas_slope_db_per_us']:+.2f}"
+                         if "meas_slope_db_per_us" in zm["tail"] else "")
+                      + f"; guard "
+                      f"{'ok' if g['pass'] else 'FAIL'} "
+                      f"({g['min_bed_minus_surface_returns_db']:+.1f} dB)",
+                      flush=True)
+        for key in order:
+            h = preps[key]["aux"]["demogorgn"]
+            metrics[f"hybrid_bed_{key}"] = {
+                "value": h["hybrid"]["clearance_m"]["min"],
+                "threshold": 0.0, "op": ">=",
+                "pass": bool(h["hybrid"]["clearance_m"]["min"] >= 0.0
+                             or h["bed_clamp_frac"] < 1e-3),
+                **{k: h[k] for k in ("seed_id", "snapshot_id",
+                                     "nodata_fill_frac", "bed_clamp_frac")},
+                **h["hybrid"],
+                "note": "HYBRID bed guard: min (REMA surface - hybrid bed) "
+                "clearance over the scene, per zone; the existing clamp "
+                "(bed <= surface - 0.1 m) is the enforcement and its "
+                "fraction is recorded. blend_zone_dgn_minus_picks_m is the "
+                "DEMOGORGN-vs-picks step the GL ramp absorbs. recorded"}
+        if gamma_rssnr and "g2_zones_db" in gmap:
+            metrics["rssnr_zone_physicality"] = {
+                "value": gmap["g2_zones_db"]["floating"].get(
+                    "med", float("nan")),
+                "threshold": None, "op": "record", "pass": True,
+                **gmap["g2_zones_db"]}
+        cov = {}
+        for key in [k for k in order if analyses[k]["meas"] is not None]:
+            p = preps[key]
+            skm = S0_KM[segment] + p["s_m"] / 1e3
+            cov[key] = {
+                zn: {"n_traces": int(m.sum()),
+                     "bottom_pick_frac": round(float(
+                         np.isfinite(p["bot"][m]).mean()), 5)}
+                for zn, m in (("grounded", skm < GL_S_KM),
+                              ("floating", skm >= GL_S_KM))}
+        if hybrid and (cov or gamma_rssnr):
+            metrics["zone_qc_coverage"] = {
+                "value": (min([z["bottom_pick_frac"] for c in cov.values()
+                               for z in c.values()], default=float("nan"))),
+                "threshold": None, "op": "record",
+                "pass": True, "picks_per_pass": cov,
+                **({"rssnr_zones": {
+                    zn: {k: gmap["g2_zones_db"][zn][k]
+                         for k in ("n", "n_total", "qc_pass_frac", "s_km")
+                         if k in gmap["g2_zones_db"][zn]}
+                    for zn in ("grounded", "floating")}}
+                   if gamma_rssnr and "g2_zones_db" in gmap else {}),
+                "note": "QC coverage over the zones: bottom-pick coverage "
+                "of each measured pass (the floating stretch's picks are "
+                "the hybrid bed's floating source) and the QC-passing "
+                "RSSNR sample count per zone (the reflectivity mapping's "
+                "along-track support). recorded only"}
     if gamma_rssnr and anchor == "level":
         # POST-RUN VERIFICATION of the analytic level anchor: per-pass
         # simulated minus measured bed-window level (dB rel own surface
@@ -2673,6 +3212,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                          for v in segment_s_range(axis, segment)]
         if axis else None,
         "k_anchor_segment": (gmap or {}).get("k_anchor_segment"),
+        "hybrid_bed": ({**preps[order[0]]["aux"]["demogorgn"]["hybrid"],
+                        "applies": "all passes of this run (one hybrid "
+                        "construction per pass scene)"} if hybrid else None),
         "passes": {}, "measured_caveats": MEASURED_CAVEATS}
     if demogorgn_bed:
         config["demogorgn"] = {**preps[order[0]]["aux"]["demogorgn"],
@@ -2696,6 +3238,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         config["rssnr_gamma"]["k_anchor_segment"] = gmap["k_anchor_segment"]
         if "g2_run_seg_db" in gmap:
             config["rssnr_gamma"]["g2_run_seg_db"] = gmap["g2_run_seg_db"]
+        if "g2_zones_db" in gmap:
+            config["rssnr_gamma"]["g2_zones_db"] = gmap["g2_zones_db"]
         if anchor == "level":
             config["rssnr_gamma"]["level_anchor"] = gmap["level_anchor"]
         config["rssnr_gamma"]["shared_field"] = (
@@ -2741,8 +3285,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         if proc:
             config["passes"][key]["processing"] = procs[key]["chain"]
         if analyses[key]["trace_info"]:
+            til = analyses[key]["trace_info_list"]
             config["passes"][key]["trace_decomposition"] = \
-                analyses[key]["trace_info"]
+                til if len(til) > 1 else til[0]
     if segment == "pilot":
         config["full_projection"] = {
             k: {"wall_s_projected": round(sims[k]["wall_s"] * 5.0, 1),
@@ -2774,7 +3319,13 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "measured tail is noise-floor-limited. "
         + MEASURED_CAVEATS
         + (" PICKED BED: " + PICKED_BED_NOTE if picked_bed else "")
-        + (" DEMOGORGN BED: " + DGN_NOTE if demogorgn_bed else "")
+        + ((" HYBRID BED: " + HYBRID_BED_NOTE
+            + f" Blend ramp {GL_RAMP_KM:g} km past the GL at "
+            f"s = {GL_S_KM:g} km; zone-split metrics (zone_split_*) judge "
+            "the grounded and floating traces separately, and the implied "
+            "reflectivity is checked against each zone's own Fresnel "
+            "ceiling (rock anchor vs ice-seawater).") if hybrid
+           else (" DEMOGORGN BED: " + DGN_NOTE if demogorgn_bed else ""))
         + (" RSSNR GAMMA: " + RSSNR_GAMMA_NOTE if gamma_rssnr else "")
         + (" PROCESSING: CSARP_standard-matching chain applied identically "
            "to every simulated pass (measured panels are already the "
@@ -2802,7 +3353,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     ab_fig = ([(pr, an, label) for pr, an, label, _ in ab_rows]
               if bed_ablation else None)
     figs = [fig_radargrams(out, preps, analyses, segment, keys=order,
-                           ablation=ab_fig),
+                           ablation=ab_fig,
+                           gl_s_km=GL_S_KM if hybrid else None),
             fig_decomposition(out, preps, analyses, keys=order,
                               ablation=ab_fig),
             fig_bed_tail(out, preps, analyses, metrics, keys=order,
@@ -2810,6 +3362,13 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     ftr = fig_decomposition_trace(out, preps, analyses, keys=order)
     if ftr is not None:
         figs.insert(2, ftr)
+    for key in [k for k in order if k in zone_results]:
+        fz = fig_decomposition_zones(
+            out, key, zone_results[key],
+            fname=("decomposition_zones.png" if len(order) == 1
+                   else f"decomposition_zones_{key}.png"))
+        if fz is not None:
+            figs.append(fz)
     if gamma_rssnr and corr_stats is not None:
         syn = None
         if add_30km and SYN30_KEY in order:
@@ -2888,7 +3447,11 @@ def main():
                     help="study segment: 'pilot' 10 km, 'full' 50 km "
                     "(s 18-68), 'extended' 69.7 km (s 0 -> the grounding "
                     "line; the RSSNR K stays anchored on the 'full' segment "
-                    "so the established mapping is reused verbatim)")
+                    "so the established mapping is reused verbatim), "
+                    "'full_line' 148.45 km (the whole overlapping line, GL "
+                    "included: HYBRID grounded-DEMOGORGN + floating-picks "
+                    "bed, requires --demogorgn-bed; K likewise pinned to "
+                    "'full')")
     ap.add_argument("--n-traces", type=int, default=None,
                     help=f"sim traces (default {N_TRACES_PILOT} pilot / "
                     f"{N_TRACES_FULL} full)")
@@ -3018,14 +3581,15 @@ def main():
                     "the simulation cost); measured data untouched. "
                     "Requires --processing standard")
     ap.add_argument("--trace-decomp-s", type=float, default=None,
-                    metavar="S_KM",
-                    help="anchor along-track position (km) of the "
-                    "SINGLE-TRACE decomposition figure (default "
-                    f"{DECOMP_S_KM['full']:g} km on full/extended: the "
-                    "scout's deep trough with the brightest structured bed "
-                    "clutter). The nearest trace of every pass is used and "
-                    "recorded per pass in the config; changing it only "
-                    "re-does the analysis, never the simulations")
+                    nargs="+", metavar="S_KM",
+                    help="anchor along-track position(s) (km) of the "
+                    "SINGLE-TRACE decomposition figure, one panel each "
+                    f"(default {DECOMP_S_KM['full']:g} km on full/extended "
+                    "-- the scout's deep trough with the brightest "
+                    "structured bed clutter; full_line adds a floating "
+                    "location at 120 km). The nearest trace of every pass "
+                    "is used and recorded per pass in the config; changing "
+                    "it only re-does the analysis, never the simulations")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     run(segment=args.segment, n_traces=args.n_traces, att=args.att,
