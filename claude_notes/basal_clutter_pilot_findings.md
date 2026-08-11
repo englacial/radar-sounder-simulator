@@ -2081,3 +2081,18 @@ pilot-verdict scales, geometry scaling, frame_span/source_label format,
 emit_pass_figs file set + crop knob), ruff clean. Figure/marker delivery
 order: high (replay) -> low -> mid -> syn14km -> syn300km, each announced
 with FIGSET_READY when its set hit disk.
+
+## Line map + mask detail (2026-08-11)
+
+Location map: outputs/basal_clutter/full_line/line_map.png (script
+claude_notes/basal_clutter_line_map.py; BedMachine v3 mask cached as
+bedmachine_mask_antarctic_*.tif). Amundsen sector, lon -117.6..-122.6.
+MODELING CAVEAT surfaced by sampling the mask along the track: the
+"floating" zone is not purely floating - BedMachine shows grounded
+ice-rise patches at s 70.3-72.6, 75.2-87.7, 88.3, 110.4, 143.9-146.5 km.
+Our hybrid bed treats everything past 69.7 as shelf (NN picks), so those
+patches' bed returns are modeled as shelf base. The radar picks ARE the
+right reflector either way (the picks follow whatever the radar saw),
+but the flat-ish cross-track assumption is least valid there. Also the
+BedMachine grounded-to-floating transition is at s=70.05 km (our 69.7
+label sits ~350 m early; visually coincident at map scale).
