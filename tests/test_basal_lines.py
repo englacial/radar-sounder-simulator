@@ -24,6 +24,7 @@ LINE_GLOBALS = (
     "LAM_ICE_M", "PASSES", "ORDER", "SEGMENTS", "S0_KM", "DECOMP_S_KM",
     "N_TRACES_BY_SEGMENT", "REF_PASS", "REF_SEASON", "REF_FRAMES",
     "GL_S_KM", "SYNTHETIC_KEYS", "MEASURED_CAVEATS", "UNSUPPORTED",
+    "RADARGRAM_Y_US", "RADARGRAM_DB",
 )
 
 
@@ -84,6 +85,26 @@ def test_activation_round_trips(line_sandbox):
 def greenland(line_sandbox):
     line_sandbox(rbc.GREENLAND_LINE)
     return rbc
+
+
+def test_greenland_radargram_window_reaches_its_bed(greenland):
+    """The Antarctic -1..13.5 us framing leaves the Greenland bed (26-31 us
+    below the surface) entirely off-panel -- which also hides the bed
+    overlay. The window must cover the deepest bed with margin."""
+    y_lo, y_hi = greenland.RADARGRAM_Y_US
+    assert y_lo <= 0.0
+    assert y_hi >= 34.0            # deepest bed 31.2 us + margin
+    lo_db, _ = greenland.RADARGRAM_DB
+    assert lo_db <= -115.0         # low pass bed sits ~108 dB down
+
+
+def test_antarctic_radargram_window_is_the_module_default():
+    """The Antarctic line must not override the framing (its entry is empty),
+    so its figures are unchanged."""
+    assert "RADARGRAM_Y_US" not in rbc.LINES[rbc.ANTARCTIC_LINE]
+    assert "RADARGRAM_DB" not in rbc.LINES[rbc.ANTARCTIC_LINE]
+    assert rbc.RADARGRAM_Y_US == (-1.0, 13.5)
+    assert rbc.RADARGRAM_DB == (-90.0, 5.0)
 
 
 def test_greenland_line_identity(greenland):

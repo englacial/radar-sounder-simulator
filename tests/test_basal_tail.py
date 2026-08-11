@@ -126,7 +126,8 @@ def _fake(rel, tot_slope, tot0, guard_db, meas=None, floor_db=-95.0):
         m_slope, m0 = meas
         bp["measured"] = (rel, m0 + m_slope * rel)
         cov["measured"] = 1.0
-    return {"bed_profs": bp, "tail_cov": cov, "floor_db": floor_db}
+    return {"bed_profs": bp, "tail_cov": cov, "floor_db": floor_db,
+            "floor_doc": {"valid": floor_db is not None}}
 
 
 def test_bed_tail_entry_slopes_excess_and_guard():
@@ -240,3 +241,70 @@ def test_tail_metric_terminology():
     blob = _text(e)
     assert "-borne" not in blob
     assert "bed returns" in blob and "surface returns" in blob
+
+
+# ------------------------------------------------- per-pass floor window
+def _tw(t0_us, t_end_us, dt_ns=33.3333):
+    n = int(round((t_end_us - t0_us) * 1e3 / dt_ns)) + 1
+    return (t0_us + np.arange(n) * dt_ns * 1e-3) * 1e-6
+
+
+def test_floor_window_default_when_the_tail_is_long():
+    """A record with a generous post-bed tail keeps the tool's established
+    end -[12, 8] us window bit-identically (every 2016 DC-8 pass, and the
+    Greenland LOW pass)."""
+    tw = _tw(0.0, 68.0)
+    bot = np.full(200, 14.2e-6)                 # 2016 low pass: bed at 14.2 us
+    lo, hi, doc = rbc.floor_window(tw, bot)
+    assert lo == pytest.approx(tw[-1] - 12e-6)
+    assert hi == pytest.approx(tw[-1] - 8e-6)
+    assert doc["slid_off_the_bed"] is False
+    assert doc["valid"] is True
+
+
+def test_floor_window_slides_off_a_bed_that_reaches_into_it():
+    """The Greenland high pass: record ends 55.4 us, deepest bed 47.53 us, so
+    end -[12, 8] us = [43.4, 47.4] us IS the bed. The window must slide."""
+    tw = _tw(0.0, 55.4)
+    bot = np.linspace(42.33e-6, 47.53e-6, 300)
+    lo, hi, doc = rbc.floor_window(tw, bot)
+    assert doc["slid_off_the_bed"] is True
+    assert lo > 47.53e-6                        # clear of the deepest bed
+    assert lo == pytest.approx(47.53e-6 + rbc.FLOOR_BED_GUARD_US * 1e-6)
+    assert hi == pytest.approx(tw[-1] - rbc.FLOOR_ROLLOFF_US * 1e-6)
+    assert doc["margin_past_deepest_bed_us"] == pytest.approx(
+        rbc.FLOOR_BED_GUARD_US)
+    assert doc["valid"] is True
+
+
+def test_floor_window_reports_invalid_when_nothing_is_left():
+    """No trustworthy floor exists when the bed runs to the record end; the
+    caller must report unknown rather than a contaminated number."""
+    tw = _tw(0.0, 55.4)
+    bot = np.full(50, 53.0e-6)
+    _, _, doc = rbc.floor_window(tw, bot)
+    assert doc["valid"] is False
+    assert doc["width_us"] < rbc.FLOOR_MIN_WIDTH_US
+
+
+def test_floor_window_never_lands_on_the_bed():
+    """Property: across a sweep of bed depths the window always starts after
+    the deepest pick whenever it reports itself valid."""
+    tw = _tw(0.0, 55.4)
+    for b_us in np.arange(20.0, 52.0, 0.5):
+        lo, hi, doc = rbc.floor_window(tw, np.full(10, b_us * 1e-6))
+        if doc["valid"]:
+            assert lo >= b_us * 1e-6, b_us
+            assert hi > lo
+
+
+def test_meas_tail_stats_tolerates_an_invalid_floor():
+    """floor_db None (no trustworthy window) must not crash the tail entry;
+    the caveat reports nulls instead of a fabricated margin."""
+    rel = _rel()
+    a = _fake(rel, -2.0, -45.0, 14.0, meas=(-9.0, -47.0), floor_db=None)
+    st = rbc.meas_tail_stats({"h_med": 2483.0, "thick_med": 2476.0}, a)
+    cav = st["noise_floor_caveat"]
+    assert cav["floor_rel_surf_db"] is None
+    assert cav["floor_limited"] is None
+    assert st["slope_db_per_us"] == pytest.approx(-9.0, abs=1e-9)

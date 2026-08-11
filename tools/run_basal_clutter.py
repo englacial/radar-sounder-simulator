@@ -121,6 +121,18 @@ SCOUT_PK_US = 0.3                    # ... over peak within +-0.3 us of bed
 # and agrees with end-30..-25 to ~1 dB (low), so it is a floor estimate
 # with at most a few dB of residual high-pass clutter tail (upper bound).
 FLOOR_TAIL_LO_US, FLOOR_TAIL_HI_US = 12.0, 8.0
+# ... BUT that window is only a floor if the record actually HAS that much
+# post-bed tail. The Greenland high pass records ~7.9 us past its deepest bed
+# pick, so end -[12, 8] us lands ON THE BED and the "floor" reads within
+# 0.6 dB of the measured bed-window level. floor_window() therefore derives
+# the window PER PASS: keep the established end -[12, 8] us whenever it sits
+# clear of (deepest bed + FLOOR_BED_GUARD_US), else slide it to start there
+# and stop FLOOR_ROLLOFF_US before the record end (the documented
+# processing roll-off). Passes with generous tails -- every 2016 DC-8 pass,
+# and the Greenland LOW pass -- are unaffected bit-identically.
+FLOOR_BED_GUARD_US = 1.5     # clearance past the deepest bed pick
+FLOOR_ROLLOFF_US = 4.0       # unusable rolled-off tail at the record end
+FLOOR_MIN_WIDTH_US = 1.0     # narrower than this -> no trustworthy floor
 # BED-RETURN TAIL (the "sim tails flatten above measured" observation).
 # Windows are relative to each trace's OWN bed reference -- the measured
 # Bottom pick for measured data, the SIM BED-LAYER NADIR TWTT for sims (the
@@ -561,6 +573,11 @@ LINES = {
         # scene window is always covered contiguously).
         "REF_FRAMES": ("20140421_01_069", "20140421_01_070"),
         "GL_S_KM": None,          # no grounding line: all grounded interior
+        # bed sits 26-31 us below the surface here (2.4-2.5 km of ice) and
+        # ~108 dB below the low pass's own surface peak -- both far outside
+        # the Antarctic line's -1..13.5 us / -90..5 dB framing.
+        "RADARGRAM_Y_US": (-1.0, 34.0),
+        "RADARGRAM_DB": (-120.0, 5.0),
         "SYNTHETIC_KEYS": (SYN14_KEY,),
         "MEASURED_CAVEATS": _GL_MEASURED_CAVEATS,
         # products this line does NOT have wired (guarded in run())
@@ -1359,6 +1376,23 @@ def apply_hybrid_bed(base, fsub, ct_m, seed, axis):
 #     pattern (M22); no per-channel processing to combine.
 PROC_TAG = "_proc"
 FIG_WIDTH_SCALE = 1.0   # --fig-width-scale: radargram panel width multiplier
+# Radargram bed overlays (--no-bed-overlay turns them off): the MEASURED
+# Bottom pick on measured panels and the SIM BED-LAYER NADIR twtt on sim
+# panels, each on its own panel's surface-referenced axis. They are drawn
+# from the same arrays the bed-window metrics use, so a visible mismatch
+# between the line and the echo IS a registration/pick problem, not a
+# plotting artefact -- which is the point of having them on by default.
+BED_OVERLAY_STYLE = dict(color="tab:cyan", lw=0.9, alpha=0.85)
+BED_OVERLAY = True      # --no-bed-overlay
+# Radargram panel window (surface-referenced twtt, us) and dB colour range.
+# LINE-SPECIFIC: the 2016 DC-8 anchor's bed sits ~8 us below the surface, so
+# -1..13.5 us frames the whole ice column there; the Greenland pair carries
+# 2.4-2.5 km of ice (bed 26-31 us below the surface) and its bed -- and any
+# bed overlay -- falls completely outside that window. The dB range likewise
+# has to reach the Greenland bed, which sits ~108 dB below its own surface
+# peak on the low pass (vs ~55 dB on the Antarctic line).
+RADARGRAM_Y_US = (-1.0, 13.5)
+RADARGRAM_DB = (-90.0, 5.0)
 N_LOOKS_SIM = 3
 CHUNK_M_PROC = 3000.0    # fine-posting chunks: ~200 traces/chunk (memory)
 REAL_CHAIN_2016 = {
@@ -2107,6 +2141,42 @@ def _wmean(P, twtt, dt, t_lo, t_hi):
     return out
 
 
+def floor_window(tw_m, bot):
+    """(lo, hi, doc): absolute-twtt measured noise-floor window for ONE pass.
+
+    Default is the tool's established record end -[12, 8] us. If the pass's
+    deepest bed pick reaches into it, the window is slid to start at
+    (deepest bed + FLOOR_BED_GUARD_US) and to stop FLOOR_ROLLOFF_US before
+    the record end. ``doc["valid"]`` is False when what is left is narrower
+    than FLOOR_MIN_WIDTH_US -- the floor (and everything derived from it:
+    noise_limited, the tail floor caveat) must then be reported as unknown
+    rather than as a number.
+    """
+    t_end = float(tw_m[-1])
+    lo = t_end - FLOOR_TAIL_LO_US * 1e-6
+    hi = t_end - FLOOR_TAIL_HI_US * 1e-6
+    b_max = float(np.nanmax(bot))
+    clear = b_max + FLOOR_BED_GUARD_US * 1e-6
+    slid = lo < clear
+    if slid:
+        lo, hi = clear, t_end - FLOOR_ROLLOFF_US * 1e-6
+    width = hi - lo
+    doc = {"window_us": [round(lo * 1e6, 3), round(hi * 1e6, 3)],
+           "width_us": round(width * 1e6, 3),
+           "record_end_us": round(t_end * 1e6, 3),
+           "deepest_bed_us": round(b_max * 1e6, 3),
+           "margin_past_deepest_bed_us": round((lo - b_max) * 1e6, 3),
+           "slid_off_the_bed": bool(slid),
+           "valid": bool(width >= FLOOR_MIN_WIDTH_US * 1e-6),
+           "note": ("measured noise floor. Default record end -[12, 8] us; "
+                    "SLID to (deepest bed + "
+                    f"{FLOOR_BED_GUARD_US:g} us) .. (record end - "
+                    f"{FLOOR_ROLLOFF_US:g} us) when the default would land "
+                    "on the bed (short post-bed tail). An UPPER bound: it "
+                    "may still hold a few dB of clutter tail")}
+    return lo, hi, doc
+
+
 def _med_db_rel(num, den):
     ok = np.isfinite(num) & np.isfinite(den) & (den > 0) & (num > 0)
     if not ok.any():
@@ -2257,7 +2327,8 @@ def meas_tail_stats(p, a):
     rel, db = a["bed_profs"]["measured"]
     lev = {f"+{t:g}us": round(_at_us(rel, db, t), 2) for t in TAIL_EXCESS_US}
     floor = a["floor_db"]
-    marg = round(lev[f"+{TAIL_EXCESS_US[-1]:g}us"] - floor, 2)
+    marg = (None if floor is None
+            else round(lev[f"+{TAIL_EXCESS_US[-1]:g}us"] - floor, 2))
     return {"slope_db_per_us": round(tail_slope_db_per_us(rel, db), 3),
             "slope_db_per_deg": round(tail_slope_db_per_deg(p, rel, db), 3),
             "level_rel_surf_db": lev,
@@ -2265,13 +2336,18 @@ def meas_tail_stats(p, a):
             "noise_floor_caveat": {
                 "floor_rel_surf_db": floor,
                 f"tail_minus_floor_at_+{TAIL_EXCESS_US[-1]:g}us_db": marg,
-                "floor_limited": bool(marg < TAIL_FLOOR_MARGIN_DB),
+                "floor_limited": (None if marg is None
+                                  else bool(marg < TAIL_FLOOR_MARGIN_DB)),
                 "margin_threshold_db": TAIL_FLOOR_MARGIN_DB,
-                "note": "measured floor = deep record tail (end -12..-8 us, "
-                "the tool's existing estimate; an UPPER bound -- it may "
-                "still hold a few dB of clutter tail). A small margin means "
-                "the measured tail is floor-limited there and the sim-minus-"
-                "measured excess is a LOWER bound on the real gap"}}
+                "window": a["floor_doc"],
+                "note": "measured floor from the PER-PASS floor window "
+                "(see 'window': default record end -12..-8 us, slid clear "
+                "of the deepest bed pick when the post-bed tail is short). "
+                "An UPPER bound -- it may still hold a few dB of clutter "
+                "tail. A small margin means the measured tail is "
+                "floor-limited there and the sim-minus-measured excess is a "
+                "LOWER bound on the real gap; a null floor means the record "
+                "leaves no trustworthy floor window at all"}}
 
 
 def bed_tail_entry(key, p, a, sources):
@@ -2397,11 +2473,13 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
         tw_m, dt_m = p["tw_m"], p["dt"]
         m_meas = clutter_metrics(meas, tw_m, dt_m, p["surf"], p["bot"])
         n_m = meas.shape[0]
-        floor = _wmean(meas, tw_m, dt_m,
-                       np.full(n_m, tw_m[-1] - FLOOR_TAIL_LO_US * 1e-6),
-                       np.full(n_m, tw_m[-1] - FLOOR_TAIL_HI_US * 1e-6))
-        floor_db = round(_med_db_rel(floor, m_meas["_spk"]), 2)
-        noise_limited = bool(m_meas["midcol_rel_surf_db"] - floor_db < 3.0)
+        f_lo, f_hi, floor_doc = floor_window(tw_m, p["bot"])
+        floor = _wmean(meas, tw_m, dt_m, np.full(n_m, f_lo),
+                       np.full(n_m, f_hi))
+        floor_db = (round(_med_db_rel(floor, m_meas["_spk"]), 2)
+                    if floor_doc["valid"] else None)
+        noise_limited = (None if floor_db is None else
+                         bool(m_meas["midcol_rel_surf_db"] - floor_db < 3.0))
         profs["measured"] = rel_mean_profile(meas, tw_m, dt_m, p["surf"],
                                              m_meas["_spk"])
         bed_profs["measured"] = rel_mean_profile(
@@ -2475,6 +2553,7 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
             "decomposition": {k: {kk: round(vv, 2) for kk, vv in v.items()}
                               for k, v in dec.items()},
             "verdict": verdict, "floor_db": floor_db,
+            "floor_doc": (floor_doc if meas is not None else None),
             "meas_noise_limited": noise_limited,
             "bed_delay_med_us": round(float(np.nanmedian(
                 (p["bot"] - p["surf"]))) * 1e6, 2),
@@ -2562,11 +2641,9 @@ def zone_analysis(p, a, gl_km=GL_S_KM):
             mmeas = clutter_metrics(meas[mm], p["tw_m"], p["dt"],
                                     p["surf"][mm], p["bot"][mm])
             n_m = int(mm.sum())
+            zf_lo, zf_hi, _ = floor_window(p["tw_m"], p["bot"][mm])
             floor = _wmean(meas[mm], p["tw_m"], p["dt"],
-                           np.full(n_m, p["tw_m"][-1]
-                                   - FLOOR_TAIL_LO_US * 1e-6),
-                           np.full(n_m, p["tw_m"][-1]
-                                   - FLOOR_TAIL_HI_US * 1e-6))
+                           np.full(n_m, zf_lo), np.full(n_m, zf_hi))
             bed_profs["measured"] = rel_mean_profile(
                 meas[mm], p["tw_m"], p["dt"], p["bot"][mm], mmeas["_spk"],
                 *TAIL_PROF_US)
@@ -2758,9 +2835,12 @@ def fig_bed_brightness(out, preps, corr_series, corr_stats, segment,
 # figures (grayscale radargrams = sequential magnitude; profile series in
 # fixed categorical order with legend, one axis)
 # ========================================================================
-def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
+def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax,
+                         bed_overlay=True, legend=False):
     """One simulated-pass panel: dB rel per-pass median simulated surface
-    peak, surface-referenced twtt axis."""
+    peak, surface-referenced twtt axis. ``bed_overlay`` draws the SIM BED
+    LAYER's nadir twtt (a['t_b'], the same reference the bed-window and
+    bed-tail metrics use) on the panel's own axis."""
     twtt_s = p["rc_frame"].t0 + np.arange(
         p["rc_frame"].n_samples) * p["rc_frame"].dt
     ref_s = 10.0 * np.log10(max(float(np.nanmedian(
@@ -2773,13 +2853,19 @@ def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
     ax.imshow(_db(a["P"])[:, ms].T - ref_s, aspect="auto", cmap="gray",
               vmin=vmin, vmax=vmax,
               extent=[s_sim[0], s_sim[-1], rel_s[ms][-1], rel_s[ms][0]])
+    if bed_overlay:
+        ax.plot(s_sim, (a["t_b"] - surf_med_s) * 1e6,
+                label="sim bed nadir twtt", **BED_OVERLAY_STYLE)
+        ax.set_ylim(y_hi, y_lo)
+        if legend:
+            ax.legend(fontsize=7, loc="lower left", framealpha=0.7)
     ax.set_title(f"{key} sim {label} (ct ±{p['reach']['ct_m'] / 1e3:.1f} km,"
                  f" {p['spacing']:.1f} m facets)", fontsize=10)
 
 
 def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
                    gl_s_km=None, w_scale=1.0, plot_s_max_km=None,
-                   fname="radargrams.png", src=None):
+                   fname="radargrams.png", src=None, bed_overlay=True):
     """Measured (top) vs simulated per pass, shared surface-referenced twtt
     axis and one shared dB-rel-surface color scale. A synthetic pass has no
     measured data: its top panel is a placeholder. ``ablation`` = list of
@@ -2788,11 +2874,13 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
     ablation. ``gl_s_km`` marks the grounding line on every panel.
     ``plot_s_max_km`` crops the PLOTTED along-track range (the data and
     every metric keep the full segment); ``src`` prepends a source-data
-    provenance line to the figure title."""
+    provenance line to the figure title. ``bed_overlay`` (default ON) draws
+    the MEASURED Bottom pick on measured panels and the SIM BED nadir twtt
+    on simulated panels."""
     keys = keys or ORDER
     ablation = ablation or []
-    y_lo, y_hi = -1.0, 13.5
-    vmin, vmax = -90.0, 5.0
+    y_lo, y_hi = RADARGRAM_Y_US
+    vmin, vmax = RADARGRAM_DB
     s0 = S0_KM[segment]
     nrow = 2 + len(ablation)
     fig, axs = plt.subplots(nrow, len(keys),
@@ -2818,15 +2906,23 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
             ax.imshow(_db(a["meas_arr"])[:, m].T - ref_m, aspect="auto",
                       cmap="gray", vmin=vmin, vmax=vmax,
                       extent=[s_km[0], s_km[-1], rel[m][-1], rel[m][0]])
+            if bed_overlay:
+                ax.plot(s_km, (p["bot"] - surf_med) * 1e6,
+                        label="measured Bottom pick", **BED_OVERLAY_STYLE)
+                ax.set_ylim(y_hi, y_lo)
+                if k == 0:
+                    ax.legend(fontsize=7, loc="lower left", framealpha=0.7)
             ax.set_title(f"{key} measured ({p['h_med']:.0f} m AGL)",
                          fontsize=10)
         # sim row(s): picked-bed (labeled when ablation rows are present)
         _sim_radargram_panel(axs[1, k], p, a, key,
                              "(picked bed)" if ablation else "",
-                             s0, y_lo, y_hi, vmin, vmax)
+                             s0, y_lo, y_hi, vmin, vmax,
+                             bed_overlay=bed_overlay, legend=(k == 0))
         for r, (pr, an, label) in enumerate(ablation):
             _sim_radargram_panel(axs[2 + r, k], pr[key], an[key], key,
-                                 f"({label})", s0, y_lo, y_hi, vmin, vmax)
+                                 f"({label})", s0, y_lo, y_hi, vmin, vmax,
+                                 bed_overlay=bed_overlay)
         if gl_s_km is not None:
             for r in range(nrow):
                 ax_ = axs[r, k]
@@ -2845,6 +2941,8 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
         axs[r, 0].set_ylabel("twtt below surface (us)")
     title = ("basal-clutter altitude comparison: measured (top) vs simulated "
              "surface+bed, dB rel own surface peak"
+             + (" [cyan: measured Bottom pick / sim bed nadir twtt]"
+                if bed_overlay else "")
              + (" -- bed-source ablation: picked bed / "
                 + " / ".join(label for _, _, label in ablation)
                 + ", all else identical" if ablation else "")
@@ -3014,8 +3112,10 @@ def fig_bed_tail(out, preps, analyses, metrics, keys=None, ablation=None,
             ax.plot(*a["bed_profs"]["measured"], color="black", lw=1.8,
                     label=f"measured ({e['measured']['slope_db_per_us']:+.1f}"
                           " dB/us)")
-            ax.axhline(e["measured"]["noise_floor_caveat"]["floor_rel_surf_db"],
-                       color="0.5", lw=0.9, ls=":", label="measured floor")
+            _fl = e["measured"]["noise_floor_caveat"]["floor_rel_surf_db"]
+            if _fl is not None:
+                ax.axhline(_fl, color="0.5", lw=0.9, ls=":",
+                           label="measured floor")
         for slug, an in [(main, analyses)] + list(ab_an.items()):
             av = an[key] if slug != main else a
             ax.plot(*av["bed_profs"]["sim_total"],
@@ -3087,7 +3187,8 @@ def emit_pass_figs(out, key, p, a, zres, segment, gl_s_km, plot_s_max_km,
     figs = [fig_radargrams(out, {key: p}, {key: a}, segment, keys=[key],
                            gl_s_km=gl_s_km, w_scale=FIG_WIDTH_SCALE,
                            plot_s_max_km=plot_s_max_km,
-                           fname=f"radargrams_{key}.png", src=src),
+                           fname=f"radargrams_{key}.png", src=src,
+                           bed_overlay=BED_OVERLAY),
             fig_decomposition(out, {key: p}, {key: a}, keys=[key],
                               fname=f"decomposition_{key}.png", src=src)]
     e = bed_tail_entry(key, p, a, [(main_slug, a)])
@@ -3382,6 +3483,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "decomposition_db": a["decomposition"],
             "midcol_verdict": a["verdict"],
             "measured_floor_rel_surf_db": a["floor_db"],
+            "measured_floor_window": a.get("floor_doc"),
             "measured_midcol_noise_limited": a["meas_noise_limited"],
             "agl_med_m": round(p["h_med"], 0),
             "note": "mid-column mean power (surf+1.0 -> bed-0.5 us) rel own "
@@ -3845,7 +3947,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                ablation=ab_fig,
                                gl_s_km=GL_S_KM if hybrid else None,
                                w_scale=FIG_WIDTH_SCALE,
-                               plot_s_max_km=plot_s_max_km),
+                               plot_s_max_km=plot_s_max_km,
+                               bed_overlay=BED_OVERLAY),
                 fig_decomposition(out, preps, analyses, keys=order,
                                   ablation=ab_fig),
                 fig_bed_tail(out, preps, analyses, metrics, keys=order,
@@ -4117,10 +4220,15 @@ def main():
                     "location at 120 km). The nearest trace of every pass "
                     "is used and recorded per pass in the config; changing "
                     "it only re-does the analysis, never the simulations")
+    ap.add_argument("--no-bed-overlay", action="store_true",
+                    help="drop the bed overlays from the radargram panels "
+                    "(default ON: the measured Bottom pick on measured "
+                    "panels, the sim bed-layer nadir twtt on sim panels)")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
-    global FIG_WIDTH_SCALE
+    global FIG_WIDTH_SCALE, BED_OVERLAY
     FIG_WIDTH_SCALE = args.fig_width_scale
+    BED_OVERLAY = not args.no_bed_overlay
     run(segment=args.segment, n_traces=args.n_traces, att=args.att,
         surf_rough=not args.smooth_surface, out_root=args.out,
         force=args.force, picked_bed=args.picked_bed,

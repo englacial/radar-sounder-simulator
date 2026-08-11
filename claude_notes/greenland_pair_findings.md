@@ -306,3 +306,256 @@ returns: low **+8.6 dB**, high **−12.1 dB**, syn14km **−13.2 dB**.
 9. The high pass's sim `record_coverage_frac` is **0.997** at bed+3.5 µs — the
    sim window is fine, but there is essentially no headroom; a longer tail
    window would run off the end of the record.
+
+
+---
+
+# Part 2 (2026-08-11): attenuation estimated from the measured data
+
+## 2.0 First: the per-pass noise-floor window (bite 3, now fixed)
+
+`floor_window()` derives the measured-floor window PER PASS: keep the
+established `record end -[12, 8] us` whenever it clears
+`(deepest bed pick + 1.5 us)`, else slide to
+`[deepest bed + 1.5 us, record end - 4 us]` (the documented roll-off), and
+report `valid: false` if under 1 us is left. Effect:
+
+| pass | window (us) | slid | floor (rel surf) | change |
+|---|---|---|---|---|
+| Greenland low | [43.254, 47.254] | no | **-116.42 dB** | unchanged (bit-identical) |
+| Greenland high | [49.033, 51.400] | **yes** | **-88.30 dB** | was **-83.05 dB** (contaminated) |
+| every 2016 DC-8 pass | end -[12, 8] us | no | — | unchanged |
+
+The old high-pass "floor" sat within **0.6 dB of that pass's own measured bed
+window** — it was the bed. The corrected floor is **5.25 dB lower**, and the
+high pass's bed window is **4.7 dB** above it (not 0.6 dB below). Its bed
+level is now usable; it is still the least comfortable margin in the study.
+
+## 2.1 Route (a): per-pass level matching (study segment, s 11-40)
+
+With constant Fresnel gamma the simulated bed level moves dB-for-dB with
+`-2*A*H`, so `A_pass = A_run + residual/(2*H_med)`; sensitivity **4.94 dB per
+dB/km** (low) / **4.95** (high) at H ~ 2.47 km.
+
+| pass | H_med | meas raw | floor | margin | meas floor-corr | sim (A=15) | resid raw | resid corr | **A raw** | **A floor-corr** |
+|---|---|---|---|---|---|---|---|---|---|---|
+| low | 2 468 m | -107.76 | -115.81 | 8.05 | -108.50 | -103.41 | **+4.35** | +5.09 | **15.88** | **16.03** |
+| high | 2 475 m | -83.95 | -88.67 | 4.72 | -85.73 | -89.62 | **-5.67** | -3.89 | **13.85** | **14.21** |
+
+**The two passes pull in opposite directions.** Spread **2.03 dB/km** raw,
+**1.82 dB/km** floor-corrected; the pair's rms-optimal value is **14.87**,
+i.e. route (a) on its own says "keep 15". That is not evidence that 15 is
+right -- it is evidence that route (a) cannot resolve A here, because the two
+passes' *measured* bed levels differ by **23.8 dB** while the simulation says
+they should differ by **13.8 dB**. A moves both passes the same way, so no
+value of A can close a 10 dB pass-to-pass disagreement.
+
+Route (a) is also structurally degenerate: a constant error in gamma maps
+1:1 into A. It constrains the PRODUCT `gamma * 10^(-2AH/10)`, never A alone.
+
+## 2.2 Route (b): bed power vs thickness, full 99.7 km line (measured only)
+
+Bed-window mean power rel own surface peak, **spreading-corrected** by
+`(r_bed_eff/r_surf)^2` with `r_bed_eff = r_surf + H/n` (the RSSNR convention,
+so the simulator's own spreading is not double-counted). Slope = `-2A`.
+
+Per trace, whole line:
+
+| pass | n | H range | A OLS | A Theil-Sen | r | resid rms |
+|---|---|---|---|---|---|---|
+| low | 6 664 | 1 937-2 680 m | 6.19 | 6.57 | **-0.496** | **4.47 dB** |
+| high | 10 005 | 1 907-2 787 m | **13.50** | **13.13** | **-0.950** | **2.29 dB** |
+
+**Answer to "does this cold interior bed behave better than the Antarctic
+one?" -- YES at altitude, NO at low level.** The high pass gives a genuinely
+well-determined regression; the low pass does not.
+
+Robustness (all four checks agree on which pass to trust):
+
+* **Along-track binning** (1 / 10 / 50 / 200 traces = 0.015 / 0.15 / 0.75 /
+  3 km): low stays **6.19 / 6.28 / 6.22 / 6.60** (r only -0.50 -> -0.65,
+  resid 4.47 -> 3.13 dB); high **13.50 / 13.59 / 13.66 / 13.90**
+  (r -0.950 -> **-0.977**, resid 2.29 -> **1.56 dB**). Binning does not move
+  the low pass, so its shallow slope is **systematic, not speckle**.
+* **Thickness sub-ranges** (thin half / thick half / thinnest quartile): low
+  5.55 / 5.19 / 6.80 with r -0.134 / -0.334 / -0.131 (uninformative
+  everywhere); high 11.35 / 13.07 / 12.53 with r -0.630 / -0.822 / -0.559
+  (stable). Noise-floor censoring of the low pass is therefore NOT the
+  explanation -- its thin (bright, unclampable) half is just as flat.
+* **Floor-pedestal subtraction in POWER** at 0.75 km bins: low 6.22 ->
+  **8.04** OLS / **8.29** TS (r -0.60, resid 4.34, TS CI **[6.28, 10.43]**);
+  high 13.66 -> **14.24** OLS / **13.91** TS (r **-0.974**, resid **1.72**,
+  TS CI **[13.42, 14.40]**).
+* **Brightness screening REJECTED as a method.** Keeping only traces
+  `>= floor + 10/15 dB` drives the low pass to A = 1.17 / -4.19 dB/km: that
+  screen selects on the regression residual (bright bed = low-attenuation
+  anomaly), a collider selection. Reported only so it is not retried.
+
+The low pass fails because at 465 m AGL the bed footprint is small, so
+trace-to-trace bed-reflectivity variation (4.3-4.5 dB rms, irreducible by
+binning) swamps a thickness trend worth ~20 dB over its 744 m of H range. The
+high pass's much larger footprint averages that heterogeneity down -- the
+same physical reason the Antarctic attempt failed, showing up here as a
+per-altitude effect rather than a per-line one.
+
+## 2.3 The chosen A, and the rule
+
+**RULE.** (1) Only route (b) isolates A -- it is a *slope*, independent of the
+assumed gamma; route (a) is a *level* match and is degenerate with gamma, so
+it is a consistency check, never the primary estimate. (2) A route-(b)
+estimate is admissible only if it passes a four-part gate: `|r| >= 0.9`,
+residual rms `<= 3 dB`, Theil-Sen 95% CI half-width `<= 1 dB/km`, and slope
+stable within `+-2 dB/km` across both thickness sub-ranges and along-track
+bin scales. (3) Take the mean of the admissible route-(b) estimate and the
+route-(a) estimate **from the same pass**, so the two routes are compared
+like for like.
+
+The high pass passes all four gate conditions; the low pass fails all four.
+Applying the rule:
+
+| estimate | value |
+|---|---|
+| route (b), high pass, floor-subtracted, 0.75 km bins, Theil-Sen | **13.91** |
+| route (a), high pass, floor-corrected | **14.21** |
+| **mean -> adopted** | **A = 14.0 dB/km** |
+
+Two methodologically independent routes -- one slope-based and
+gamma-free, one level-based -- agree to **0.30 dB/km** on the pass where both
+are well-conditioned. Retained as a systematic envelope, not as estimates:
+route (a) low **16.03** (upper) and route (b) low **8.3** (lower), i.e. the
+honest per-line uncertainty is roughly **+-2 dB/km**, dominated by the low
+pass's disagreement rather than by any statistical error.
+
+**Predicted consequence, stated before the rerun.** dA = -1.0 dB/km brightens
+the simulated bed by `2 * 1.0 * 2.47 = +4.94 dB`, so the high pass's residual
+should go **-5.67 -> ~-0.7** (nearly zeroed) and the low pass's
+**+4.35 -> ~+9.3** (worse). That is expected and is not an argument against
+the value: the low-pass residual is a *level* disagreement between the two
+measured passes (23.8 dB apart where the sim says 13.8 dB), which only gamma
+or a pass-specific effect can explain -- attenuation moves both passes
+together.
+
+
+## 2.4 RERUN at A = 14.0 -- before/after, and a correction to route (a)
+
+Full segment (s 11-40), all three passes, everything else unchanged
+(picked bed, constant Fresnel gamma, matched CSARP_standard processing).
+Simulation wall **3 934.9 s (66 min)**: low 1 841.4 s, high 1 270.9 s,
+syn14km 822.7 s -- within 1 % of the A = 15 run, as expected (attenuation
+changes no geometry).
+
+### Bed-window levels, dB rel own surface peak
+
+| pass | component | A = 15 | A = 14 | delta |
+|---|---|---|---|---|
+| low | **bed returns** | -104.75 | **-99.87** | **+4.88** |
+| low | surface returns | -110.20 | -110.20 | +0.00 |
+| low | total (metric) | -103.41 | -99.38 | +4.03 |
+| low | measured | -107.76 | -107.76 | — |
+| low | **residual (total - meas)** | **+4.35** | **+8.38** | +4.03 |
+| high | **bed returns** | -99.28 | **-94.33** | **+4.95** |
+| high | surface returns | -90.19 | -90.19 | +0.00 |
+| high | total (metric) | -89.62 | -88.68 | +0.94 |
+| high | measured | -83.95 | -83.95 | — |
+| high | **residual (total - meas)** | **-5.67** | **-4.73** | +0.94 |
+| syn14km | bed returns | -99.01 | **-94.07** | **+4.94** |
+| syn14km | surface returns | -85.22 | -85.22 | +0.00 |
+| syn14km | total | -85.01 | -84.61 | +0.40 |
+
+Everything else is untouched by A, exactly as it should be: mid-column levels
+(-78.08 / -61.32 / -51.05 dB), the altitude trend (measured +1.09 vs
+simulated +16.76 dB), the surface registration and the decomposition verdicts
+are all bit-identical between the two runs.
+
+### The correction: route (a) is invalid on the HIGH pass
+
+The **bed-returns** component moved by **+4.88 / +4.95 / +4.94 dB** -- exactly
+the predicted `2 * dA * H = 4.94 dB`. But the **total** bed window moved only
+**+4.03** (low), **+0.94** (high) and **+0.40 dB** (syn14km), because the
+total also contains A-independent SURFACE clutter. So the pre-stated
+prediction ("high residual -5.67 -> ~-0.7") was wrong, and the reason matters
+more than the number:
+
+> **The bed-window residual is only a calibration target where the bed window
+> is bed-dominated.** In the sim that is true for the low pass (bed returns
+> +5.5 dB over surface returns at A = 15, +10.3 dB at A = 14) and false for
+> the high pass (bed **-9.1 dB below** surface returns at A = 15, -4.1 dB at
+> A = 14) and for syn14km (-13.8 dB). On the high pass the total bed-window
+> level moves only **0.19 dB per dB/km of A** (0.94 / 4.95), so route (a)
+> there is ~26x less sensitive than the `2H` figure assumes and cannot
+> constrain A at all.
+
+This inverts the pass selection in the rule of section 2.3: **route (a) is
+valid only on the LOW pass, route (b) only on the HIGH pass.** No single pass
+supports both routes, so the "mean of the two routes on the same pass" step
+cannot be executed as written. The adopted value therefore rests on:
+
+| estimator | pass | value | status |
+|---|---|---|---|
+| route (b) (slope, gamma-free) | high | **13.91-14.24** | admissible (gate passed) |
+| route (a) (level) | low | **15.88-16.03** | admissible but gamma-degenerate |
+| route (a) (level) | high | 13.85-14.21 | **INVALID** -- bed window is surface clutter |
+| route (b) (slope) | low | 6.2-8.3 | **INVALID** -- gate failed on all four criteria |
+
+**A = 14.0 dB/km is retained**, now justified by route (b) on the high pass
+alone (13.91 Theil-Sen / 14.24 OLS, r = -0.974, residual 1.72 dB), with route
+(a) on the low pass (16.0) as the upper bound of a **[13.9, 16.0] dB/km**
+envelope. Route (b) is preferred because it is measured-only and independent
+of gamma, whereas route (a)-low inherits the gamma error 1:1 (a 5 dB gamma
+error is 1.0 dB/km of A). Caveat in the other direction: any residual
+measured surface clutter in the high pass's bed window is thickness-
+independent and flattens its slope, so **route (b)-high is a lower bound**;
+that is consistent with it sitting at the bottom of the envelope.
+
+### Net effect of the change
+
+* **High pass**: residual -5.67 -> **-4.73 dB** (improved, but only via the
+  0.94 dB the surface-clutter-dominated total allows).
+* **Low pass**: residual +4.35 -> **+8.38 dB** (worse, as predicted in 2.3).
+* The **23.8 dB** measured pass-to-pass bed-level difference vs the sim's
+  **13.8 dB** is unchanged and remains the dominant unexplained discrepancy.
+  It is not an attenuation problem -- A moves both passes together. Closing it
+  needs either a pass-dependent effect (system calibration, surface-peak
+  normalization) or an RSSNR-driven gamma; the Greenland RSSNR store (section
+  "Greenland RSSNR store check") contains both segments and is the obvious
+  next step.
+
+## 2.5 Bed-pick overlays (and a framing bug they exposed)
+
+`fig_radargrams(..., bed_overlay=True)` (default ON, `--no-bed-overlay` to
+disable) now draws the **measured Bottom pick** on every measured panel and
+the **sim bed-layer nadir twtt** on every simulated panel, in cyan, from the
+same arrays the bed-window metrics use -- so a visible mismatch between line
+and echo is a real registration/pick problem, not a plotting artefact.
+
+Adding them exposed a genuine framing bug: the panel window was hard-coded
+`-1 .. 13.5 us` and the colour range `-90 .. 5 dB`, both sized for the
+Antarctic anchor (bed ~8 us below the surface, ~55 dB down). On this line the
+bed is **26-31 us** below the surface and **~108 dB** down, so **every
+Greenland radargram figure produced before this change showed only the top
+40 % of the ice column and no bed at all.** `RADARGRAM_Y_US` and
+`RADARGRAM_DB` are now line globals: Antarctic keeps `(-1.0, 13.5)` /
+`(-90.0, 5.0)` (untouched, asserted in tests), Greenland uses
+`(-1.0, 34.0)` / `(-120.0, 5.0)`. With the correct framing the overlay lands
+exactly on the bed echo on all three passes, and the measured low panel shows
+the dense internal layering that the surface+bed simulation has no term for
+-- the visual counterpart of the 36 dB mid-column gap.
+
+## 2.6 Deliverables and tests (part 2)
+
+* `outputs/greenland_pair/full_pbed_proc_att14/` -- `radargrams.png` (with
+  overlays, corrected framing), `decomposition.png`,
+  `decomposition_trace.png`, `bed_tail.png`, `metrics.json`, `report.html`,
+  `run_config.json`; mirrored to
+  `outputs/verification/greenland_pair_full_pbed_proc_att14/`.
+* `outputs/greenland_pair/full_pbed_proc/` (A = 15) retained for the
+  before/after comparison.
+* Tests: **341 passed**. New this part -- 5 floor-window tests in
+  `tests/test_basal_tail.py` (default window kept when the tail is long, slid
+  off a bed that reaches into it, `valid: false` when nothing is left, a
+  property sweep that the window never lands on the bed, and
+  `meas_tail_stats` tolerating a null floor) and 2 framing tests in
+  `tests/test_basal_lines.py`.
+* Note: `tests/test_refraction_joint.py::test_compile_flat_in_n_and_runtime`
+  fails intermittently when a 65-minute simulation is saturating the CPU (it
+  asserts on wall-clock); it passes standalone.
