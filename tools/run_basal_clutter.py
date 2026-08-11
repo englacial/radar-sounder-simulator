@@ -32,6 +32,18 @@ window mapping, alias-safe oversampling, REMA+BedMachine scene building,
 cached runs, facet spacing, surface gate. Runs are chunked ~10 km along
 track so the 50 km segment projects ~linearly from the 10 km pilot.
 
+STUDY LINES (--line, see LINES / activate_line): the module defaults ARE
+the Antarctic line above, so `--line antarctic_2016` is a no-op and that
+path (and its caches) is untouched. `--line greenland_2014_2017` swaps in
+the Greenland PAIR from claude_notes/greenland_altitude_scout.md --
+20140421_01_069 (465 m AGL, 2014_Greenland_P3) and 20170424_01_067
+(2483 m AGL, 2017_Greenland_P3) over the same central-west interior line,
+a 5.3x altitude ratio with an IDENTICAL radar configuration -- plus the
+synthetic 14 km pass as the third altitude. That line is EPSG:3413,
+ArcticDEM 32 m + BedMachine Greenland v5 150 m (opr.py selects both from
+the hemisphere), has no grounding line, and mixes two seasons (one per
+pass, hence the per-pass "season" key).
+
 Run:  uv run python tools/run_basal_clutter.py                # 10 km pilot
       uv run python tools/run_basal_clutter.py --segment full # 50 km (STOP:
       report pilot timings first; full run only on explicit go-ahead)
@@ -74,7 +86,14 @@ from soundersim.opr import load_bottom_pick, load_frame  # noqa: E402
 from soundersim.physics import fresnel_normal  # noqa: E402
 
 C = 299792458.0
-SEASON = "2016_Antarctica_DC8"
+# ---- LINE-SPECIFIC globals (see LINES / activate_line below) -------------
+# Everything in this block describes THE 2016 DC-8 Antarctic anchor line and
+# is the module default. A second study line (the Greenland pair) is a
+# sibling config block in LINES that rebinds exactly these names; the
+# Antarctic path is therefore untouched code and its caches stay valid.
+LINE = "antarctic_2016"    # active line key
+SEASON = "2016_Antarctica_DC8"          # default season (per-pass override)
+CRS = "EPSG:3031"                       # anchor along-track / pick-axis CRS
 CASE_PREFIX = "basal_clutter"
 OUT_DEFAULT = ROOT / "outputs" / "basal_clutter"
 VER_ROOT = ROOT / "outputs" / "verification"
@@ -164,6 +183,8 @@ N_TRACES_PILOT = 48
 N_TRACES_FULL = 240        # same ~210 m sim trace spacing as the pilot
 N_TRACES_EXT = 335         # 69.7 km at the same ~208 m sim trace spacing
 N_TRACES_LINE = 714        # 148.45 km at the same ~208 m sim trace spacing
+N_TRACES_BY_SEGMENT = {"pilot": N_TRACES_PILOT, "full": N_TRACES_FULL,
+                       "extended": N_TRACES_EXT, "full_line": N_TRACES_LINE}
 
 # Pass table (claude_notes/basal_clutter_scout.md). Slices are half-open
 # slow_time indices into each FULL frame; "rev" passes fly the line backwards
@@ -431,6 +452,146 @@ PICKED_BED_NOTE = (
     "runs are directly comparable.")
 
 
+# ========================================================================
+# STUDY-LINE REGISTRY (--line)
+# ========================================================================
+# Everything above describes the 2016 DC-8 Antarctic anchor line and IS the
+# module default, so `--line antarctic_2016` is a no-op and that path stays
+# byte-identical (caches included). A second line is a sibling config block
+# that rebinds exactly the LINE-SPECIFIC globals; nothing else in the tool
+# knows a line exists.
+#
+# GREENLAND PAIR (claude_notes/greenland_altitude_scout.md, 2026-08-11): the
+# only genuine multi-altitude repeat found in 26 Greenland collections --
+# 20140421_01_069 at 465 m AGL and 20170424_01_067 at 2483 m AGL over the
+# SAME central-west interior line, 5.3x altitude ratio, offsets med 14 /
+# max 45 m, trace counts matching to 1, and an IDENTICAL radar
+# configuration (195 MHz / 30 MHz / 1-3-10 us / PRF 12 kHz / hanning /
+# k = 4). It is a PAIR, not a triplet: the synthetic 14 km pass supplies the
+# third altitude. Differences from the Antarctic line that the registry
+# carries: two SEASONS (one per pass, hence the per-pass "season" key),
+# EPSG:3413, no grounding line (all grounded interior ice, gl_s_km None),
+# fc 195 MHz, and BedMachine GREENLAND v5 at 150 m (opr.py picks the
+# product from the hemisphere -- nothing to configure).
+ANTARCTIC_LINE = "antarctic_2016"
+GREENLAND_LINE = "greenland_2014_2017"
+
+_GL_SEASON_LOW = "2014_Greenland_P3"
+_GL_SEASON_HIGH = "2017_Greenland_P3"
+# Slices are half-open slow_time indices into each FULL frame, derived from
+# nav by projecting both passes onto the anchor polyline (the scout's
+# segment table). Neither pass is reversed (both fly increasing anchor s)
+# and neither segment crosses a frame boundary -- one frame per pass.
+_GL_PASSES = {
+    "low": {
+        "agl_med_m": 465.0, "rev": False, "season": _GL_SEASON_LOW,
+        "param_frame": "20140421_01_069",
+        "pilot": [("20140421_01_069", (1672, 2341))],
+        "full": [("20140421_01_069", (736, 2675))]},
+    "high": {
+        "agl_med_m": 2483.0, "rev": False, "season": _GL_SEASON_HIGH,
+        "param_frame": "20170424_01_067",
+        "pilot": [("20170424_01_067", (973, 1641))],
+        "full": [("20170424_01_067", (36, 1976))]},
+}
+# Synthetic constant-altitude pass: the Antarctic --add-14km construction
+# (constant ELLIPSOIDAL height, roll 0, real line geometry and picks, the
+# LOW pass's real system params) on this line. Carrier = low, so its season
+# is the 2014 one.
+_GL_PASSES[SYN14_KEY] = {
+    "agl_med_m": None, "rev": False, "season": _GL_SEASON_LOW,
+    "param_frame": "20140421_01_069",
+    "pilot": _GL_PASSES["low"]["pilot"], "full": _GL_PASSES["low"]["full"],
+    "synthetic_msl_m": SYN14_MSL_M,
+    # 2-trace geometry/phase gate (2026-08-11), the syn500km/syn300km
+    # failure class: the beta = 0.5 spacing (54.97 m) builds 79.2 m facets
+    # on the anisotropic +-12.05 km window and trips the Fresnel-zone LPA
+    # check (limit 54.4 m, ratio 1.46). Requesting 0.7x snaps the DEM stride
+    # down one notch, clears the check with no warnings, and leaves the
+    # field finite with nadir surface/bed delays matching the picks to
+    # <= 15 ns (< 1 frame bin; DEM-vs-pick, not a phase error). Cache-safe:
+    # this pass is new.
+    "facet_spacing_scale": 0.7}
+
+_GL_MEASURED_CAVEATS = (
+    "Measured references are CSARP_standard. Scout quirks recorded: the two "
+    "passes share fc/B/waveforms/PRF/SAR params exactly, but the product "
+    "fast-time bin differs 0.16% (33.3859 vs 33.3333 ns) and t0 by 167 ns "
+    "(5 bins), so every depth/delay comparison is made in METRES or "
+    "MICROSECONDS on each pass's OWN lattice and never by bin index; "
+    "img_comb blend lengths differ (low [3 us, -inf, 2.64 us; 10 us, -inf, "
+    "3.5 us] vs high [3, -inf, 1; 10, -inf, 3]) so the first ~3 us below "
+    "the surface is NOT one instrument across passes; the ft_wind decode "
+    "falls back on both passes and the scout hand-verified the true value "
+    "IS hanning; param_csarp.combine.method reads 'mvdr' on the 2017 frames "
+    "while param_combine reads 'standard' (param_combine is the one that "
+    "describes CSARP_standard). The 2017 surface pick sits ~25 m (5 range "
+    "bins) below the 2014 one against ArcticDEM while the picked ice "
+    "thicknesses agree to 7 m -- a common-mode twtt/elevation reference "
+    "offset, removed per frame by the surface registration gate, never "
+    "shared between passes. BedMachine Greenland v5 (150 m) reproduces only "
+    "23-46% of the radar-pick along-track bed roughness rms, so simulated "
+    "basal clutter is expected systematically smoother in fine texture than "
+    "measured (the --picked-bed residual corrects the NADIR bed onto the "
+    "low pass's picks). The high pass records only ~7.9 us of post-bed tail "
+    "(vs ~21.1 us for the low pass): bed-tail metrics beyond +3 us are "
+    "coverage-limited at altitude and tail_coverage records it.")
+
+LINES = {
+    ANTARCTIC_LINE: {},          # the module defaults (no-op activation)
+    GREENLAND_LINE: {
+        "LINE": GREENLAND_LINE,
+        "SEASON": _GL_SEASON_LOW,
+        "CRS": "EPSG:3413",
+        "CASE_PREFIX": "greenland_pair",
+        "OUT_DEFAULT": ROOT / "outputs" / "greenland_pair",
+        "FC_HZ": 195e6,
+        "LAM_ICE_M": C / (195e6 * float(np.sqrt(3.17))),
+        "PASSES": _GL_PASSES,
+        "ORDER": ["low", "high"],
+        "SEGMENTS": ("pilot", "full"),
+        # display origin = anchor along-track s of each segment's start
+        "S0_KM": {"pilot": 25.0, "full": 11.0},
+        "DECOMP_S_KM": {"pilot": 30.0, "full": 30.0},
+        "N_TRACES_BY_SEGMENT": {"pilot": 48, "full": 140},
+        "REF_PASS": "low",
+        "REF_SEASON": _GL_SEASON_LOW,
+        # Both low-pass frames supply the pick axis (the segment lives
+        # inside _069, but the axis spans the whole 99.7 km line so the
+        # scene window is always covered contiguously).
+        "REF_FRAMES": ("20140421_01_069", "20140421_01_070"),
+        "GL_S_KM": None,          # no grounding line: all grounded interior
+        "SYNTHETIC_KEYS": (SYN14_KEY,),
+        "MEASURED_CAVEATS": _GL_MEASURED_CAVEATS,
+        # products this line does NOT have wired (guarded in run())
+        "UNSUPPORTED": ("gamma_rssnr", "demogorgn_bed", "hybrid"),
+    },
+}
+# Season of the pick-axis frames (REF_FRAMES); the Antarctic line's is its
+# single SEASON.
+REF_SEASON = SEASON
+UNSUPPORTED = ()
+
+
+def activate_line(name):
+    """Rebind the line-specific module globals to registry entry ``name``.
+
+    ``antarctic_2016`` is the module's own default, so activating it is a
+    no-op and that line's behaviour/caches are bit-identical to before the
+    registry existed.
+    """
+    if name not in LINES:
+        raise ValueError(f"unknown line {name!r}; have {sorted(LINES)}")
+    globals().update(LINES[name])
+    return name
+
+
+def pass_season(spec):
+    """Season of one pass spec: its own ``season`` if the line mixes seasons
+    (the Greenland pair flies 2014 and 2017), else the line season."""
+    return spec.get("season", SEASON)
+
+
 def case_tag(picked_bed, gamma_rssnr=False, proc=False, dgn=False):
     return ((PBED_TAG if picked_bed else "")
             + (DGN_TAG if dgn else "")
@@ -440,7 +601,8 @@ def case_tag(picked_bed, gamma_rssnr=False, proc=False, dgn=False):
 
 def ref_bed_picks():
     """Radar-picked bed elevation along the anchor line (the reference LOW
-    pass), on the anchor along-track axis (EPSG:3031, s=0 at _005 trace 0).
+    pass), on the anchor along-track axis (the line CRS, s = 0 at the first
+    REF_FRAMES trace).
 
     Elevation convention is the one the tool's registration fits already use
     (run_altitude_comparison): ellipsoidal ice surface = Elevation -
@@ -449,10 +611,11 @@ def ref_bed_picks():
     WGS84-ellipsoidal datum as the REMA + BedMachine scene stack (no geoid
     term), so the residual against BedMachine is datum-consistent. Pick gaps
     stay NaN."""
-    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    tr = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
     xs, ys, beds = [], [], []
     for fid in REF_FRAMES:
-        frame = _retry(f"ref frame {fid}", lambda f=fid: load_frame(SEASON, f))
+        frame = _retry(f"ref frame {fid}",
+                       lambda f=fid: load_frame(REF_SEASON, f))
         lat, lon = rac._lonlat(frame)
         surf = np.asarray(frame.Surface.values, np.float64)
         elev = np.asarray(frame.Elevation.values, np.float64)
@@ -508,7 +671,7 @@ def apply_picked_bed(base, ref):
     """Rewrite the base scene's bed DEM in place as BedMachine + the anchor
     -line pick residual (PICKED_BED_NOTE). Returns the recorded stats."""
     dem, bed = base.dems[0], np.asarray(base.dems[1], np.float64)
-    tr = Transformer.from_crs("EPSG:3031", base.crs, always_xy=True)
+    tr = Transformer.from_crs(CRS, base.crs, always_xy=True)
     rx, ry = tr.transform(ref["x"], ref["y"])
     ny, nx = bed.shape
     xa, ya = base.transform * (0.0, 0.0)
@@ -788,7 +951,7 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
     surplus, so the conservation is exact only while the specular term
     dominates at nadir; the measured nadir shift is reported."""
     d, prov = fetch_rssnr_anchor()
-    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    tr = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
     sx, sy = tr.transform(d["lon"], d["lat"])
     s_smp = project_to_track(sx, sy, axis["x"], axis["y"], axis["s"])
     thick = C / (2.0 * np.sqrt(axis["eps_ice"])) * (d["btw"] - d["stw"])
@@ -864,7 +1027,7 @@ def apply_rssnr_gamma(base, axis, gmap, spec=None):
     the cross-track normal (apply_picked_bed's projection). Returns recorded
     stats."""
     bed = base.dems[1]
-    tr = Transformer.from_crs("EPSG:3031", base.crs, always_xy=True)
+    tr = Transformer.from_crs(CRS, base.crs, always_xy=True)
     rx, ry = tr.transform(axis["x"], axis["y"])
     ny, nx = bed.shape
     xa, ya = base.transform * (0.0, 0.0)
@@ -1059,7 +1222,7 @@ def apply_hybrid_bed(base, fsub, ct_m, seed, axis):
 
     gl_m, ramp_m = GL_S_KM * 1e3, GL_RAMP_KM * 1e3
     dem = np.asarray(base.dems[0], np.float64)
-    tr = Transformer.from_crs("EPSG:3031", base.crs, always_xy=True)
+    tr = Transformer.from_crs(CRS, base.crs, always_xy=True)
     rx, ry = tr.transform(axis["x"], axis["y"])
     ny, nx = dem.shape
     cols, rows = np.meshgrid(np.arange(nx) + 0.5, np.arange(ny) + 0.5)
@@ -1280,7 +1443,7 @@ def process_standard(p, sim):
     k0 = 2.0 * np.pi / lam
     ph = np.exp(2j * k0 * dz).astype(np.complex64)[:, None]
 
-    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    tr = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
     px, py = tr.transform(p["base"].nav_llh[:, 1], p["base"].nav_llh[:, 0])
     straight = straightness_stats(np.asarray(px), np.asarray(py), dz,
                                   round(L / spacing))
@@ -1429,6 +1592,7 @@ def process_standard_cached(p, sim, out_dir, att, surf_rough, force=False):
     jp.write_text(json.dumps({
         "meta_key": key, "meta": meta, "chain": proc["chain"],
         "p_lite": {"key": p["key"], "segment": p["segment"],
+                   "season": p.get("season", SEASON),
                    "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
                    "rev": p["rev"], "synthetic": p["synthetic"],
                    "spacing": p["spacing"], "dt": p["dt"],
@@ -1472,7 +1636,8 @@ def load_proc_pass(key, out_dir, segment="full_line", picked_bed=False,
     if not pl["synthetic"]:
         fsubs = []
         for fid, (a, b) in pl["parts"]:
-            fs = load_frame(SEASON, fid).isel(slow_time=slice(a, b))
+            fs = load_frame(pl.get("season", SEASON),
+                            fid).isel(slow_time=slice(a, b))
             if pl["rev"]:
                 fs = fs.isel(slow_time=slice(None, None, -1))
             fsubs.append(fs)
@@ -1480,6 +1645,7 @@ def load_proc_pass(key, out_dir, segment="full_line", picked_bed=False,
                 else xr.concat(fsubs, dim="slow_time",
                                combine_attrs="override"))
     p_lite = {"key": pl["key"], "segment": pl["segment"],
+              "season": pl.get("season", SEASON),
               "parts": [(fid, tuple(sl)) for fid, sl in pl["parts"]],
               "rev": pl["rev"], "synthetic": pl["synthetic"],
               "spacing": pl["spacing"], "dt": pl["dt"],
@@ -1601,9 +1767,10 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
     synth_altitude_fsub."""
     spec = PASSES[key]
     parts = spec[segment]
+    season = pass_season(spec)
     fsubs, bots, tw_ref = [], [], None
     for fid, (a, b) in parts:
-        frame = load_frame(SEASON, fid)
+        frame = load_frame(season, fid)
         tw = np.asarray(frame.twtt.values, np.float64)
         if tw_ref is None:
             tw_ref = tw
@@ -1645,7 +1812,7 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
         fsub_sim, bot_sim_full = upsample_fsub(fsub, bot_sub, posting_div)
         n_traces = int(fsub_sim.sizes["slow_time"])
 
-    params = rac.mcords_params(SEASON, spec["param_frame"])
+    params = rac.mcords_params(season, spec["param_frame"])
     wf = params["waveform"]
     f0, bw = wf["center_frequency_Hz"], wf["bandwidth_Hz"]
     window, win_note = rac.map_window(wf["pulse_compression_freq_window"])
@@ -1699,7 +1866,7 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
                                             spec_diffuse)
                           if gmap else None)
     idx = aux["idx"]
-    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    tr = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
 
     def _s_of(fs):
         lat_, lon_ = rac._lonlat(fs)
@@ -1714,7 +1881,8 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
     surf_sim = (surf[idx] if posting_div == 1
                 else np.asarray(fsub_sim.Surface.values, np.float64)[idx])
     bot_sim = bot_sub[idx] if posting_div == 1 else bot_sim_full[idx]
-    return {"key": key, "segment": segment, "parts": parts, "rev": spec["rev"],
+    return {"key": key, "segment": segment, "parts": parts,
+            "season": season, "rev": spec["rev"],
             "roll_note": roll_note, "params": params, "window": window,
             "win_note": win_note, "fsub": fsub, "bot": bot_sub, "surf": surf,
             "dt": dt, "t0f": t0f, "oversample": oversample, "f_alias": f_alias,
@@ -1844,7 +2012,8 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
     """run_level cache key for one chunk. Optional features (gamma,
     DEMOGORGN, and the hypothesis knobs) contribute keys ONLY when they are
     ON, so every pre-existing cache stays valid byte-for-byte."""
-    return {"season": SEASON, "pass": p["key"], "segment": p["segment"],
+    return {"season": p.get("season", SEASON), "pass": p["key"],
+            "segment": p["segment"],
             "picked_bed": p["picked_bed"],
             **({"gamma_rssnr": True, "rssnr_snapshot": RSSNR_SNAPSHOT,
                 "rssnr_k_db": p["aux"]["rssnr_gamma"]["k_db"]}
@@ -2504,7 +2673,7 @@ def bed_profile_correlations(p, a, a_const, gmap, axis):
     sim_rl = _smooth_db(s_sim, a["sim_bedlayer_prof_db"])  # bed-borne only
     # implied pattern -RSSNR(s) + K (== G2 - 2AH), at the sim traces'
     # anchor-axis position
-    tr = Transformer.from_crs("EPSG:4326", "EPSG:3031", always_xy=True)
+    tr = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
     px, py = tr.transform(p["base"].nav_llh[:, 1], p["base"].nav_llh[:, 0])
     s_anchor = project_to_track(px, py, axis["x"], axis["y"], axis["s"])
     implied = (np.interp(s_anchor, gmap["s"], gmap["g2_db"])
@@ -2901,9 +3070,11 @@ def source_label(key, p):
     if p.get("synthetic"):
         alt = p["synthetic"].get("synthetic_msl_m",
                                  p["synthetic"].get("agl_med_m", 0.0))
-        return (f"{SEASON} - SYNTHETIC {alt / 1e3:g} km constant-altitude "
-                f"pass on the {span} line (no measured data)")
-    return f"{SEASON} - measured {span} ({p['h_med'] / 1e3:.1f} km AGL)"
+        return (f"{p.get('season', SEASON)} - SYNTHETIC {alt / 1e3:g} km "
+                f"constant-altitude pass on the {span} line "
+                f"(no measured data)")
+    return (f"{p.get('season', SEASON)} - measured {span} "
+            f"({p['h_med'] / 1e3:.1f} km AGL)")
 
 
 def emit_pass_figs(out, key, p, a, zres, segment, gl_s_km, plot_s_max_km,
@@ -2950,7 +3121,21 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         bed_rough_extra_db=0.0, passes=None, spec=None,
         anchor="median", level_deficit_db=None, trace_decomp_s_km=None,
         add_14km=False, add_300km=False, per_pass_figs=False,
-        plot_s_max_km=None, proc_cache=False):
+        plot_s_max_km=None, proc_cache=False, line=None):
+    if line:
+        activate_line(line)
+    if segment not in SEGMENTS:
+        raise ValueError(f"line {LINE!r} has no {segment!r} segment; "
+                         f"have {list(SEGMENTS)}")
+    for feat, on in (("gamma_rssnr", gamma_rssnr),
+                     ("demogorgn_bed", demogorgn_bed)):
+        if on and feat in UNSUPPORTED:
+            raise ValueError(
+                f"{feat} is not wired for line {LINE!r}: "
+                + {"gamma_rssnr": "no required-surface-SNR mapping has "
+                   "been calibrated on this line",
+                   "demogorgn_bed": "DEMOGORGN is an ANTARCTIC-only bed "
+                   "ensemble (Bedmap3 grid)"}[feat])
     proc = processing == "standard"
     hybrid = segment == "full_line"
     if hybrid and not demogorgn_bed:
@@ -2984,14 +3169,17 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
              + ([SYN500_KEY] if add_500km else [])
              + ([SYN14_KEY] if add_14km else [])
              + ([SYN300_KEY] if add_300km else []))
+    missing = [k for k in order if k not in PASSES]
+    if missing:
+        raise ValueError(f"line {LINE!r} defines no pass(es) {missing}; "
+                         f"synthetics available: "
+                         f"{[k for k in SYNTHETIC_KEYS if k in PASSES]}")
     if passes:
         unknown = [k for k in passes if k not in order]
         if unknown:
             raise ValueError(f"unknown pass(es) {unknown}; have {order}")
         order = [k for k in order if k in passes]
-    n_traces = n_traces or {"pilot": N_TRACES_PILOT, "full": N_TRACES_FULL,
-                            "extended": N_TRACES_EXT,
-                            "full_line": N_TRACES_LINE}[segment]
+    n_traces = n_traces or N_TRACES_BY_SEGMENT[segment]
     ts_km = (DECOMP_S_KM[segment] if trace_decomp_s_km is None
              else trace_decomp_s_km)
     ts_km = [float(v) for v in np.atleast_1d(ts_km)]
@@ -3477,7 +3665,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 "scout-documented): reported, not tuned away. " + rec}
 
     config = {
-        "case": case, "segment": segment, "n_traces": n_traces,
+        "case": case, "line": LINE, "segment": segment,
+        "n_traces": n_traces,
         "att_db_per_km": att, "surf_rough": bool(surf_rough),
         "margin_us": MARGIN_US, "post_bed_window_us": POST_BED_US,
         "chunk_m": CHUNK_M, "picked_bed": bool(picked_bed),
@@ -3676,7 +3865,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         if add_30km and SYN30_KEY in order:
             p30, a30 = preps[SYN30_KEY], analyses[SYN30_KEY]
             s30 = p30["s_sim"]
-            tr = Transformer.from_crs("EPSG:4326", "EPSG:3031",
+            tr = Transformer.from_crs("EPSG:4326", CRS,
                                       always_xy=True)
             px, py = tr.transform(p30["base"].nav_llh[:, 1],
                                   p30["base"].nav_llh[:, 0])
@@ -3744,7 +3933,14 @@ def _report(out, case, config, metrics, notes, figs):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
+    # --line is pre-parsed so the parser below advertises the ACTIVE
+    # line's segments/defaults in its choices and help text.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--line", choices=sorted(LINES),
+                     default=ANTARCTIC_LINE)
+    line = pre.parse_known_args()[0].line
+    activate_line(line)
+    ap = argparse.ArgumentParser(description=__doc__, parents=[pre])
     ap.add_argument("--segment", choices=list(SEGMENTS), default="pilot",
                     help="study segment: 'pilot' 10 km, 'full' 50 km "
                     "(s 18-68), 'extended' 69.7 km (s 0 -> the grounding "
@@ -3941,7 +4137,7 @@ def main():
         trace_decomp_s_km=args.trace_decomp_s,
         add_14km=args.add_14km, add_300km=args.add_300km,
         per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,
-        proc_cache=args.proc_cache,
+        proc_cache=args.proc_cache, line=args.line,
         spec=(None if args.specular_fraction is None
               else (args.specular_fraction, args.spec_tilt_deg,
                     args.diffuse_exponent)))
