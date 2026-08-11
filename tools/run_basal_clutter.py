@@ -578,6 +578,12 @@ LINES = {
         # the Antarctic line's -1..13.5 us / -90..5 dB framing.
         "RADARGRAM_Y_US": (-1.0, 34.0),
         "RADARGRAM_DB": (-120.0, 5.0),
+        # ... and the same for the surface-referenced profile figures. The
+        # DATA extent must reach past the deepest bed (31.2 us) or the bed
+        # returns are never computed, not merely cropped.
+        "PROFILE_REL_US": (-1.5, 34.5),
+        "PROFILE_X_US": (-1.0, 34.0),
+        "PROFILE_DB": (-140.0, 5.0),
         # Required-surface-SNR store for THIS line (scouted 2026-08-11: the
         # greenland store holds 5 698 frames / 182 segments, and BOTH of the
         # pair's segments are in it -- 20140421_01 with 66 frames and
@@ -1438,6 +1444,16 @@ BED_OVERLAY = True      # --no-bed-overlay
 # peak on the low pass (vs ~55 dB on the Antarctic line).
 RADARGRAM_Y_US = (-1.0, 13.5)
 RADARGRAM_DB = (-90.0, 5.0)
+# Surface-referenced PROFILE windows, shared by fig_decomposition,
+# fig_decomposition_trace and fig_decomposition_zones. PROFILE_REL_US is a
+# DATA window (rel_mean_profile builds the arrays over it), not just an axis
+# limit -- too short and the bed is not merely off-plot, it is never
+# computed. Same line-specific sizing as RADARGRAM_*: the 2016 DC-8 bed sits
+# ~8 us below the surface and ~55 dB down, the Greenland bed ~29 us below and
+# ~108 dB down.
+PROFILE_REL_US = (-1.5, 14.5)      # rel_mean_profile extent (data)
+PROFILE_X_US = (-1.0, 13.5)        # plotted x range
+PROFILE_DB = (-110.0, 5.0)         # plotted y range
 N_LOOKS_SIM = 3
 CHUNK_M_PROC = 3000.0    # fine-posting chunks: ~200 traces/chunk (memory)
 REAL_CHAIN_2016 = {
@@ -2260,10 +2276,18 @@ def clutter_metrics(P, twtt, dt, t_s, t_b):
             "_spk": spk, "_mid": mid, "_bed": bed}
 
 
-def rel_mean_profile(P, twtt, dt, t_ref, norm, lo_us=-1.5, hi_us=14.5):
+def rel_mean_profile(P, twtt, dt, t_ref, norm, lo_us=None, hi_us=None):
     """(rel_us, dB): mean power vs twtt below each trace's own reference
     time, each trace normalized by ``norm`` (its own surface peak), integer
-    bin shifts (every grid here shares the 20.202 ns lattice)."""
+    bin shifts (every grid here shares the 20.202 ns lattice).
+
+    Defaults to the ACTIVE LINE's PROFILE_REL_US: this is the data extent,
+    so a line whose bed sits deeper than the default simply would not have
+    its bed in the profile at all."""
+    if lo_us is None:
+        lo_us = PROFILE_REL_US[0]
+    if hi_us is None:
+        hi_us = PROFILE_REL_US[1]
     k0 = int(round(lo_us * 1e-6 / dt))          # negative
     k1 = int(round(hi_us * 1e-6 / dt))
     nrel = k1 - k0 + 1
@@ -2735,8 +2759,8 @@ def fig_decomposition_zones(out, key, zres, gl_km=GL_S_KM,
                 ax.plot(*z["profs"][pk], label=label, **st)
         met = z["metrics"]
         res = met.get("bed_window_residual_db")
-        ax.set_xlim(-1.0, 13.5)
-        ax.set_ylim(-110, 5)
+        ax.set_xlim(*PROFILE_X_US)
+        ax.set_ylim(*PROFILE_DB)
         ax.grid(alpha=0.3)
         ax.set_title(
             f"{key} {zn.upper()} (s {met['s_km'][0]:.0f}-"
@@ -3028,8 +3052,9 @@ def fig_decomposition(out, preps, analyses, keys=None, ablation=None,
             x0, y0 = a["profs"]["sim_surface"]
             xv, yv = av["profs"]["sim_surface"]
             dev = float(np.nanmax(np.abs(
-                np.interp(x0, xv, yv) - y0)[(x0 >= -1.0) & (x0 <= 13.5)
-                                            & (y0 > -105.0)]))
+                np.interp(x0, xv, yv) - y0)[(x0 >= PROFILE_X_US[0])
+                                            & (x0 <= PROFILE_X_US[1])
+                                            & (y0 > PROFILE_DB[0] + 5.0)]))
             print(f"  decomposition {key} [{label}]: surface-borne max "
                   f"deviation {dev:.3f} dB vs picked-bed run", flush=True)
             if dev > 0.3:
@@ -3042,9 +3067,10 @@ def fig_decomposition(out, preps, analyses, keys=None, ablation=None,
         ax.axvspan(1.0, tb - MID_HI_US, color="tab:blue", alpha=0.06,
                    label="mid-column window" if k == 0 else None)
         ax.axvline(tb, color="0.5", lw=0.8, ls=":")
-        ax.text(tb, -108, " median bed", fontsize=7, color="0.4")
-        ax.set_xlim(-1.0, 13.5)
-        ax.set_ylim(-110, 5)
+        ax.text(tb, PROFILE_DB[0] + 2.0, " median bed", fontsize=7,
+                color="0.4")
+        ax.set_xlim(*PROFILE_X_US)
+        ax.set_ylim(*PROFILE_DB)
         ax.grid(alpha=0.3)
         ax.set_title(f"{key} ({preps[key]['h_med']:.0f} m AGL)  "
                      f"[{a['verdict']}]", fontsize=10)
@@ -3100,8 +3126,8 @@ def fig_decomposition_trace(out, preps, analyses, keys=None,
         ax.axvspan(tb - BED_LO_US, tb + BED_HI_US, color="tab:green",
                    alpha=0.08, label="bed-return window" if k == 0 else None)
         ax.axvline(tb, color="0.5", lw=0.8, ls=":")
-        ax.set_xlim(-1.0, 13.5)
-        ax.set_ylim(-110, 5)
+        ax.set_xlim(*PROFILE_X_US)
+        ax.set_ylim(*PROFILE_DB)
         ax.grid(alpha=0.3)
         ax.set_title(f"{key} ({preps[key]['h_med']:.0f} m AGL)  s = "
                      f"{ti['sim_s_km']:.2f} km, trace {ti['sim_trace_index']}"

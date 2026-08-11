@@ -25,6 +25,7 @@ LINE_GLOBALS = (
     "N_TRACES_BY_SEGMENT", "REF_PASS", "REF_SEASON", "REF_FRAMES",
     "GL_S_KM", "SYNTHETIC_KEYS", "MEASURED_CAVEATS", "UNSUPPORTED",
     "RADARGRAM_Y_US", "RADARGRAM_DB",
+    "PROFILE_REL_US", "PROFILE_X_US", "PROFILE_DB",
     "RSSNR_SNAPSHOT", "RSSNR_STORE", "RSSNR_CACHE",
     "LEVEL_ANCHOR_DEFICIT_DB", "LEVEL_ANCHOR_NOTE",
 )
@@ -98,6 +99,46 @@ def test_greenland_radargram_window_reaches_its_bed(greenland):
     assert y_hi >= 34.0            # deepest bed 31.2 us + margin
     lo_db, _ = greenland.RADARGRAM_DB
     assert lo_db <= -115.0         # low pass bed sits ~108 dB down
+
+
+def test_greenland_profile_window_reaches_its_bed(greenland):
+    """PROFILE_REL_US is a DATA window: too short and the bed returns are
+    never computed, so the decomposition figures cannot show them however the
+    axes are set. All three profile figures share these globals."""
+    lo, hi = greenland.PROFILE_REL_US
+    assert lo <= -1.0
+    assert hi >= 32.0              # deepest bed 31.2 us
+    x_lo, x_hi = greenland.PROFILE_X_US
+    assert x_hi >= 34.0
+    assert x_hi <= hi              # never plot beyond what was computed
+    db_lo, _ = greenland.PROFILE_DB
+    assert db_lo <= -130.0         # bed returns sit ~108 dB down
+    # framing is consistent with the radargram panels
+    assert greenland.PROFILE_X_US[1] == greenland.RADARGRAM_Y_US[1]
+
+
+def test_antarctic_profile_window_is_the_module_default():
+    assert "PROFILE_REL_US" not in rbc.LINES[rbc.ANTARCTIC_LINE]
+    assert rbc.PROFILE_REL_US == (-1.5, 14.5)
+    assert rbc.PROFILE_X_US == (-1.0, 13.5)
+    assert rbc.PROFILE_DB == (-110.0, 5.0)
+
+
+def test_rel_mean_profile_extent_follows_the_active_line(line_sandbox):
+    """The default arguments must be resolved at CALL time, not bound at
+    import, or activating a line would silently keep the Antarctic extent."""
+    dt = 33.3333e-9
+    n = 2200
+    twtt = np.arange(n) * dt
+    P = np.ones((3, n))
+    t_ref = np.full(3, 400 * dt)
+    norm = np.ones(3)
+    rel_a, _ = rbc.rel_mean_profile(P, twtt, dt, t_ref, norm)
+    assert rel_a[-1] == pytest.approx(14.5, abs=0.05)
+    line_sandbox(rbc.GREENLAND_LINE)
+    rel_g, _ = rbc.rel_mean_profile(P, twtt, dt, t_ref, norm)
+    assert rel_g[-1] == pytest.approx(34.5, abs=0.05)
+    assert rel_g[-1] > rel_a[-1]
 
 
 def test_antarctic_radargram_window_is_the_module_default():
