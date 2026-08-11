@@ -1953,3 +1953,131 @@ tail not floor-limited (+27 dB margin at bed+3 us).
 
 STOPPED HERE by design: low/mid/syn passes on the full line await user
 review of the high-pass result.
+
+## FULL-LINE ALTITUDE CAMPAIGN: staged per-pass delivery, low/mid + syn14km/syn300km (2026-08-10)
+
+User-approved continuation after the high-pass review. Two new plot knobs
+(the delivered high-pass figures were replotted first, then every other
+pass emitted its own figure set the moment it completed):
+
+* `--plot-s-max S` crops the PLOTTED radargram along-track range (the data,
+  caches and every metric keep the full 148.45 km); `--fig-width-scale`
+  (added by the user in e684f64) scales the radargram panel width. The
+  campaign ran `--plot-s-max 100 --fig-width-scale 2`, which preserves the
+  delivered 3x-width figure's px-per-km on the 0-100 km crop.
+* `--per-pass-figs` (STAGED DELIVERY): each pass's complete figure set is
+  written as SEPARATE suffixed files (radargrams_<pass>.png,
+  decomposition_<pass>.png, bed_tail_<pass>.png,
+  decomposition_trace_<pass>.png, decomposition_zones_<pass>.png)
+  immediately after that pass's sim+processing+analysis, with a
+  `FIGSET_READY <pass>` marker line; the unsuffixed combined figures are
+  skipped in this mode. Every figure top carries the SOURCE-DATA
+  provenance (season + frame span + altitude, e.g. "2016_Antarctica_DC8 -
+  measured 20161031_07_002-005 (10.8 km AGL)"; synthetics are labeled
+  "SYNTHETIC <alt> km constant-altitude pass on the 20161105_05_005-007
+  line (no measured data)"). Helpers `frame_span` / `source_label` /
+  `emit_pass_figs`; zone_analysis moved into the pass loop so the zones
+  figure can be emitted per pass.
+* NEW SYNTHETIC ALTITUDES `syn14km` (14,000 m) and `syn300km` (300,000 m)
+  -- the syn30km/syn500km constructions at the campaign's altitudes
+  (`--add-14km` / `--add-300km`; syn30km/syn500km untouched, not run here).
+
+Each pass ran as its own invocation of the same command family
+(`--segment full_line --demogorgn-bed --gamma-from-rssnr --processing
+standard --no-companion --anchor level --level-deficit-db 3.56 --att 20
+--passes <key> --per-pass-figs --plot-s-max 100 --fig-width-scale 2
+--out-name full_line`), sharing one chunk cache; per-pass metrics/config
+snapshots are preserved as `metrics_<key>.json` / `run_config_<key>.json`
+(the plain metrics.json is the last invocation's). Everything mirrored to
+`outputs/verification/basal_clutter_full_line/`.
+
+### 2-trace pilots for the new altitudes (before their full runs)
+
+| quantity | syn14km | syn300km (unscaled -> scaled) |
+|---|---|---|
+| AGL med | 13,934 m | 299,934 m |
+| reach (surface / bed -> ct) | 8,548 / 3,604 -> +-8,548 m | 38,088 / 16,438 -> +-38,088 m |
+| facet spacing | 56.20 m (scale 1.0) | 257.9 -> **180.5 m (scale 0.7)** |
+| LPA check | ratio 1.26 (KEPT: milder than the accepted airborne 1.43 class) | **1.36 -> 1.03** (the syn500km failure class; 0.7x snaps the stride down) |
+| window t0 / n_samples | 89.90 us / 4441 | 1997.88 us / 4441 |
+| alias-limited aperture | 800 m / 55 traces | 15,996 m / 1078 traces (half-angle 1.522 deg) |
+| phase argument 2k0*opl vs f64 ulp | 1.2e5 rad, margin 8.3e15x | 2.4e6 rad, margin 5.1e15x |
+| layer peak-to-median (coherence) | 69.0 / 71.0 dB | 34.8 / 53.3 dB |
+| scene grid | 4852 x 3402 (~66 MB/iface) | 6699 x 5248 (~141 MB/iface) |
+
+Both pilots PILOT_OK (fields finite, no alias warning, dropped power
+recorded). syn300km's pilot bed-layer dropped fraction is large (0.89 at
+the 2-trace crop; 0.245-class at syn500km full runs) -- the documented
+reach-construction property (bed facets simulated over the surface-driven
++-38 km reach while bed arrivals beyond +-16 km fall past the window
+end); it does not touch the bed window. An earlier syn14km pilot attempt
+died silently when the session scratchpad was wiped mid-flight; it was
+re-run synchronously and is the one recorded here.
+
+### The zone-split table across altitude (dB rel own surface-return peak)
+
+Bed-window level (sim / meas, residual), tail guard; grounded s 0-69.7 km
+vs floating (shelf base) s 69.7-148.4 km:
+
+| pass | AGL | grounded sim/meas (resid) | floating sim/meas (resid) | grounded guard | floating guard | grounded slope sim/meas | floating slope sim/meas | midcol resid g/f |
+|---|---|---|---|---|---|---|---|---|
+| low | 449 m | -53.9 / -57.9 (**+4.03**) | -28.1 / -40.8 (**+12.63**) | FAIL -0.9 | ok +30.7 | -6.09 / -8.25 | -8.90 / -6.68 | -18.3 / -16.5 |
+| mid | 9,080 m | -50.0 / -49.2 (**-0.85**) | -25.2 / -28.2 (**+3.01**) | ok +20.1 | ok +36.3 | -4.72 / -4.76 | -2.75 / -6.53 | -9.9 / -12.7 |
+| high | 10,763 m | -50.7 / -48.8 (**-1.88**) | -26.2 / -28.1 (**+1.88**) | ok +24.4 | ok +39.9 | -1.54 / -3.66 | -1.72 / -6.61 | -9.8 / -13.0 |
+| syn14km | 13,934 m | -49.9 / -- | -26.1 / -- | ok +21.3 | ok +38.2 | -0.26 / -- | -3.32 / -- | -- |
+| syn300km | 299,934 m | -34.1 / -- | -27.0 / -- | **FAIL -12.6** | FAIL +3.4 | -0.51 / -- | +2.09 / -- | -- |
+
+* **The floating (specular-regime) residual is altitude-dependent and
+  collapses toward zero with altitude: +12.6 (low) -> +3.0 (mid) -> +1.9
+  dB (high).** The high-pass agreement reported at the review was not a
+  fluke of the calibration pass, but it does NOT transfer down: at 449 m
+  the fixed K overshoots the measured shelf-base brightness by 12.6 dB.
+  The measured floating bed window itself moves -40.8 -> -28.2 -> -28.1
+  dB (rel own surface peak) from low to mid/high while the sim sits at
+  -25..-28 dB everywhere -- i.e. the MEASUREMENT changes with altitude
+  (at 449 m the pulse-limited specular surface peak is relatively much
+  stronger, and/or the real shelf base decorrelates the specular gain the
+  flat-ish NN bed provides), and the effective-gamma mapping only
+  reproduces the altitude regime it was anchored in. This is the
+  campaign's headline caveat on the specular-regime story.
+* Grounded residuals reproduce the known family behavior (low +4.0, the
+  standing overshoot; mid/high within 1.9 dB, gate-passing); the
+  whole-line level-anchor medians read +9.79 / +2.50 / +1.98 dB
+  (low/mid/high) -- the low pass FAILS the 2 dB gate on the full line
+  because the floating overshoot now dominates its median (recorded, not
+  re-anchored).
+* Floating measured tail slopes are steady at -6.5..-6.7 dB/us across all
+  three altitudes (the specular signature), while the sim's floating
+  slope goes -8.9 -> -2.7 -> -1.7: the NN-staircase/cross-track-ridge
+  artifact hurts most at altitude (excess at bed+2 us +12.3 / +10.0 /
+  +11.2 dB).
+* **syn300km verdict: at 300 km the grounded bed is clutter-buried (zone
+  guard -12.6 dB) while the floating specular shelf base still peeks
+  above the co-arriving surface clutter (+3.4 dB, below the 10 dB
+  fair-comparison threshold).** Whole-line bed-over-clutter -2.8 dB --
+  between syn30km (+7.1 on the extended segment) and syn500km (-24.7):
+  the clutter-blindness onset sits between 14 km (syn14km: +39.5 dB, still
+  wide open) and 300 km on this line. The syn300km grounded-min clearance
+  reads -15.9 m with clamp frac 1e-5: the +-38 km window catches a spot
+  where DEMOGORGN pokes above REMA; the existing clamp enforces the
+  guard (recorded).
+
+### Timings / mechanics
+
+| pass | sim wall | chunks x s/chunk | aperture (traces) | invocation wall |
+|---|---|---|---|---|
+| high (replay for the figset) | (cached) | 49 (replay) | 632 m (44) | ~9 min |
+| low | 3,460.5 s (57.7 min) | 49 x ~70.7 | 86 m (7) | ~66 min |
+| mid | 1,563.4 s (26.1 min) | 49 x ~32.2 | 550 m (38) | ~33 min |
+| syn14km | 765.8 s (12.8 min) | 49 x ~16.6 | 800 m (55) | ~19 min |
+| syn300km | 1,157.7 s (19.3 min) | 49 x ~23.6 | 15,996 m (1078) | ~35 min |
+
+One-time fetches: syn14km REMA window (prep 260 s incl fetch), syn300km's
++-38 km REMA window is the big one (6699 x 5248 at 32 m, ~141 MB/iface in
+memory; prep 766 s incl fetch); low's own narrow window fetched during its
+run. Chunk cache now 5 passes x 49 chunks under `full_line/runs/`.
+Tests: **331 green** (unit 308 -> 312; 4 added: syn14/syn300 pattern +
+pilot-verdict scales, geometry scaling, frame_span/source_label format,
+emit_pass_figs file set + crop knob), ruff clean. Figure/marker delivery
+order: high (replay) -> low -> mid -> syn14km -> syn300km, each announced
+with FIGSET_READY when its set hit disk.

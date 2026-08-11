@@ -442,12 +442,14 @@ def test_syn500km_pass_entry_follows_the_syn30km_pattern():
         assert s500[k] == s30[k]
     assert s500["pilot"] == rbc.PASSES["low"]["pilot"]
     assert s500["full"] == rbc.PASSES["low"]["full"]
-    # only the orbital pass carries the spacing scale (cache safety)
+    # only the wide-reach orbital passes may carry a spacing scale (cache
+    # safety: no real pass, and no pre-existing synthetic, ever moves)
     assert s500["facet_spacing_scale"] == pytest.approx(0.7)
     assert "facet_spacing_scale" not in s30
     for k in ("low", "mid", "high"):
         assert "facet_spacing_scale" not in rbc.PASSES[k]
-    assert rbc.SYNTHETIC_KEYS == (rbc.SYN30_KEY, rbc.SYN500_KEY)
+    assert rbc.SYNTHETIC_KEYS == (rbc.SYN30_KEY, rbc.SYN500_KEY,
+                                  rbc.SYN14_KEY, rbc.SYN300_KEY)
     assert rbc.SYN500_KEY not in rbc.ORDER
 
 
@@ -833,3 +835,86 @@ def test_run_rejects_full_line_without_the_hybrid_bed():
         rbc.run(segment="full_line")
     with pytest.raises(ValueError, match="ablation"):
         rbc.run(segment="full_line", demogorgn_bed=True, bed_ablation=True)
+
+
+# ---------------- altitude-campaign synthetics (syn14km / syn300km) + figs
+
+def test_new_synthetic_altitude_passes_follow_the_pattern():
+    """syn14km/syn300km mirror the syn30km construction: LOW-pass line and
+    picks on every segment, constant ellipsoidal height, not in ORDER."""
+    assert rbc.SYN14_MSL_M == 14000.0 and rbc.SYN300_MSL_M == 300000.0
+    for skey, msl in ((rbc.SYN14_KEY, 14000.0), (rbc.SYN300_KEY, 300000.0)):
+        s = rbc.PASSES[skey]
+        assert s["synthetic_msl_m"] == msl
+        assert s["param_frame"] == rbc.PASSES["low"]["param_frame"]
+        assert not s["rev"]
+        for seg in rbc.SEGMENTS:
+            assert s[seg] == rbc.PASSES["low"][seg]
+        assert skey not in rbc.ORDER
+    # PASSES insertion order stays ORDER + SYNTHETIC_KEYS (config contract)
+    assert list(rbc.PASSES) == rbc.ORDER + list(rbc.SYNTHETIC_KEYS)
+    # pilot-measured LPA verdicts: syn300km needs the syn500km-class 0.7x
+    # facet-spacing scale (ratio 1.36 unscaled); syn14km stays unscaled
+    # (ratio 1.26, milder than the accepted airborne-family 1.43 class)
+    assert rbc.PASSES[rbc.SYN300_KEY]["facet_spacing_scale"] \
+        == pytest.approx(0.7)
+    assert "facet_spacing_scale" not in rbc.PASSES[rbc.SYN14_KEY]
+
+
+def test_new_synthetic_altitude_geometry_scales():
+    """Derived geometry at the two new altitudes: reach and alias-limited
+    aperture bracket between the airborne high pass and syn500km."""
+    lam = C / rbc.FC_HZ
+    r14 = rbc.derive_reach(14.0e3, 12.4e-6, 421.0)
+    assert 8e3 < r14["ct_m"] < 11e3               # vs high's ~7.4 km
+    r300 = rbc.derive_reach(300.0e3, 12.4e-6, 421.0)
+    assert 33e3 < r300["ct_m"] < 42e3             # vs syn500km's ~45-49 km
+    assert r300["ct_m"] == pytest.approx(r300["surface_reach_m"])
+    L14, th14 = rbc.alias_limited_aperture(lam, 14.85, 14.7e3)
+    L300, th300 = rbc.alias_limited_aperture(lam, 14.85, 3.007e5)
+    assert th14 == pytest.approx(1.522, abs=0.01)
+    assert th14 == pytest.approx(th300, abs=1e-6)  # posting-set half-angle
+    assert 700.0 < L14 < 900.0
+    assert 15e3 < L300 < 17e3
+
+
+def test_frame_span_and_source_label():
+    assert rbc.frame_span([("20161031_07_005", (0, 1)),
+                           ("20161031_07_004", (0, 1)),
+                           ("20161031_07_003", (0, 1)),
+                           ("20161031_07_002", (0, 1))]) \
+        == "20161031_07_002-005"
+    assert rbc.frame_span([("20161105_05_005", (0, 1))]) == "20161105_05_005"
+    assert rbc.frame_span([("20161105_05_005", (0, 1)),
+                           ("20161028_05_006", (0, 1))]) \
+        == "20161105_05_005/20161028_05_006"
+    p_meas = {"parts": rbc.PASSES["high"]["full_line"], "h_med": 10763.0}
+    lbl = rbc.source_label("high", p_meas)
+    assert lbl == ("2016_Antarctica_DC8 - measured 20161031_07_002-005 "
+                   "(10.8 km AGL)")
+    p_syn = {"parts": rbc.PASSES["low"]["full_line"],
+             "synthetic": {"synthetic_msl_m": 14000.0}}
+    lbl_s = rbc.source_label("syn14km", p_syn)
+    assert "SYNTHETIC 14 km" in lbl_s
+    assert "20161105_05_005-007" in lbl_s and "no measured data" in lbl_s
+
+
+def test_emit_pass_figs_writes_suffixed_labeled_files(tmp_path):
+    """The staged-delivery figure set: separate per-pass files, written from
+    one pass's analysis alone (no other pass needed)."""
+    p, sim = _synthetic_pass()
+    p["parts"] = rbc.PASSES["low"]["full_line"]
+    p["reach"] = {"ct_m": 2500.0}
+    a = rbc.analyze_pass(p, sim, trace_s_km=3.0)
+    figs = rbc.emit_pass_figs(tmp_path, "syn30km", p, a, None, "extended",
+                              None, None, "demogorgn")
+    names = sorted(f.name for f in figs)
+    assert names == ["bed_tail_syn30km.png", "decomposition_syn30km.png",
+                     "decomposition_trace_syn30km.png",
+                     "radargrams_syn30km.png"]
+    assert all(f.exists() for f in figs)
+    # the crop knob is plot-only and accepted end-to-end
+    fp = rbc.fig_radargrams(tmp_path, {"syn30km": p}, {"syn30km": a},
+                            "extended", keys=["syn30km"], plot_s_max_km=3.0,
+                            fname="radargrams_crop.png", src="SRC LINE")
+    assert fp.exists() and fp.name == "radargrams_crop.png"

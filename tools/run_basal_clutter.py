@@ -300,7 +300,35 @@ PASSES[SYN500_KEY] = {
     # down one notch and brings the built facets back under the limit;
     # measured in the 2-trace pilot. Cache-safe: only this new pass.
     "facet_spacing_scale": 0.7}
-SYNTHETIC_KEYS = (SYN30_KEY, SYN500_KEY)
+
+# Altitude-campaign synthetics (--add-14km / --add-300km, 2026-08-10): the
+# same constant-ellipsoidal-height construction at 14 km (high-altitude
+# airborne, ~1.3x the high pass) and 300 km (low LEO). Each new altitude
+# gets the syn500km-style 2-trace phase/aperture pilot before its full run;
+# geometry (reach / facet spacing / alias-limited aperture / window origin)
+# is derived, recorded in the config and in the findings note.
+SYN14_KEY = "syn14km"
+SYN14_MSL_M = 14000.0
+PASSES[SYN14_KEY] = {
+    "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
+    "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
+    "extended": PASSES["low"]["extended"],
+    "full_line": PASSES["low"]["full_line"],
+    "synthetic_msl_m": SYN14_MSL_M}
+SYN300_KEY = "syn300km"
+SYN300_MSL_M = 300000.0
+PASSES[SYN300_KEY] = {
+    "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
+    "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
+    "extended": PASSES["low"]["extended"],
+    "full_line": PASSES["low"]["full_line"],
+    "synthetic_msl_m": SYN300_MSL_M,
+    # 2-trace pilot (2026-08-10): beta = 0.5 spacing (258 m) builds 351 m
+    # facets on the anisotropic +-38 km window (LPA ratio 1.36 -- the
+    # syn500km failure class), so the same 0.7x request snaps the stride
+    # down and clears the check. Cache-safe: this pass is new.
+    "facet_spacing_scale": 0.7}
+SYNTHETIC_KEYS = (SYN30_KEY, SYN500_KEY, SYN14_KEY, SYN300_KEY)
 
 MEASURED_CAVEATS = (
     "Measured references are CSARP_standard. Scout pitfalls recorded: the "
@@ -2226,7 +2254,7 @@ def zone_analysis(p, a, gl_km=GL_S_KM):
 
 
 def fig_decomposition_zones(out, key, zres, gl_km=GL_S_KM,
-                            fname="decomposition_zones.png"):
+                            fname="decomposition_zones.png", src=None):
     """Trace-averaged decomposition of ONE pass split into the grounded and
     floating sub-windows: measured vs sim total vs surface/bed returns,
     surface-referenced, one panel per zone (fig_decomposition's series)."""
@@ -2261,8 +2289,9 @@ def fig_decomposition_zones(out, key, zres, gl_km=GL_S_KM,
         if k == 0:
             ax.set_ylabel("dB rel own surface-return peak (mean power)")
             ax.legend(fontsize=8, loc="upper right")
-    fig.suptitle(f"zone-split decomposition, GL at s = {gl_km:g} km "
-                 "(grounded rock bed vs floating ice-ocean shelf base)")
+    title = (f"zone-split decomposition, GL at s = {gl_km:g} km "
+             "(grounded rock bed vs floating ice-ocean shelf base)")
+    fig.suptitle((src + "\n" + title) if src else title)
     fig.tight_layout()
     fp = out / fname
     fig.savefig(fp, dpi=130)
@@ -2412,13 +2441,17 @@ def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
 
 
 def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
-                   gl_s_km=None, w_scale=1.0):
+                   gl_s_km=None, w_scale=1.0, plot_s_max_km=None,
+                   fname="radargrams.png", src=None):
     """Measured (top) vs simulated per pass, shared surface-referenced twtt
     axis and one shared dB-rel-surface color scale. A synthetic pass has no
     measured data: its top panel is a placeholder. ``ablation`` = list of
     (preps, analyses, label) bed-source rows appended below the picked-bed
     row (row 2 is then labeled 'picked bed'): the clean bed-source
-    ablation. ``gl_s_km`` marks the grounding line on every panel."""
+    ablation. ``gl_s_km`` marks the grounding line on every panel.
+    ``plot_s_max_km`` crops the PLOTTED along-track range (the data and
+    every metric keep the full segment); ``src`` prepends a source-data
+    provenance line to the figure title."""
     keys = keys or ORDER
     ablation = ablation or []
     y_lo, y_hi = -1.0, 13.5
@@ -2465,23 +2498,31 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
                                 alpha=0.85)
                     ax_.text(gl_s_km, y_lo + 0.4, " GL", color="tab:red",
                              fontsize=8, va="top")
+        if plot_s_max_km is not None:
+            s_km_ = s0 + p["s_sim"] / 1e3
+            for r in range(nrow):
+                axs[r, k].set_xlim(float(s_km_[0]),
+                                   min(float(s_km_[-1]), plot_s_max_km))
         axs[nrow - 1, k].set_xlabel("anchor along-track s (km)")
     for r in range(nrow):
         axs[r, 0].set_ylabel("twtt below surface (us)")
-    fig.suptitle(
-        "basal-clutter altitude triplet: measured (top) vs simulated "
-        "surface+bed, dB rel own surface peak"
-        + (" -- bed-source ablation: picked bed / "
-           + " / ".join(label for _, _, label in ablation)
-           + ", all else identical" if ablation else ""))
+    title = ("basal-clutter altitude comparison: measured (top) vs simulated "
+             "surface+bed, dB rel own surface peak"
+             + (" -- bed-source ablation: picked bed / "
+                + " / ".join(label for _, _, label in ablation)
+                + ", all else identical" if ablation else "")
+             + (f"\n[plotted s <= {plot_s_max_km:g} km of the full segment]"
+                if plot_s_max_km is not None else ""))
+    fig.suptitle((src + "\n" + title) if src else title, fontsize=11)
     fig.tight_layout()
-    fp = out / "radargrams.png"
+    fp = out / fname
     fig.savefig(fp, dpi=130)
     plt.close(fig)
     return fp
 
 
-def fig_decomposition(out, preps, analyses, keys=None, ablation=None):
+def fig_decomposition(out, preps, analyses, keys=None, ablation=None,
+                      fname="decomposition.png", src=None):
     """Per pass: measured vs sim total vs the sim's per-interface split
     (surface-borne vs bed-borne) mean-power profiles below the surface.
 
@@ -2542,16 +2583,18 @@ def fig_decomposition(out, preps, analyses, keys=None, ablation=None):
         if k == 0:
             ax.set_ylabel("dB rel own surface peak (mean power)")
             ax.legend(fontsize=8, loc="upper right")
-    fig.suptitle("clutter decomposition: which interface supplies the "
-                 "mid-column energy (per-layer coherent fields)")
+    title = ("clutter decomposition: which interface supplies the "
+             "mid-column energy (per-layer coherent fields)")
+    fig.suptitle((src + "\n" + title) if src else title)
     fig.tight_layout()
-    fp = out / "decomposition.png"
+    fp = out / fname
     fig.savefig(fp, dpi=130)
     plt.close(fig)
     return fp
 
 
-def fig_decomposition_trace(out, preps, analyses, keys=None):
+def fig_decomposition_trace(out, preps, analyses, keys=None,
+                            fname="decomposition_trace.png", src=None):
     """SINGLE-TRACE variant of fig_decomposition: the same measured / sim
     total / sim surface-borne / sim bed-borne curves at ONE slow-time
     location (``--trace-decomp-s``, recorded per pass in the config) instead
@@ -2601,18 +2644,19 @@ def fig_decomposition_trace(out, preps, analyses, keys=None):
             ax.set_ylabel("dB rel own surface-return peak (single trace)")
             ax.legend(fontsize=8, loc="upper right")
     s_list = sorted({round(ti["requested_s_km"], 2) for _, _, ti in panels})
-    fig.suptitle("SINGLE-TRACE decomposition, anchor s = "
-                 + " / ".join(f"{v:.2f}" for v in s_list) + " km"
-                 "\n(one sounding per panel, not the trace ensemble mean)",
-                 fontsize=10)
+    title = ("SINGLE-TRACE decomposition, anchor s = "
+             + " / ".join(f"{v:.2f}" for v in s_list) + " km"
+             "\n(one sounding per panel, not the trace ensemble mean)")
+    fig.suptitle((src + "\n" + title) if src else title, fontsize=10)
     fig.tight_layout()
-    fp = out / "decomposition_trace.png"
+    fp = out / fname
     fig.savefig(fp, dpi=130)
     plt.close(fig)
     return fp
 
 
-def fig_bed_tail(out, preps, analyses, metrics, keys=None, ablation=None):
+def fig_bed_tail(out, preps, analyses, metrics, keys=None, ablation=None,
+                 fname="bed_tail.png", src=None):
     """Per pass: BED-REFERENCED ensemble mean-power profiles -- measured vs
     each bed source's sim total, plus the sim surface-return curve (the
     fair-comparison guard) and the measured noise floor. The fit window is
@@ -2656,13 +2700,73 @@ def fig_bed_tail(out, preps, analyses, metrics, keys=None, ablation=None):
         if k == 0:
             ax.set_ylabel("dB rel own surface peak (mean power)")
             ax.legend(fontsize=7, loc="lower left")
-    fig.suptitle("bed-return tail: decay past the bed echo (each dataset on "
-                 "its OWN bed reference)")
+    title = ("bed-return tail: decay past the bed echo (each dataset on "
+             "its OWN bed reference)")
+    fig.suptitle((src + "\n" + title) if src else title)
     fig.tight_layout()
-    fp = out / "bed_tail.png"
+    fp = out / fname
     fig.savefig(fp, dpi=130)
     plt.close(fig)
     return fp
+
+
+# ========================================================================
+# per-pass figure sets (--per-pass-figs): incremental delivery
+# ========================================================================
+def frame_span(parts):
+    """Compact provenance id for a parts list: '20161031_07_002-005' when
+    the frames share one flight prefix, else the '/'-joined full ids."""
+    ids = [fid for fid, _ in parts]
+    pre = ids[0].rsplit("_", 1)[0]
+    if any(f.rsplit("_", 1)[0] != pre for f in ids):
+        return "/".join(ids)
+    nums = sorted(int(f.rsplit("_", 1)[1]) for f in ids)
+    if len(ids) == 1:
+        return ids[0]
+    return f"{pre}_{nums[0]:03d}-{nums[-1]:03d}"
+
+
+def source_label(key, p):
+    """SOURCE-DATA provenance line for the figure tops: season + frame
+    segments (+ altitude); synthetic passes name the carrier line."""
+    span = frame_span(p["parts"])
+    if p.get("synthetic"):
+        alt = p["synthetic"].get("synthetic_msl_m",
+                                 p["synthetic"].get("agl_med_m", 0.0))
+        return (f"{SEASON} - SYNTHETIC {alt / 1e3:g} km constant-altitude "
+                f"pass on the {span} line (no measured data)")
+    return f"{SEASON} - measured {span} ({p['h_med'] / 1e3:.1f} km AGL)"
+
+
+def emit_pass_figs(out, key, p, a, zres, segment, gl_s_km, plot_s_max_km,
+                   main_slug):
+    """Write ONE pass's complete figure set as separate suffixed files
+    (radargrams_<key>.png, ...), each labeled with the source-data
+    provenance, immediately after that pass's sim+processing+analysis --
+    the staged-delivery contract. Returns the figure paths."""
+    src = source_label(key, p)
+    figs = [fig_radargrams(out, {key: p}, {key: a}, segment, keys=[key],
+                           gl_s_km=gl_s_km, w_scale=FIG_WIDTH_SCALE,
+                           plot_s_max_km=plot_s_max_km,
+                           fname=f"radargrams_{key}.png", src=src),
+            fig_decomposition(out, {key: p}, {key: a}, keys=[key],
+                              fname=f"decomposition_{key}.png", src=src)]
+    e = bed_tail_entry(key, p, a, [(main_slug, a)])
+    figs.append(fig_bed_tail(out, {key: p}, {key: a},
+                             {f"bed_return_tail_{key}": e}, keys=[key],
+                             fname=f"bed_tail_{key}.png", src=src))
+    ftr = fig_decomposition_trace(out, {key: p}, {key: a}, keys=[key],
+                                  fname=f"decomposition_trace_{key}.png",
+                                  src=src)
+    if ftr is not None:
+        figs.append(ftr)
+    if zres is not None:
+        fz = fig_decomposition_zones(out, key, zres,
+                                     fname=f"decomposition_zones_{key}.png",
+                                     src=src)
+        if fz is not None:
+            figs.append(fz)
+    return figs
 
 
 # ========================================================================
@@ -2676,7 +2780,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
         bed_rough_extra_db=0.0, passes=None, spec=None,
-        anchor="median", level_deficit_db=None, trace_decomp_s_km=None):
+        anchor="median", level_deficit_db=None, trace_decomp_s_km=None,
+        add_14km=False, add_300km=False, per_pass_figs=False,
+        plot_s_max_km=None):
     proc = processing == "standard"
     hybrid = segment == "full_line"
     if hybrid and not demogorgn_bed:
@@ -2707,7 +2813,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
                          "follow-up, not wired (clean three-way ablation)")
     order = (ORDER + ([SYN30_KEY] if add_30km else [])
-             + ([SYN500_KEY] if add_500km else []))
+             + ([SYN500_KEY] if add_500km else [])
+             + ([SYN14_KEY] if add_14km else [])
+             + ([SYN300_KEY] if add_300km else []))
     if passes:
         unknown = [k for k in passes if k not in order]
         if unknown:
@@ -2767,6 +2875,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"dB (med {gmap['g2_seg_db']['med']}), censored "
               f"{gmap['n_censored']}/{gmap['n_samples']}", flush=True)
     preps, sims, analyses, procs = {}, {}, {}, {}
+    zone_results, pass_figs = {}, []
+    main_slug = ("picked_bed" if picked_bed else
+                 "demogorgn" if demogorgn_bed else "bedmachine")
     for key in order:
         print(f"== {key} ({segment}{tag}) ==", flush=True)
         p = prep_pass(key, segment, n_traces, ref=ref, gmap=gmap, axis=axis,
@@ -2831,6 +2942,17 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                   + f"): bed-window bed - surface returns "
                   f"{ti['bed_window_bed_minus_surface_returns_db']:+.1f} dB",
                   flush=True)
+        if hybrid:
+            zone_results[key] = zone_analysis(preps[key], analyses[key])
+        if per_pass_figs:
+            # STAGED DELIVERY: this pass's complete figure set, written the
+            # moment its sim+processing+analysis is done; the marker line is
+            # the coordinator's pickup signal.
+            pass_figs += emit_pass_figs(
+                out, key, preps[key], analyses[key], zone_results.get(key),
+                segment, GL_S_KM if hybrid else None, plot_s_max_km,
+                main_slug)
+            print(f"FIGSET_READY {key}", flush=True)
 
     # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
     corr_stats = corr_series = None
@@ -3000,8 +3122,6 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                             s_sim, a_pb["sim_bed_prof_db"]), meas), 3)}
                 metrics[f"{slug}_bed_ablation_{key}"] = e
     # ---- bed-return tail: decay past the bed echo, sim vs measured ----
-    main_slug = ("picked_bed" if picked_bed else
-                 "demogorgn" if demogorgn_bed else "bedmachine")
     ab_by_slug = [("demogorgn" if "DEMOGORGN" in label else "bedmachine", an)
                   for _, an, label, _ in (ab_rows or [])]
     for key in order:
@@ -3021,11 +3141,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 f"({v['guard']['min_bed_minus_surface_returns_db']:+.1f} dB)"
                 for k, v in e["sim"].items()), flush=True)
     # ---- ZONE SPLIT (full_line): grounded vs floating sub-windows ----
-    zone_results = {}
+    # (zone_results filled in the pass loop, right after each analysis)
     if hybrid:
         for key in order:
-            zres = zone_analysis(preps[key], analyses[key])
-            zone_results[key] = zres
+            zres = zone_results[key]
             zmet = {zn: zres[zn]["metrics"] for zn in zres
                     if "metrics" in zres[zn]}
             fres = zmet.get("floating", {}).get("bed_window_residual_db")
@@ -3209,6 +3328,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "gamma_double_count_guard": gmap["bed_rough_guard"]
             if gamma_rssnr else None}),
         "trace_decomp_s_km": ts_km,
+        "per_pass_figs": bool(per_pass_figs),
+        "plot_s_max_km": plot_s_max_km,
+        "fig_width_scale": FIG_WIDTH_SCALE,
         "segment_s_km": [round(v / 1e3, 2)
                          for v in segment_s_range(axis, segment)]
         if axis else None,
@@ -3353,24 +3475,32 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 shutil.copy2(out / old, out / keep)  # pre-ablation version
     ab_fig = ([(pr, an, label) for pr, an, label, _ in ab_rows]
               if bed_ablation else None)
-    figs = [fig_radargrams(out, preps, analyses, segment, keys=order,
-                           ablation=ab_fig,
-                           gl_s_km=GL_S_KM if hybrid else None,
-                           w_scale=FIG_WIDTH_SCALE),
-            fig_decomposition(out, preps, analyses, keys=order,
-                              ablation=ab_fig),
-            fig_bed_tail(out, preps, analyses, metrics, keys=order,
-                         ablation=ab_fig)]
-    ftr = fig_decomposition_trace(out, preps, analyses, keys=order)
-    if ftr is not None:
-        figs.insert(2, ftr)
-    for key in [k for k in order if k in zone_results]:
-        fz = fig_decomposition_zones(
-            out, key, zone_results[key],
-            fname=("decomposition_zones.png" if len(order) == 1
-                   else f"decomposition_zones_{key}.png"))
-        if fz is not None:
-            figs.append(fz)
+    if per_pass_figs:
+        # staged-delivery mode: the suffixed per-pass sets (already emitted
+        # in the loop, marker-lined) ARE the figure deliverable; the
+        # unsuffixed combined figures are skipped so the two styles cannot
+        # drift apart within one run.
+        figs = list(pass_figs)
+    else:
+        figs = [fig_radargrams(out, preps, analyses, segment, keys=order,
+                               ablation=ab_fig,
+                               gl_s_km=GL_S_KM if hybrid else None,
+                               w_scale=FIG_WIDTH_SCALE,
+                               plot_s_max_km=plot_s_max_km),
+                fig_decomposition(out, preps, analyses, keys=order,
+                                  ablation=ab_fig),
+                fig_bed_tail(out, preps, analyses, metrics, keys=order,
+                             ablation=ab_fig)]
+        ftr = fig_decomposition_trace(out, preps, analyses, keys=order)
+        if ftr is not None:
+            figs.insert(2, ftr)
+        for key in [k for k in order if k in zone_results]:
+            fz = fig_decomposition_zones(
+                out, key, zone_results[key],
+                fname=("decomposition_zones.png" if len(order) == 1
+                       else f"decomposition_zones_{key}.png"))
+            if fz is not None:
+                figs.append(fz)
     if gamma_rssnr and corr_stats is not None:
         syn = None
         if add_30km and SYN30_KEY in order:
@@ -3508,6 +3638,25 @@ def main():
                     "reach (~45 km), facet spacing (~200 m) and "
                     "alias-limited aperture (~27 km) follow from the "
                     "geometry -- a prediction panel, no measured data")
+    ap.add_argument("--add-14km", action="store_true",
+                    help="add a SYNTHETIC pass at "
+                    f"{SYN14_MSL_M:.0f} m constant ellipsoidal height "
+                    "(high-altitude airborne; syn30km construction)")
+    ap.add_argument("--add-300km", action="store_true",
+                    help="add a SYNTHETIC low-LEO pass at "
+                    f"{SYN300_MSL_M:.0f} m constant ellipsoidal height "
+                    "(syn500km construction; derived reach/facets/aperture)")
+    ap.add_argument("--per-pass-figs", action="store_true",
+                    help="STAGED DELIVERY: write each pass's complete "
+                    "figure set as separate suffixed files "
+                    "(radargrams_<pass>.png, ...) immediately after that "
+                    "pass completes, printing 'FIGSET_READY <pass>'; the "
+                    "unsuffixed combined figures are skipped")
+    ap.add_argument("--plot-s-max", type=float, default=None,
+                    metavar="S_KM",
+                    help="crop the PLOTTED radargram along-track range at "
+                    "this anchor s (km); data, caches and metrics keep the "
+                    "full segment (plot-iteration knob, cache-replay safe)")
     ap.add_argument("--bed-ablation", action="store_true",
                     help="with --picked-bed: also simulate every pass with "
                     "the BEDMACHINE and DEMOGORGN beds (identical "
@@ -3613,6 +3762,8 @@ def main():
         bed_rough_extra_db=args.bed_rough_extra_db,
         anchor=args.anchor, level_deficit_db=args.level_deficit_db,
         trace_decomp_s_km=args.trace_decomp_s,
+        add_14km=args.add_14km, add_300km=args.add_300km,
+        per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,
         spec=(None if args.specular_fraction is None
               else (args.specular_fraction, args.spec_tilt_deg,
                     args.diffuse_exponent)))
