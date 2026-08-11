@@ -2096,3 +2096,72 @@ right reflector either way (the picks follow whatever the radar saw),
 but the flat-ish cross-track assumption is least valid there. Also the
 BedMachine grounded-to-floating transition is at s=70.05 km (our 69.7
 label sits ~350 m early; visually coincident at map scale).
+
+## Processed-stack cache + floating-zone single-trace four-panel (2026-08-11)
+
+### `--proc-cache`: seconds-fast plot iteration on the full_line campaign
+
+New tool machinery (`process_standard_cached` / `load_proc_pass` /
+`proc_rid` / `chunk_digests`, `--proc-cache` on the CLI): the FOCUSED
+per-interface stacks (mocomp + backprojection outputs Fs/Fb, complex64 --
+the focuser's native dtype and therefore the BIT-EXACT source of the
+3-look P/Ps/Pb powers, which are recomputed identically on load) are
+persisted per pass under `outputs/basal_clutter/full_line/proc_cache/`
+as npz+json pairs following the run-cache meta conventions, together with
+the light per-trace arrays (nadir, picks, s axes, twtt) and scalars a
+figure needs. STALENESS: the meta key embeds a sha256 digest of every
+source chunk's cache meta_key (the sim is deterministic in its meta);
+`load_proc_pass` re-derives the digests from the chunk cache as it exists
+NOW and declines on any mismatch or missing chunk -- a stale cache is
+rebuilt, never silently served. `load_proc_pass` reconstructs a
+figure-ready (p_lite, sim_lite, proc) with NO scene prep and NO chunk
+replay (measured Data re-sliced from the locally cached frames), so a
+four-panel trace figure now takes ~2 s of loading per synthetic pass and
+~1 s per measured pass, against ~4-19 min per pass cold.
+
+* **Size: 669 MB total for all five passes** (138-143 MB each: low 140 /
+  mid 138 / high 138 / syn14km 143 / syn300km 143) -- above the 500 MB
+  estimate because bit-exactness requires the complex per-layer stacks
+  (float32 powers would break the bit-compare and cost MORE: 3 arrays vs
+  2). Cold population walls: low 211 s, mid 257 s, syn14km 280 s, high
+  268 s, syn300km 1121 s (its 1078-trace aperture).
+* **VERIFIED bit-exact** (mid): cached-path P stack and the s = 35 km
+  extracted trace curves compared against a full direct recompute
+  (prep + chunk replay + uncached process_standard):
+  `VERIFY mid: P bit-identical=True, trace curves bit-identical=True
+  (PASS)`.
+* Tests: 2 added (`proc_rid` naming incl. the `_hyb` marker; chunk-digest
+  stability, re-simulated-chunk and missing-chunk staleness, cold-cache
+  decline; `_proc_from_stacks` equals the process_standard tail exactly).
+  Suite **333 green** (unit 312 -> 314), ruff clean.
+
+### Four-panel single-trace figures (low / mid / syn14km / syn300km)
+
+`claude_notes/trace4_fig.py` (supersedes the one-off trace4_s35 script):
+per-interface curves at ONE sounding, actual bed marked (red line at the
+sim bed-layer nadir; dotted marker at the measured Bottom pick where it
+differs visibly), NO window shading/annotations, provenance sub-titles
+wrapped (the s=35 overlap defect fixed and that figure regenerated).
+
+* `decomposition_trace4_s35.png` (grounded trough; regenerated):
+  low/mid measured+sim at trace 2356/2358, syn14km 2356, syn300km 2356;
+  per-trace bed-window bed - surface returns +31.3 / +25.0 / +22.3 /
+  **-31.0 dB** (low/mid/syn14/syn300).
+* `decomposition_trace4_s100.png` (FLOATING shelf base, s = 100.0 km):
+  traces **low 6731 / mid 6739 / syn14km 6731 / syn300km 6731**; bed at
+  8.30-8.36 us below the surface returns; per-trace guard (bed-window bed
+  - surface returns) **+72.0 / +54.1 / +43.6 / +9.9 dB**.
+
+The floating single sounding IS the specular altitude story in one image:
+at 449 m the sim shelf-base spike towers ~45 dB above the measured
+RELATIVE level at the same delay (the +12.6 dB zone residual seen at one
+trace: the sim's flat-ish NN base mirrors the transmit power back while
+the measured relative return is pulled down by the much stronger
+pulse-limited surface peak); at 9.2 km the sim spike sits on the measured
+peak; and at 300 km the specular base still rises ~10 dB above the
+co-arriving surface clutter at a single sounding -- the same monotone
+low -> orbital collapse the zone metrics gave (+72 -> +54 -> +44 -> +10 dB
+guard), now visible without any ensemble averaging. Note the s = 35 km
+grounded counterpart runs the opposite way at orbit (-31 dB: rough-bed
+trough fully clutter-buried), which is the grounded-vs-floating verdict
+of the syn300km run at trace scale.

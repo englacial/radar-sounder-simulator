@@ -1301,6 +1301,8 @@ def process_standard(p, sim):
 
     P = look(np.abs(Fs + Fb) ** 2)
     Ps, Pb = look(np.abs(Fs) ** 2), look(np.abs(Fb) ** 2)
+    # Fs/Fb (complex64, the focuser's native output) ride along so the
+    # proc cache can persist the exact source of P/Ps/Pb.
     chain = {
         "real_chain": REAL_CHAIN_2016,
         "sim_posting_m": round(spacing, 3),
@@ -1326,7 +1328,173 @@ def process_standard(p, sim):
                 "surface_alias_ratio); g6 channel combine inside the sim "
                 "array pattern",
     }
-    return {"P": P, "Ps": Ps, "Pb": Pb, "twtt": twtt, "chain": chain}
+    return {"P": P, "Ps": Ps, "Pb": Pb, "twtt": twtt, "chain": chain,
+            "Fs": Fs, "Fb": Fb}
+
+
+# ------------------------------------------------------------------------
+# processed-stack cache (--proc-cache): seconds-fast plot iteration
+# ------------------------------------------------------------------------
+# The chunk cache stores RAW per-layer fields; the matched-processing
+# focuser on top of them costs minutes-to-tens-of-minutes per pass (the
+# syn300km aperture is 1078 traces), which made figure iterations ~30 min.
+# This cache persists the FOCUSED per-interface complex64 stacks (the
+# bit-exact source of the P/Ps/Pb powers: complex64 is the focuser's
+# native output dtype, and the look averaging is recomputed identically on
+# load) plus the light per-trace arrays a figure needs, under
+# <out>/proc_cache/<rid>.npz|.json following the run-cache meta
+# conventions. STALENESS: the meta key embeds a sha256 digest of every
+# source chunk's cache meta_key -- the simulation is deterministic in its
+# meta, so equal digests imply an identical assembled field; a changed or
+# missing chunk cache fails the key comparison and the stack is REBUILT,
+# never silently served.
+PROC_CACHE_DIRNAME = "proc_cache"
+PROC_CACHE_VERSION = 1
+
+
+def proc_rid(p):
+    return (f"{p['key']}_{p['segment']}"
+            f"{case_tag(p['picked_bed'], p['gamma_rssnr'], p['proc'], p['dgn'])}"
+            + ("_hyb" if p.get("hybrid") else ""))
+
+
+def chunk_digests(p, runs_dir, n_chunks, att, surf_rough):
+    """{chunk rid: sha256(meta_key)[:16]} over the pass's chunk caches."""
+    import hashlib
+    out = {}
+    for ci in range(n_chunks):
+        rid = chunk_rid(p, ci, att, surf_rough)
+        d = json.loads((Path(runs_dir) / f"{rid}.json").read_text())
+        out[rid] = hashlib.sha256(d["meta_key"].encode()).hexdigest()[:16]
+    return out
+
+
+def _digests_current(stored, runs_dir):
+    """Re-derive the digests for the STORED chunk rid list from the chunk
+    cache as it exists now (missing file -> None: stale)."""
+    import hashlib
+    out = {}
+    for rid in stored:
+        jp = Path(runs_dir) / f"{rid}.json"
+        if not jp.exists():
+            out[rid] = None
+            continue
+        d = json.loads(jp.read_text())
+        out[rid] = hashlib.sha256(d["meta_key"].encode()).hexdigest()[:16]
+    return out
+
+
+def _proc_from_stacks(Fs, Fb, twtt, chain):
+    def look(P):
+        return ndimage.uniform_filter1d(P, N_LOOKS_SIM, axis=0,
+                                        mode="nearest")
+    return {"P": look(np.abs(Fs + Fb) ** 2), "Ps": look(np.abs(Fs) ** 2),
+            "Pb": look(np.abs(Fb) ** 2), "twtt": twtt, "chain": chain,
+            "Fs": Fs, "Fb": Fb}
+
+
+def process_standard_cached(p, sim, out_dir, att, surf_rough, force=False):
+    """Cache-first process_standard (module-section comment). Also stores
+    the light per-trace arrays + scalars that let load_proc_pass rebuild a
+    figure-ready (p_lite, sim_lite, proc) with NO scene prep or chunk
+    replay."""
+    cdir = Path(out_dir) / PROC_CACHE_DIRNAME
+    cdir.mkdir(parents=True, exist_ok=True)
+    rid = proc_rid(p)
+    jp, npz_p = cdir / f"{rid}.json", cdir / f"{rid}.npz"
+    meta = {"version": PROC_CACHE_VERSION, "pass": p["key"],
+            "segment": p["segment"], "n_traces": int(len(p["idx"])),
+            "n_looks": N_LOOKS_SIM, "posting_div": p.get("posting_div", 1),
+            "spacing_m": round(p["spacing"], 4),
+            "att_db_per_km": att, "surf_rough": bool(surf_rough),
+            "chunk_digests": chunk_digests(p, Path(out_dir) / "runs",
+                                           sim["n_chunks"], att, surf_rough)}
+    key = json.dumps(meta, sort_keys=True)
+    if jp.exists() and npz_p.exists() and not force:
+        doc = json.loads(jp.read_text())
+        if doc.get("meta_key") == key:
+            z = np.load(npz_p)
+            print(f"  [proc-cache hit] {rid}", flush=True)
+            return _proc_from_stacks(z["Fs"], z["Fb"], z["twtt"],
+                                     doc["chain"])
+        print(f"  [proc-cache STALE] {rid}: meta changed, rebuilding",
+              flush=True)
+    proc = process_standard(p, sim)
+    np.savez(npz_p, Fs=proc["Fs"], Fb=proc["Fb"], twtt=proc["twtt"],
+             nadir=sim["nadir"], s_sim=p["s_sim"], surf_sim=p["surf_sim"],
+             bot_sim=np.asarray(p["bot_sim"], np.float64),
+             s_m=p["s_m"], surf=p["surf"],
+             bot=np.asarray(p["bot"], np.float64), tw_m=p["tw_m"])
+    rc = p["rc_frame"]
+    jp.write_text(json.dumps({
+        "meta_key": key, "meta": meta, "chain": proc["chain"],
+        "p_lite": {"key": p["key"], "segment": p["segment"],
+                   "parts": [[fid, list(sl)] for fid, sl in p["parts"]],
+                   "rev": p["rev"], "synthetic": p["synthetic"],
+                   "spacing": p["spacing"], "dt": p["dt"],
+                   "posting_div": p.get("posting_div", 1),
+                   "h_med": p["h_med"], "thick_med": p["thick_med"],
+                   "reach_ct_m": p["reach"]["ct_m"],
+                   "rc_frame": {"dt": rc.dt, "t0": rc.t0,
+                                "n_samples": rc.n_samples, "f0": rc.f0}},
+    }, indent=1) + "\n")
+    print(f"  [proc-cache write] {rid} "
+          f"({npz_p.stat().st_size / 1e6:.0f} MB)", flush=True)
+    return proc
+
+
+def load_proc_pass(key, out_dir, segment="full_line", picked_bed=False,
+                   gamma_rssnr=True, proc_tag=True, dgn=True, hybrid=True):
+    """SECONDS-fast figure path: (p_lite, sim_lite, proc) from the proc
+    cache + the locally cached frames -- no scene prep, no chunk replay.
+    The stored chunk fingerprints are re-derived from the chunk cache AS IT
+    EXISTS NOW and must match, else returns None (caller falls back to the
+    full path, which rebuilds the cache). p_lite carries exactly the
+    fields analyze_pass and the trace figures consume; measured Data is
+    re-sliced from the cached frames (synthetic passes skip it)."""
+    cdir = Path(out_dir) / PROC_CACHE_DIRNAME
+    rid = (f"{key}_{segment}"
+           f"{case_tag(picked_bed, gamma_rssnr, proc_tag, dgn)}"
+           + ("_hyb" if hybrid else ""))
+    jp, npz_p = cdir / f"{rid}.json", cdir / f"{rid}.npz"
+    if not (jp.exists() and npz_p.exists()):
+        return None
+    doc = json.loads(jp.read_text())
+    stored = doc["meta"]["chunk_digests"]
+    if (doc["meta"].get("version") != PROC_CACHE_VERSION
+            or _digests_current(stored, Path(out_dir) / "runs") != stored):
+        print(f"  [proc-cache STALE] {rid}: chunk cache changed", flush=True)
+        return None
+    z = np.load(npz_p)
+    pl = doc["p_lite"]
+    rc = pl["rc_frame"]
+    fsub = None
+    if not pl["synthetic"]:
+        fsubs = []
+        for fid, (a, b) in pl["parts"]:
+            fs = load_frame(SEASON, fid).isel(slow_time=slice(a, b))
+            if pl["rev"]:
+                fs = fs.isel(slow_time=slice(None, None, -1))
+            fsubs.append(fs)
+        fsub = (fsubs[0] if len(fsubs) == 1
+                else xr.concat(fsubs, dim="slow_time",
+                               combine_attrs="override"))
+    p_lite = {"key": pl["key"], "segment": pl["segment"],
+              "parts": [(fid, tuple(sl)) for fid, sl in pl["parts"]],
+              "rev": pl["rev"], "synthetic": pl["synthetic"],
+              "spacing": pl["spacing"], "dt": pl["dt"],
+              "posting_div": pl["posting_div"], "h_med": pl["h_med"],
+              "thick_med": pl["thick_med"],
+              "reach": {"ct_m": pl["reach_ct_m"]},
+              "rc_frame": RadarConfig(dt=rc["dt"], n_samples=rc["n_samples"],
+                                      t0=rc["t0"], f0=rc["f0"]),
+              "fsub": fsub, "tw_m": z["tw_m"], "surf": z["surf"],
+              "bot": z["bot"], "s_m": z["s_m"], "s_sim": z["s_sim"],
+              "surf_sim": z["surf_sim"], "bot_sim": z["bot_sim"]}
+    sim_lite = {"twtt": z["twtt"], "nadir": z["nadir"]}
+    proc = _proc_from_stacks(z["Fs"], z["Fb"], z["twtt"], doc["chain"])
+    print(f"  [proc-cache load] {rid}", flush=True)
+    return p_lite, sim_lite, proc
 
 
 # ========================================================================
@@ -2782,7 +2950,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         bed_rough_extra_db=0.0, passes=None, spec=None,
         anchor="median", level_deficit_db=None, trace_decomp_s_km=None,
         add_14km=False, add_300km=False, per_pass_figs=False,
-        plot_s_max_km=None):
+        plot_s_max_km=None, proc_cache=False):
     proc = processing == "standard"
     hybrid = segment == "full_line"
     if hybrid and not demogorgn_bed:
@@ -2925,7 +3093,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                   antenna=antenna, bed_rough=bed_rough,
                                   spec=spec)
         if proc:
-            procs[key] = process_standard(p, sims[key])
+            procs[key] = (process_standard_cached(p, sims[key], out, att,
+                                                  surf_rough, force=force)
+                          if proc_cache else process_standard(p, sims[key]))
             ch = procs[key]["chain"]
             print(f"  processed: aperture {ch['aperture_m']:.0f} m "
                   f"({ch['aperture_traces']} traces, half-angle "
@@ -3657,6 +3827,13 @@ def main():
                     help="crop the PLOTTED radargram along-track range at "
                     "this anchor s (km); data, caches and metrics keep the "
                     "full segment (plot-iteration knob, cache-replay safe)")
+    ap.add_argument("--proc-cache", action="store_true",
+                    help="persist/reuse the FOCUSED per-interface stacks "
+                    f"under <out>/{PROC_CACHE_DIRNAME}/ (bit-exact source "
+                    "of the processed powers, keyed on chain provenance + "
+                    "per-chunk cache digests; stale caches are rebuilt): "
+                    "plot iterations drop from ~30 min to seconds via "
+                    "load_proc_pass")
     ap.add_argument("--bed-ablation", action="store_true",
                     help="with --picked-bed: also simulate every pass with "
                     "the BEDMACHINE and DEMOGORGN beds (identical "
@@ -3764,6 +3941,7 @@ def main():
         trace_decomp_s_km=args.trace_decomp_s,
         add_14km=args.add_14km, add_300km=args.add_300km,
         per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,
+        proc_cache=args.proc_cache,
         spec=(None if args.specular_fraction is None
               else (args.specular_fraction, args.spec_tilt_deg,
                     args.diffuse_exponent)))

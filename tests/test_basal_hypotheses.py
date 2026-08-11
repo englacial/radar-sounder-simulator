@@ -918,3 +918,53 @@ def test_emit_pass_figs_writes_suffixed_labeled_files(tmp_path):
                             "extended", keys=["syn30km"], plot_s_max_km=3.0,
                             fname="radargrams_crop.png", src="SRC LINE")
     assert fp.exists() and fp.name == "radargrams_crop.png"
+
+
+# ----------------------------------- processed-stack cache (--proc-cache)
+
+def test_proc_cache_ids_digests_and_staleness(tmp_path):
+    import json as _json
+    p = {**_p(), "segment": "full_line", "key": "high", "hybrid": True}
+    assert rbc.proc_rid(p) == "high_full_line_dgn_rssnr_proc_hyb"
+    p_plain = _p()
+    assert rbc.proc_rid(p_plain) == "low_full_dgn_rssnr_proc"
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    for ci in range(2):
+        rid = rbc.chunk_rid(p, ci, 20.0, True)
+        (runs / f"{rid}.json").write_text(
+            _json.dumps({"meta_key": f"meta-{ci}"}))
+    d = rbc.chunk_digests(p, runs, 2, 20.0, True)
+    assert len(d) == 2 and all(len(v) == 16 for v in d.values())
+    # unchanged chunk cache -> digests reproduce
+    assert rbc._digests_current(d, runs) == d
+    # a re-simulated chunk (different meta_key) flips its digest
+    rid0 = rbc.chunk_rid(p, 0, 20.0, True)
+    (runs / f"{rid0}.json").write_text(_json.dumps({"meta_key": "CHANGED"}))
+    cur = rbc._digests_current(d, runs)
+    assert cur[rid0] != d[rid0]
+    # a missing chunk cache reads as None (stale, never silently served)
+    (runs / f"{rid0}.json").unlink()
+    assert rbc._digests_current(d, runs)[rid0] is None
+    # no cache written yet -> the fast path declines
+    assert rbc.load_proc_pass("high", tmp_path) is None
+
+
+def test_proc_from_stacks_matches_the_processing_tail():
+    """Rebuilding P/Ps/Pb from stored complex64 stacks must equal the
+    process_standard tail exactly (same look filter on the same bytes)."""
+    from scipy import ndimage as ndi
+    rng = np.random.default_rng(7)
+    Fs = (rng.normal(size=(24, 16)) + 1j * rng.normal(size=(24, 16))
+          ).astype(np.complex64)
+    Fb = (rng.normal(size=(24, 16)) + 1j * rng.normal(size=(24, 16))
+          ).astype(np.complex64)
+    tw = np.arange(16) * 2e-8
+    pr = rbc._proc_from_stacks(Fs, Fb, tw, {"real_chain": "x"})
+    want = ndi.uniform_filter1d(np.abs(Fs + Fb) ** 2, rbc.N_LOOKS_SIM,
+                                axis=0, mode="nearest")
+    assert np.array_equal(pr["P"], want)
+    assert np.array_equal(pr["Ps"], ndi.uniform_filter1d(
+        np.abs(Fs) ** 2, rbc.N_LOOKS_SIM, axis=0, mode="nearest"))
+    assert pr["Fs"] is Fs and pr["Fb"] is Fb and pr["chain"] == {
+        "real_chain": "x"}
