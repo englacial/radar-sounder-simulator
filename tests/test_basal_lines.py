@@ -25,6 +25,8 @@ LINE_GLOBALS = (
     "N_TRACES_BY_SEGMENT", "REF_PASS", "REF_SEASON", "REF_FRAMES",
     "GL_S_KM", "SYNTHETIC_KEYS", "MEASURED_CAVEATS", "UNSUPPORTED",
     "RADARGRAM_Y_US", "RADARGRAM_DB",
+    "RSSNR_SNAPSHOT", "RSSNR_STORE", "RSSNR_CACHE",
+    "LEVEL_ANCHOR_DEFICIT_DB", "LEVEL_ANCHOR_NOTE",
 )
 
 
@@ -213,6 +215,44 @@ def test_greenland_measured_caveats_record_the_scout_quirks(greenland):
         assert needle in txt, needle
 
 
+def test_greenland_rssnr_store_is_its_own_pinned_snapshot(greenland):
+    """The RSSNR mapping must read the GREENLAND store, pinned, and cache to
+    this line's own output tree -- never the Antarctic store or cache."""
+    assert greenland.RSSNR_STORE["prefix"] == "icechunk/greenland"
+    assert greenland.RSSNR_SNAPSHOT == "GEAMAHQ7BRVPG9SQPK20"
+    assert greenland.RSSNR_SNAPSHOT != rbc.LINES[rbc.ANTARCTIC_LINE].get(
+        "RSSNR_SNAPSHOT", "3YH47013745B2T5ZZR50")
+    assert greenland.RSSNR_CACHE.parent.name == "greenland_pair"
+    # the pick axis (and therefore the RSSNR fetch) is the LOW pass
+    assert greenland.REF_FRAMES == ("20140421_01_069", "20140421_01_070")
+
+
+def test_greenland_rssnr_is_now_wired(greenland):
+    assert "gamma_rssnr" not in greenland.UNSUPPORTED
+    assert "demogorgn_bed" in greenland.UNSUPPORTED
+
+
+def test_greenland_level_anchor_is_contamination_aware(greenland):
+    """D is derived from the LOW pass's BED-RETURNS component, so it is
+    negative here (the constant-gamma sim bed is BRIGHTER than measured) --
+    the opposite sign to the Antarctic deficit, and a sign error would move
+    the bed 16 dB the wrong way."""
+    d = greenland.LEVEL_ANCHOR_DEFICIT_DB
+    assert d == pytest.approx(-7.89)
+    assert d < 0 < rbc.LINES[rbc.ANTARCTIC_LINE].get(
+        "LEVEL_ANCHOR_DEFICIT_DB", 14.8)
+    note = greenland.LEVEL_ANCHOR_NOTE
+    for needle in ("BED-RETURNS", "LOW pass", "HIGH pass", "TRANSFER TEST"):
+        assert needle in note, needle
+
+
+def test_antarctic_rssnr_config_untouched():
+    assert "RSSNR_SNAPSHOT" not in rbc.LINES[rbc.ANTARCTIC_LINE]
+    assert rbc.RSSNR_STORE["prefix"] == "icechunk/antarctica"
+    assert rbc.RSSNR_SNAPSHOT == "3YH47013745B2T5ZZR50"
+    assert rbc.LEVEL_ANCHOR_DEFICIT_DB == 14.8
+
+
 # --------------------------------------------------- per-line guards
 def _run_kwargs(**kw):
     kw.setdefault("line", rbc.GREENLAND_LINE)
@@ -220,12 +260,26 @@ def _run_kwargs(**kw):
 
 
 def test_unsupported_features_rejected_on_greenland(line_sandbox):
-    assert set(rbc.LINES[rbc.GREENLAND_LINE]["UNSUPPORTED"]) >= {
-        "gamma_rssnr", "demogorgn_bed"}
-    with pytest.raises(ValueError, match="gamma_rssnr is not wired"):
-        rbc.run(**_run_kwargs(gamma_rssnr=True))
+    assert set(rbc.LINES[rbc.GREENLAND_LINE]["UNSUPPORTED"]) == {
+        "demogorgn_bed", "hybrid"}
     with pytest.raises(ValueError, match="demogorgn_bed is not wired"):
         rbc.run(**_run_kwargs(demogorgn_bed=True))
+
+
+def test_relocated_rssnr_run_demands_an_explicit_companion(line_sandbox):
+    """--out-name moves the case dir, so the constant-gamma companion can no
+    longer be found at its derived sibling path: the run must say where it
+    is rather than silently re-simulating 66 minutes of chunks."""
+    with pytest.raises(ValueError, match="--companion-name"):
+        rbc.run(**_run_kwargs(segment="full", gamma_rssnr=True,
+                              out_name="somewhere_else"))
+
+
+def test_missing_companion_directory_is_caught(line_sandbox, tmp_path):
+    with pytest.raises(ValueError, match="companion runs not found"):
+        rbc.run(**_run_kwargs(segment="full", gamma_rssnr=True,
+                              out_root=str(tmp_path),
+                              out_name="a", companion_name="no_such_dir"))
 
 
 def test_segment_not_on_this_line_rejected(line_sandbox):

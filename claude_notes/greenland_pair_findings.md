@@ -559,3 +559,222 @@ the dense internal layering that the surface+bed simulation has no term for
 * Note: `tests/test_refraction_joint.py::test_compile_flat_in_n_and_runtime`
   fails intermittently when a 65-minute simulation is saturating the CPU (it
   asserts on wall-clock); it passes standalone.
+
+
+---
+
+# Part 3 (2026-08-11): RSSNR-driven bed reflectivity on the Greenland line
+
+## 3.1 Wiring
+
+The Antarctic RSSNR machinery is reused verbatim (`fetch_rssnr_anchor` ->
+`rssnr_gamma_profile` -> `build_rssnr_gamma` -> `apply_rssnr_gamma`, mapping
+`|Gamma_bed|^2 dB = 2*A*H(s) - RSSNR(s) + K`). Only configuration moved into
+the line registry:
+
+| global | Antarctic | Greenland |
+|---|---|---|
+| `RSSNR_STORE.prefix` | `icechunk/antarctica` | **`icechunk/greenland`** |
+| `RSSNR_SNAPSHOT` | `3YH47013745B2T5ZZR50` | **`GEAMAHQ7BRVPG9SQPK20`** |
+| `RSSNR_CACHE` | `outputs/basal_clutter/...` | `outputs/greenland_pair/rssnr_anchor.npz` |
+| `LEVEL_ANCHOR_DEFICIT_DB` | +14.8 | **-7.89** |
+
+`gamma_rssnr` is removed from the Greenland `UNSUPPORTED` list;
+`demogorgn_bed` and `hybrid` stay unsupported. The fetch runs on
+`REF_FRAMES` = the **LOW pass** (`20140421_01_069/_070`) -- the same
+pick/reference convention the picked bed uses, so gamma and bed share one
+along-track axis.
+
+One new API knob was needed: `--companion-name`. The acceptance analysis
+compares against a **constant-gamma companion run**, whose directory the tool
+derives from `segment + case_tag`. Because this study's constant-gamma run
+lives under `--out-name full_pbed_proc_att14` (to keep A = 15 and A = 14
+side by side), the derived path would have pointed at the **A = 15** run and
+silently re-simulated 66 minutes of chunks at the wrong attenuation.
+`--companion-name` names it explicitly, and a missing/mismatched companion
+now fails **in milliseconds, before any frame or DEM work**.
+
+## 3.2 What the RSSNR field looks like on this line
+
+76 decimated samples along the 99.7 km anchor line (**1 333 m** median
+spacing), **92.1 % QC-pass** (6 censored of 76), **21 samples inside the
+29 km study segment**.
+
+* **RSSNR itself**: 72.2 - 100.1 dB, median **83.6**, p5-p95 77.0-95.7 --
+  **28 dB of dynamic range** (larger RSSNR = dimmer bed).
+* Dataset-internal ice thickness (from its own surface/bed twtts):
+  1 937 - 2 670 m, median 2 185 m.
+* **Mapped |Gamma_bed|^2 over the segment** (A = 14.0, level-anchored):
+  min **-30.8**, p5 -29.2, med **-20.8**, p95 -13.8, max **-11.6 dB**.
+  Sample-to-sample swings of 15 dB between adjacent 1.3 km samples --
+  genuine along-track structure, not a smooth trend:
+  `-17.6 -14.5 -26.9 -27.7 -30.8 -26.3 -20.5 -29.0 -26.5 -21.7 -18.4 -13.8
+  -18.5 -27.4 -29.1 -16.7 -16.5 -29.2 -11.6 -16.4 -20.8` dB.
+* Censored samples take the segment minimum (-30.8 dB) as a brightness
+  FLOOR, never interpolated across.
+
+## 3.3 K and its derivation (contamination-aware level anchoring)
+
+| quantity | value |
+|---|---|
+| K_median (median |Gamma|^2 = the constant Fresnel value) | **+2.06 dB** |
+| deficit D (contamination-aware, LOW pass, bed-returns) | **-7.89 dB** |
+| **K_level (adopted)** | **-5.83 dB** |
+| K_phys (Fresnel surface + 2-way transmission) | **-10.32 dB** |
+| **K - K_phys** | **+4.50 dB** |
+| implied effective attenuation | **14.9 dB/km** |
+
+`D = median(measured bed window) - median(simulated BED-RETURNS bed window)`
+on the **LOW pass only**, from the A = 14.0 constant-gamma full-segment run:
+`-107.76 - (-99.87) = -7.89 dB`. Two deliberate choices, both following the
+route-validity finding of section 2.4:
+
+* **Solved through the decomposition**, not the total field: the total also
+  contains A- and gamma-independent surface clutter, which would bias D.
+* **The HIGH pass is excluded from the solve**: its bed window is
+  surface-dominated (bed returns 4.1 dB *below* surface returns at A = 14),
+  its total level moves only 0.19 dB per dB/km, so including it would drag D
+  toward the clutter floor. Its post-run residual is instead the
+  **transfer test**.
+
+**K - K_phys = +4.50 dB is remarkably small.** On the Antarctic family this
+gap was large enough to be a headline caveat; here the absolute chain
+(Fresnel surface, 14 dB/km attenuation, Fresnel ice->rock bed) is nearly
+self-consistent, and the anchoring only has to absorb 4.5 dB. Equivalently,
+the level anchoring implies an **effective attenuation of 14.9 dB/km**
+against the adopted 14.0 -- an *independent* corroboration of the part-2
+estimate to within **0.9 dB/km**, from a completely different constraint
+(absolute level, not slope).
+
+## 3.4 Physicality of the implied |Gamma|^2
+
+| diagnostic | value | reading |
+|---|---|---|
+| fraction of segment samples with |Gamma|^2 > 0 dB | **0.000** | no unphysical reflectivity anywhere |
+| fraction above the Fresnel ice->rock ceiling (-12.86 dB) | **0.048** (1 of 21) | one sample only |
+| max excess over that ceiling | **+1.31 dB** | marginal |
+| segment median vs the ceiling | **7.9 dB below** | comfortably sub-rock |
+
+This is a clean result. The Antarctic runs needed a documented caveat about
+a positive-|Gamma|^2 fraction (reflectivity > 1, the price of median-anchoring
+on a dim-bed segment); here **nothing exceeds 0 dB**, and essentially nothing
+exceeds the rock ceiling either -- the single 1.3 dB excursion is well within
+what a wetter or smoother basal patch would give. The mapped field is
+physically admissible as it stands, which is the strongest evidence so far
+that A = 14 and the constant-gamma baseline are mutually consistent on this
+line.
+
+## 3.5 Plot change
+
+The bed overlay is now **dotted** and appears on **measured panels only**.
+The sim-panel bed line was removed entirely: the sim's bed nadir twtt is a
+model *input*, not an independent pick, so drawing it on the simulated
+radargram invites reading a tautology as agreement. The measured Bottom pick
+stays, dotted, because there it is a genuine cross-check of registration
+against the echo.
+
+
+## 3.6 RERUN with the RSSNR gamma -- results
+
+Full segment (s 11-40), all three passes, `--gamma-from-rssnr --anchor level`,
+everything else identical to the A = 14.0 constant-gamma run (picked bed,
+matched CSARP_standard processing). Simulation wall **3 975.7 s (66 min)**:
+low 1 875.3 s, high 1 274.4 s, syn14km 825.9 s -- **1.0 % above** the
+constant-gamma run, as expected (gamma changes no geometry). The
+constant-gamma companion was resolved from `--companion-name` and hit its
+cache on every chunk (`[skip-exists]`), so the acceptance analysis cost
+nothing.
+
+### Bed-window levels, dB rel own surface peak (constant -> RSSNR)
+
+| pass | component | constant | RSSNR | delta |
+|---|---|---|---|---|
+| low | **bed returns** | -99.87 | **-108.74** | **-8.87** |
+| low | surface returns | -110.20 | -110.20 | +0.00 |
+| low | total | -99.38 | -105.32 | -5.94 |
+| low | measured | -107.76 | -107.76 | — |
+| low | **residual** | **+8.38** | **+2.44** | **-5.94** |
+| high | **bed returns** | -94.33 | **-102.88** | **-8.55** |
+| high | surface returns | -90.19 | -90.19 | +0.00 |
+| high | total | -88.68 | -89.80 | -1.12 |
+| high | **residual** | **-4.73** | **-5.85** | -1.12 |
+| syn14km | bed returns | -94.07 | **-101.77** | **-7.70** |
+| syn14km | total | -84.61 | -85.07 | -0.46 |
+
+**Level-anchor verification**: post-run median residual **-1.70 dB** against a
+2 dB gate -- **PASS**. Per pass: low **+2.44 dB** (the solve target; the
+residual is positive because the total also carries surface returns that the
+bed-only solve did not include), high **-5.85 dB**.
+
+**The transfer test FAILS, and informatively.** K moves only bed returns, and
+it moved the high pass's bed returns by the full -8.55 dB -- but the high
+pass's *total* bed window moved only **-1.12 dB**, because that window is
+surface clutter. The same anchoring that brings the low pass to +2.44 dB
+leaves the high pass at -5.85 dB. This is the third independent confirmation
+of the study's central structural finding: **above ~2.5 km AGL on this line,
+the bed window is not a bed measurement**, so it can neither calibrate a bed
+model nor test one.
+
+Mid-column levels (-78.08 / -61.32 / -51.05 dB) and the altitude trend
+(measured +1.09 vs simulated +16.76 dB) are **bit-identical** to the
+constant-gamma run -- bed gamma touches only bed returns, exactly as it
+should.
+
+### ACCEPTANCE: along-track bed-brightness correlation vs measured
+
+Pearson r of the ~1 km-smoothed bed-window power profile (dB rel own surface
+peak), same bed geometry in both runs:
+
+| pass | **constant gamma** | **RSSNR gamma** | change | data-only ceiling (`r_implied_vs_measured`) | by-construction check (`r_bedlayer_vs_implied`) |
+|---|---|---|---|---|---|
+| **low** (465 m) | **+0.193** | **+0.604** | **+0.411** | **+0.897** | +0.823 |
+| high (2 483 m) | +0.708 | +0.618 | -0.090 | **+0.070** | +0.784 |
+
+**On the low pass the RSSNR field works: r goes +0.19 -> +0.60** against a
+data-only ceiling of +0.897. The constant-gamma profile is nearly flat and
+misses every along-track feature; the RSSNR profile reproduces the measured
+dips at s ~ 31 and ~ 35.5 km and the rises at ~ 26.5 and ~ 33 km, and drops
+the level from ~ -96 to ~ -104 dB against a measured ~ -106 dB
+(`bed_brightness.png`, left panel). The Antarctic benchmark went ~0 -> ~0.8;
+this line goes +0.19 -> +0.60 with a ceiling of +0.90, i.e. the simulation
+captures **67 %** of the achievable correlation.
+
+**The high pass's numbers must not be read as a bed-model score.** Its
+`r_implied_vs_measured` ceiling is **+0.070**: the measured high-pass
+bed-brightness profile has essentially no relationship to the RSSNR pattern
+in the first place (its bed window sits only 4.7 dB above the noise floor and
+is surface-clutter crowded). Consistently, `r_sim_rssnr_vs_implied` is
+**+0.048** for the high pass against **+0.784** for its bed-layer-only field
+-- the imposed gamma is faithfully rendered in the bed layer and then buried
+in the total. The constant-gamma +0.708 is therefore a *geometric* agreement
+(both sims track the same terrain-driven clutter), not evidence about the
+bed; the -0.09 change is noise on a meaningless baseline.
+
+### Verdict on the RSSNR wiring
+
+Accepted for the LOW pass and for any future bed-reflectivity work on this
+line; **not** usable as an acceptance metric at altitude, for the same
+structural reason that invalidated route (a) in part 2. The recommended
+practice on this line is to score bed models on the **bed-layer decomposition
+component**, never the total field, whenever the pass is above ~1 km AGL.
+
+## 3.7 Deliverables and tests (part 3)
+
+* `outputs/greenland_pair/full_pbed_proc_att14_rssnr/` -- `radargrams.png`
+  (dotted measured-only pick overlay, corrected framing), `decomposition.png`,
+  `decomposition_trace.png`, `bed_tail.png`, **`bed_brightness.png`** (the
+  acceptance figure), `metrics.json`, `report.html`, `run_config.json`;
+  mirrored to
+  `outputs/verification/greenland_pair_full_pbed_proc_att14_rssnr/`.
+* `outputs/greenland_pair/rssnr_anchor.npz` -- the pinned fetch (76 samples,
+  snapshot `GEAMAHQ7BRVPG9SQPK20`) with provenance.
+* Constant-gamma A = 14.0 run retained at
+  `outputs/greenland_pair/full_pbed_proc_att14/` for the before/after table.
+* New metric entries: `rssnr_level_anchor` (gate 2 dB, PASS at -1.70),
+  `rssnr_gamma_mapping`, `bed_brightness_correlation`.
+* Tests: 6 new in `tests/test_basal_lines.py` (Greenland store pinned to its
+  own snapshot and cache, `gamma_rssnr` now wired, the contamination-aware
+  deficit's sign and note, the Antarctic RSSNR config untouched, and the two
+  companion-resolution guards). The companion-existence check runs in the
+  early guard block so a missing companion fails in **milliseconds** rather
+  than after 66 minutes of simulation.

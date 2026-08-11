@@ -578,10 +578,47 @@ LINES = {
         # the Antarctic line's -1..13.5 us / -90..5 dB framing.
         "RADARGRAM_Y_US": (-1.0, 34.0),
         "RADARGRAM_DB": (-120.0, 5.0),
+        # Required-surface-SNR store for THIS line (scouted 2026-08-11: the
+        # greenland store holds 5 698 frames / 182 segments, and BOTH of the
+        # pair's segments are in it -- 20140421_01 with 66 frames and
+        # 20170424_01 with 65). The mapping is driven off the ANCHOR pass's
+        # frames (REF_FRAMES = the low pass), the same pick/reference
+        # convention the picked bed uses.
+        "RSSNR_SNAPSHOT": "GEAMAHQ7BRVPG9SQPK20",
+        "RSSNR_STORE": {"bucket": "opr-radar-metrics",
+                        "prefix": "icechunk/greenland",
+                        "region": "us-west-2"},
+        "RSSNR_CACHE": ROOT / "outputs" / "greenland_pair"
+        / "rssnr_anchor.npz",
+        # LEVEL ANCHORING deficit for this line, derived CONTAMINATION-AWARE
+        # (see LEVEL_ANCHOR_NOTE): D = median(measured bed window) -
+        # median(simulated BED-RETURNS bed window) on the LOW pass only.
+        # The high pass is excluded on purpose -- its bed window is
+        # surface-clutter dominated (bed returns sit 4.1 dB BELOW surface
+        # returns at A = 14), so its total-field level moves only 0.19 dB
+        # per dB/km and would bias D toward the clutter floor. From the
+        # A = 14.0 constant-gamma full-segment run:
+        #   measured -107.76 dB, sim bed returns -99.87 dB -> D = -7.89 dB.
+        # The high pass's post-run residual is the TRANSFER TEST.
+        "LEVEL_ANCHOR_DEFICIT_DB": -7.89,
+        "LEVEL_ANCHOR_NOTE": (
+            "K_level = K_median + D. CONTAMINATION-AWARE derivation for this "
+            "line: D = median(measured bed window) - median(simulated "
+            "BED-RETURNS bed window) on the LOW pass ONLY, taken from the "
+            "A = 14.0 constant-gamma full-segment run (-107.76 - (-99.87) = "
+            "-7.89 dB). The decomposition is used rather than the total "
+            "field because the total also holds A-independent surface "
+            "clutter; the HIGH pass is excluded entirely because its bed "
+            "window is surface-dominated (bed returns 4.1 dB BELOW surface "
+            "returns), so its total level moves only 0.19 dB per dB/km and "
+            "would drag D toward the clutter floor. Received bed level "
+            "shifts dB-for-dB with K, so one analytic step replaces an "
+            "iteration; the LOW pass's post-run residual verifies the "
+            "solve and the HIGH pass's is the TRANSFER TEST."),
         "SYNTHETIC_KEYS": (SYN14_KEY,),
         "MEASURED_CAVEATS": _GL_MEASURED_CAVEATS,
         # products this line does NOT have wired (guarded in run())
-        "UNSUPPORTED": ("gamma_rssnr", "demogorgn_bed", "hybrid"),
+        "UNSUPPORTED": ("demogorgn_bed", "hybrid"),
     },
 }
 # Season of the pick-axis frames (REF_FRAMES); the Antarctic line's is its
@@ -889,6 +926,13 @@ def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi,
             # K - K_phys / (2 * H_med) estimates the attenuation the
             # anchoring absorbed (recorded, not tuned away).
             "g2_pos_frac_seg": round(float((gs > 0).mean()), 3),
+            # ... and the physically meaningful ceiling for a ROCK bed: the
+            # constant run's Fresnel ice->bed value. Samples above it need a
+            # brighter-than-rock interface (wet/smooth basal patches); a
+            # large fraction means the anchoring is inflating the field.
+            "g2_over_fresnel_frac_seg": round(float((gs > g2_const).mean()),
+                                              3),
+            "g2_max_over_fresnel_db": round(float(gs.max() - g2_const), 2),
             "implied_eff_att_db_per_km": round(
                 att_db_per_km + (k - kp)
                 / (2.0 * float(np.median(thick_m[seg])) / 1e3), 1),
@@ -1030,7 +1074,7 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
             "deficit_db": round(lvl, 2),
             "k_median_db": round(prof["k_db"] - shift, 2),
             "k_level_db": prof["k_db"],
-            "source": ("recorded default (att 31 DEMOGORGN unsplit)"
+            "source": (f"registry default for line {LINE!r}"
                        if level_deficit_db is None else "supplied"),
             "note": LEVEL_ANCHOR_NOTE}
     prof["provenance"] = prov
@@ -1376,13 +1420,14 @@ def apply_hybrid_bed(base, fsub, ct_m, seed, axis):
 #     pattern (M22); no per-channel processing to combine.
 PROC_TAG = "_proc"
 FIG_WIDTH_SCALE = 1.0   # --fig-width-scale: radargram panel width multiplier
-# Radargram bed overlays (--no-bed-overlay turns them off): the MEASURED
-# Bottom pick on measured panels and the SIM BED-LAYER NADIR twtt on sim
-# panels, each on its own panel's surface-referenced axis. They are drawn
-# from the same arrays the bed-window metrics use, so a visible mismatch
-# between the line and the echo IS a registration/pick problem, not a
-# plotting artefact -- which is the point of having them on by default.
-BED_OVERLAY_STYLE = dict(color="tab:cyan", lw=0.9, alpha=0.85)
+# Radargram bed overlay (--no-bed-overlay turns it off): the MEASURED Bottom
+# pick, DOTTED, on MEASURED PANELS ONLY. It is drawn from the same array the
+# measured bed-window metrics use, so a visible mismatch between the line and
+# the echo IS a registration/pick problem, not a plotting artefact -- which
+# is the point of having it on by default. Simulated panels carry NO bed
+# line: the sim's bed nadir twtt is a model input, not an independent pick,
+# so drawing it there invites reading a tautology as agreement.
+BED_OVERLAY_STYLE = dict(color="tab:cyan", lw=1.1, ls=":", alpha=0.9)
 BED_OVERLAY = True      # --no-bed-overlay
 # Radargram panel window (surface-referenced twtt, us) and dB colour range.
 # LINE-SPECIFIC: the 2016 DC-8 anchor's bed sits ~8 us below the surface, so
@@ -2835,12 +2880,10 @@ def fig_bed_brightness(out, preps, corr_series, corr_stats, segment,
 # figures (grayscale radargrams = sequential magnitude; profile series in
 # fixed categorical order with legend, one axis)
 # ========================================================================
-def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax,
-                         bed_overlay=True, legend=False):
+def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
     """One simulated-pass panel: dB rel per-pass median simulated surface
-    peak, surface-referenced twtt axis. ``bed_overlay`` draws the SIM BED
-    LAYER's nadir twtt (a['t_b'], the same reference the bed-window and
-    bed-tail metrics use) on the panel's own axis."""
+    peak, surface-referenced twtt axis. NO bed overlay (see
+    BED_OVERLAY_STYLE): the sim's bed nadir twtt is a model input."""
     twtt_s = p["rc_frame"].t0 + np.arange(
         p["rc_frame"].n_samples) * p["rc_frame"].dt
     ref_s = 10.0 * np.log10(max(float(np.nanmedian(
@@ -2853,12 +2896,6 @@ def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax,
     ax.imshow(_db(a["P"])[:, ms].T - ref_s, aspect="auto", cmap="gray",
               vmin=vmin, vmax=vmax,
               extent=[s_sim[0], s_sim[-1], rel_s[ms][-1], rel_s[ms][0]])
-    if bed_overlay:
-        ax.plot(s_sim, (a["t_b"] - surf_med_s) * 1e6,
-                label="sim bed nadir twtt", **BED_OVERLAY_STYLE)
-        ax.set_ylim(y_hi, y_lo)
-        if legend:
-            ax.legend(fontsize=7, loc="lower left", framealpha=0.7)
     ax.set_title(f"{key} sim {label} (ct ±{p['reach']['ct_m'] / 1e3:.1f} km,"
                  f" {p['spacing']:.1f} m facets)", fontsize=10)
 
@@ -2875,8 +2912,7 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
     ``plot_s_max_km`` crops the PLOTTED along-track range (the data and
     every metric keep the full segment); ``src`` prepends a source-data
     provenance line to the figure title. ``bed_overlay`` (default ON) draws
-    the MEASURED Bottom pick on measured panels and the SIM BED nadir twtt
-    on simulated panels."""
+    the MEASURED Bottom pick, dotted, on measured panels only."""
     keys = keys or ORDER
     ablation = ablation or []
     y_lo, y_hi = RADARGRAM_Y_US
@@ -2917,12 +2953,10 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
         # sim row(s): picked-bed (labeled when ablation rows are present)
         _sim_radargram_panel(axs[1, k], p, a, key,
                              "(picked bed)" if ablation else "",
-                             s0, y_lo, y_hi, vmin, vmax,
-                             bed_overlay=bed_overlay, legend=(k == 0))
+                             s0, y_lo, y_hi, vmin, vmax)
         for r, (pr, an, label) in enumerate(ablation):
             _sim_radargram_panel(axs[2 + r, k], pr[key], an[key], key,
-                                 f"({label})", s0, y_lo, y_hi, vmin, vmax,
-                                 bed_overlay=bed_overlay)
+                                 f"({label})", s0, y_lo, y_hi, vmin, vmax)
         if gl_s_km is not None:
             for r in range(nrow):
                 ax_ = axs[r, k]
@@ -2941,7 +2975,7 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
         axs[r, 0].set_ylabel("twtt below surface (us)")
     title = ("basal-clutter altitude comparison: measured (top) vs simulated "
              "surface+bed, dB rel own surface peak"
-             + (" [cyan: measured Bottom pick / sim bed nadir twtt]"
+             + (" [cyan dotted: measured Bottom pick]"
                 if bed_overlay else "")
              + (" -- bed-source ablation: picked bed / "
                 + " / ".join(label for _, _, label in ablation)
@@ -3222,7 +3256,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         bed_rough_extra_db=0.0, passes=None, spec=None,
         anchor="median", level_deficit_db=None, trace_decomp_s_km=None,
         add_14km=False, add_300km=False, per_pass_figs=False,
-        plot_s_max_km=None, proc_cache=False, line=None):
+        plot_s_max_km=None, proc_cache=False, line=None,
+        companion_name=None):
     if line:
         activate_line(line)
     if segment not in SEGMENTS:
@@ -3248,11 +3283,30 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     if hybrid and bed_ablation:
         raise ValueError("--bed-ablation is not wired for the full_line "
                          "hybrid segment")
-    if out_name and (companion and gamma_rssnr or bed_ablation):
+    if out_name and bed_ablation:
         raise ValueError("--out-name relocates the case directory; the "
-                         "companion/ablation runs resolve their own sibling "
-                         "directories, so run it with --no-companion and "
-                         "without --bed-ablation (hypothesis tests)")
+                         "ablation runs resolve their own sibling "
+                         "directories, so run it without --bed-ablation")
+    if out_name and companion and gamma_rssnr and not companion_name:
+        raise ValueError("--out-name relocates the case directory, so the "
+                         "constant-gamma companion can no longer be found "
+                         "at its derived sibling path: pass "
+                         "--companion-name <dir> (the constant-gamma run "
+                         "built with the SAME --att and bed source) or "
+                         "--no-companion")
+    # Resolved and CHECKED here, before any frame/DEM/simulation work: a
+    # missing companion must fail in milliseconds, not after the run.
+    runs_const = None
+    if gamma_rssnr and companion:
+        runs_const = (Path(out_root or OUT_DEFAULT)
+                      / (companion_name
+                         or (segment + case_tag(picked_bed, False, proc,
+                                                demogorgn_bed)))
+                      / "runs")
+        if not runs_const.is_dir():
+            raise ValueError(f"constant-gamma companion runs not found at "
+                             f"{runs_const}: build that run first (same "
+                             "--att and bed source) or pass --no-companion")
     if spec and not gamma_rssnr:
         raise ValueError("--specular-fraction splits the RSSNR-mapped bed "
                          "reflectivity: use it with --gamma-from-rssnr")
@@ -3416,10 +3470,6 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
     corr_stats = corr_series = None
     if gamma_rssnr and companion:
-        runs_const = (Path(out_root or OUT_DEFAULT)
-                      / (segment + case_tag(picked_bed, False, proc,
-                                            demogorgn_bed))
-                      / "runs")
         corr_stats, corr_series = {}, {}
         for key in [k for k in ORDER if k in order]:
             print(f"== {key} constant-gamma companion (cache-first) ==",
@@ -4220,6 +4270,12 @@ def main():
                     "location at 120 km). The nearest trace of every pass "
                     "is used and recorded per pass in the config; changing "
                     "it only re-does the analysis, never the simulations")
+    ap.add_argument("--companion-name", default=None,
+                    help="directory name (under --out) of the CONSTANT-gamma "
+                    "companion run the RSSNR acceptance analysis compares "
+                    "against; needed when --out-name relocates this run. It "
+                    "must have been built with the same --att and bed "
+                    "source, else its cached chunks miss and it re-simulates")
     ap.add_argument("--no-bed-overlay", action="store_true",
                     help="drop the bed overlays from the radargram panels "
                     "(default ON: the measured Bottom pick on measured "
@@ -4246,6 +4302,7 @@ def main():
         add_14km=args.add_14km, add_300km=args.add_300km,
         per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,
         proc_cache=args.proc_cache, line=args.line,
+        companion_name=args.companion_name,
         spec=(None if args.specular_fraction is None
               else (args.specular_fraction, args.spec_tilt_deg,
                     args.diffuse_exponent)))
