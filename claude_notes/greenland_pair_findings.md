@@ -778,3 +778,189 @@ component**, never the total field, whenever the pass is above ~1 km AGL.
   companion-resolution guards). The companion-existence check runs in the
   early guard block so a missing companion fails in **milliseconds** rather
   than after 66 minutes of simulation.
+
+
+## 3.8 Framing sweep: the profile figures had the same bug (and worse)
+
+Fixing the radargram framing in part 2 caught only one of two families. The
+**surface-referenced profile figures** carried the same Antarctic sizing, and
+in their case it was not merely a crop:
+
+`rel_mean_profile(..., lo_us=-1.5, hi_us=14.5)` is a **DATA window** -- it
+builds the profile arrays over that extent. On this line the bed sits at
+**~29 us** below the surface, so the bed returns were **never computed**, and
+no axis change could have revealed them. Three figures consumed those arrays
+and additionally clipped to `-1.0..13.5 us` / `-110..5 dB`:
+
+| figure | was | now (Greenland) |
+|---|---|---|
+| `decomposition.png` | 0-13.5 us, bed absent | **-1..34 us, -140..5 dB** |
+| `decomposition_trace.png` | 0-13.5 us, bed absent (subtitle said "bed at 29.05 us") | **-1..34 us, -140..5 dB** |
+| `decomposition_zones.png` (Antarctic-only path) | unchanged | unchanged |
+
+Two derived thresholds were tied to the old -110 dB floor and are now
+expressed against `PROFILE_DB`: the surface-borne bed-source-invariance check
+(`y0 > -105.0` -> `PROFILE_DB[0] + 5`) and the "median bed" text anchor.
+
+New line globals, Antarctic values unchanged and asserted in tests:
+
+| global | Antarctic | Greenland |
+|---|---|---|
+| `PROFILE_REL_US` (data) | (-1.5, 14.5) | **(-1.5, 34.5)** |
+| `PROFILE_X_US` (plot x) | (-1.0, 13.5) | **(-1.0, 34.0)** |
+| `PROFILE_DB` (plot y) | (-110.0, 5.0) | **(-140.0, 5.0)** |
+
+`rel_mean_profile` now resolves its extent from the ACTIVE line at call time
+(a regression test proves the default is not bound at import, which would
+have silently kept the Antarctic extent after `activate_line`).
+
+**Swept the remaining figures; two were never affected and need no change:**
+`fig_bed_tail` plots on `TAIL_PROF_US`, which is **bed-referenced**
+(-1..+4 us about the bed pick), so it is correct on any line by construction
+-- which is why the bed-tail metrics were sound throughout. `fig_bed_brightness`
+plots along-track `s` with an autoscaled y axis. `fig_radargrams` was fixed in
+part 2.
+
+### What the corrected figures show
+
+With the bed finally in frame, `decomposition_trace.png` and
+`decomposition.png` make the study's central result visible rather than
+merely tabulated: on the LOW pass the simulated **bed returns** spike at
+29 us to meet and slightly exceed the simulated surface returns (+1.4 dB
+single-trace guard) and the sim total tracks the measured bed peak; on the
+HIGH pass and syn14km the bed-return curve stays 15-20 dB **below** the
+surface-return curve all the way through the bed window (-18.4 / -17.8 dB).
+Across the whole column the measured curve sits far above the simulation on
+every pass -- the missing englacial term, now visible over 34 us instead of
+the first 13.5.
+
+
+---
+
+# Part 4 (2026-08-12): bed-visibility bisection -- and a correction to A
+
+Triggered by the user's report that the bed is clearly visible in the OPR
+product for `20170424_01_067` but not in our figures. Deliverable:
+`outputs/greenland_pair/bed_visibility_bisect.png`.
+
+## 4.1 Bisection verdict: NO stage loses the bed
+
+Stage by stage on the high pass (each with its own robust colorscale, full
+record, bed-pick overlay):
+
+| stage | bed peak | bed window | floor | verdict |
+|---|---|---|---|---|
+| 1. raw `load_frame` (whole frame) | -78.14 | -81.62 | -86.87 | present |
+| 2. sliced to s 11-40 | -80.54 | -83.95 | -88.67 | present, unchanged |
+| 3. dt/t0 lattice handling | — | — | — | **no-op**: the measured array is never resampled (each pass keeps its own `tw`/`dt`); verified array-identical |
+| 4. per-trace surface-peak normalization | -80.54 | -83.95 | -88.67 | **exactly unchanged** (it divides each trace by a scalar) |
+| 5. final figure arrays | same | same | same | present in the data |
+
+All dB rel own surface peak. **No stage degrades the bed.** Asset checks:
+`data_product='CSARP_standard'`, `Data` (3 335 x 1 663), full record
+0-55.400 us, no non-positive samples, surface peaks spread only 6.2 dB p5-p95
+with **zero** traces at the frame maximum (no saturation, no mispick).
+
+### The bed IS there -- quantified against a proper null
+
+`bed peak` is `max(power over +-0.3 us) / floor mean`. For pure background
+that statistic is **not** 0 dB: the max of ~18 exponential samples sits ~2.3 dB
+above their mean. Measuring the same statistic at reflector-free delays gives
+the null:
+
+| pass | product | at bed | null (in floor window) | **excess over null** |
+|---|---|---|---|---|
+| low | standard | 16.56 | 2.27 | **+14.30 dB** |
+| low | mvdr | 17.85 | 2.38 | **+15.48 dB** |
+| high | standard | 8.47 | 2.32 | **+6.16 dB** |
+| high | **mvdr** | 13.82 | 2.31 | **+11.51 dB** |
+
+**The high pass's bed is a real +6.2 dB detection in the product we load, and
++11.5 dB in CSARP_mvdr.** The user is right that it is clearly visible -- the
+bed-zoom panels show it as a crisp continuous line in `CSARP_mvdr` and as a
+faint diffuse band in `CSARP_standard`.
+
+## 4.2 Why it is invisible in our figures (a real, fixed, plotting bug)
+
+The bed stands 6-16 dB above its local background while the shipped panel
+ramp spans **125 dB** (`RADARGRAM_DB = (-120, 5)`): a 6 dB feature occupies
+4.8 % of the gray range. Worse, a shared ramp **cannot** work here -- the two
+passes' beds sit at -99 dB (low) and -81 dB (high) rel their own surface
+peaks, 18 dB apart, each only 6-16 dB above its own background, so no single
+linear ramp renders both.
+
+Fix: new line global `RADARGRAM_SCALE` (`"shared"` = Antarctic, unchanged and
+asserted; `"per_panel"` = Greenland) scaling each panel to its own robust
+2-99.8 percentiles and printing the range in the panel title, so
+comparability is preserved by annotation rather than by a shared ramp.
+
+## 4.3 CORRECTION: the measured claims were product-limited, not physics
+
+| claim (parts 2-3) | status | corrected |
+|---|---|---|
+| "bed only 4.7 dB above floor" | window-mean statistic, misleading as a visibility claim | bed **peak** is 8.1 dB over floor and **+6.2 dB over null** -- detected, not absent |
+| "data ceiling 0.070 -> not a bed measurement above 2.5 km" | **too strong; product-limited** | ceiling is +0.078 (standard, window), +0.155 (standard, peak), **+0.470 (mvdr, window), +0.531 (mvdr, peak)** |
+| acceptance high pass const +0.708 -> RSSNR +0.618 | still uninformative, reason now precise | scored against a standard-product profile whose ceiling is 0.08; on mvdr the ceiling is ~0.5, so the high pass should be re-scored on mvdr before any conclusion |
+
+The **simulation-side** conclusions are untouched: the mid-column is
+surface-borne by 84-124 dB, bed returns sit 15-20 dB below surface returns at
+altitude, and the altitude trend overshoots by +15.7 dB. None of these depend
+on measured bed visibility.
+
+## 4.4 CORRECTION: A = 14.0 dB/km does not survive
+
+Route (b) re-run identically on both products and with both bed measures
+(floor-subtracted, 0.75 km bins):
+
+| pass | product | measure | **A (Theil-Sen)** | r | resid |
+|---|---|---|---|---|---|
+| low | standard | window | 8.29 | -0.602 | 4.34 |
+| low | standard | peak | 7.43 | -0.508 | 4.85 |
+| low | mvdr | window | 7.93 | -0.640 | 3.85 |
+| low | mvdr | peak | 7.06 | -0.549 | 4.22 |
+| high | standard | window | **13.91** | -0.974 | 1.72 |
+| high | standard | peak | **13.40** | -0.967 | 1.87 |
+| high | **mvdr** | window | **6.18** | -0.902 | 1.53 |
+| high | **mvdr** | peak | **6.66** | -0.833 | 2.25 |
+
+* The **low pass gives 7.1-8.3 across all four combinations** -- a 1.2 dB/km
+  spread. Product-stable and measure-stable, though statistically weak.
+* The **high pass swings 13.9 -> 6.2 between products** (7.7 dB/km) while
+  passing the statistical gate in BOTH. My part-2 gate tested statistical
+  quality but **not product stability**, and admitted the contaminated one.
+* On mvdr the high pass (6.2-6.7) **agrees with the low pass** (7.1-8.3).
+  Two independent altitudes agreeing is the physically required outcome, and
+  it only happens on the clutter-suppressed product.
+
+**The committed A = 14.0 is an artifact of clutter contamination in the
+CSARP_standard high-pass bed window.** The clutter's thickness dependence is
+steeper than the bed's, faking a high attenuation; that is the same
+contamination that gives that product a 0.078 correlation ceiling. The
+consistent slope evidence is **A ~ 6.5-8 dB/km**.
+
+**Unresolved tension, stated rather than papered over.** The SLOPE evidence
+now says A ~ 7; the LEVEL evidence (part 3's level anchoring, implied
+effective attenuation **14.9 dB/km**) still says ~15. They reconcile only if
+the bed reflectivity is far dimmer than Fresnel ice->rock: holding the
+measured level with A = 7 needs |Gamma|^2 about **30 dB below** the -12.86 dB
+rock value, i.e. ~-43 dB. That is a dim, rough, frozen bed -- physically
+possible but a different scene than the constant-Fresnel baseline assumes.
+Resolving it needs the two constraints fitted jointly, not one anchored on
+the other.
+
+**Recommendation (a study decision, not taken here):** re-derive A with a
+product-stability gate added, on CSARP_mvdr, and re-run the campaign at the
+corrected value. The part-2/3 simulations remain valid as computed -- their
+A is an input, and every level-dependent metric scales analytically at
+2*dA*H = 4.94 dB per dB/km -- but the *conclusion* that A = 14 is the line's
+attenuation should be withdrawn pending that re-derivation.
+
+## 4.5 Also recommended: use CSARP_mvdr for bed-referenced work on this line
+
+`CSARP_standard` is the right measured reference for surface and mid-column
+comparisons (it is the product the img_comb/SAR chain we model produces). For
+anything *bed-referenced* on the high pass it is the wrong choice: +5.4 dB
+less bed, a 0.078 vs 0.470 correlation ceiling, and an attenuation slope
+inflated by 7.7 dB/km. The tool loads the product via `load_frame(...,
+data_product=...)`, so this is a one-argument change, but it would need its
+own metric re-derivation and is left as a recorded follow-up.

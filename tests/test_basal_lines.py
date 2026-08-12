@@ -25,7 +25,7 @@ LINE_GLOBALS = (
     "N_TRACES_BY_SEGMENT", "REF_PASS", "REF_SEASON", "REF_FRAMES",
     "GL_S_KM", "SYNTHETIC_KEYS", "MEASURED_CAVEATS", "UNSUPPORTED",
     "RADARGRAM_Y_US", "RADARGRAM_DB",
-    "PROFILE_REL_US", "PROFILE_X_US", "PROFILE_DB",
+    "PROFILE_REL_US", "PROFILE_X_US", "PROFILE_DB", "RADARGRAM_SCALE",
     "RSSNR_SNAPSHOT", "RSSNR_STORE", "RSSNR_CACHE",
     "LEVEL_ANCHOR_DEFICIT_DB", "LEVEL_ANCHOR_NOTE",
 )
@@ -115,6 +115,22 @@ def test_greenland_profile_window_reaches_its_bed(greenland):
     assert db_lo <= -130.0         # bed returns sit ~108 dB down
     # framing is consistent with the radargram panels
     assert greenland.PROFILE_X_US[1] == greenland.RADARGRAM_Y_US[1]
+
+
+def test_panel_scale_shared_vs_per_panel(line_sandbox):
+    """The Antarctic line keeps the shared ramp byte-identically; Greenland
+    scales each panel to its own robust percentiles so a 6 dB bed is not
+    rendered as 5% of a 125 dB gray ramp (the 2026-08-12 bisection)."""
+    rng = np.random.default_rng(0)
+    img = rng.normal(-90.0, 6.0, size=(200, 300))
+    lo, hi, note = rbc._panel_scale(img, -120.0, 5.0)
+    assert (lo, hi) == (-120.0, 5.0) and note == ""      # shared: untouched
+    line_sandbox(rbc.GREENLAND_LINE)
+    assert rbc.RADARGRAM_SCALE == "per_panel"
+    lo, hi, note = rbc._panel_scale(img, -120.0, 5.0)
+    assert -120.0 < lo < hi < 5.0                        # tightened to data
+    assert (hi - lo) < 60.0                              # far narrower ramp
+    assert "dB" in note
 
 
 def test_antarctic_profile_window_is_the_module_default():

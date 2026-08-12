@@ -578,6 +578,10 @@ LINES = {
         # the Antarctic line's -1..13.5 us / -90..5 dB framing.
         "RADARGRAM_Y_US": (-1.0, 34.0),
         "RADARGRAM_DB": (-120.0, 5.0),
+        # ... but a shared 125 dB ramp cannot render a bed that stands only
+        # 6-16 dB above its own background (bisection 2026-08-12), so this
+        # line scales per panel and annotates the range.
+        "RADARGRAM_SCALE": "per_panel",
         # ... and the same for the surface-referenced profile figures. The
         # DATA extent must reach past the deepest bed (31.2 us) or the bed
         # returns are never computed, not merely cropped.
@@ -1444,6 +1448,17 @@ BED_OVERLAY = True      # --no-bed-overlay
 # peak on the low pass (vs ~55 dB on the Antarctic line).
 RADARGRAM_Y_US = (-1.0, 13.5)
 RADARGRAM_DB = (-90.0, 5.0)
+# How the radargram panels are scaled. "shared" (the Antarctic design) puts
+# every panel on RADARGRAM_DB so panels are directly comparable by eye.
+# That only works while the passes' bed levels are within the ramp's
+# resolving power: on the Greenland line the LOW pass's bed sits at -99 dB
+# rel its own surface peak and the HIGH pass's at -81 dB, an 18 dB
+# separation, while each bed stands only 6-16 dB above its own local
+# background -- so NO single 125 dB ramp can render both. "per_panel" scales
+# each panel to its own robust percentiles and prints the range in the panel
+# title, trading a shared ramp for annotated comparability.
+RADARGRAM_SCALE = "shared"
+RADARGRAM_PCT = (2.0, 99.8)   # per_panel percentile limits
 # Surface-referenced PROFILE windows, shared by fig_decomposition,
 # fig_decomposition_trace and fig_decomposition_zones. PROFILE_REL_US is a
 # DATA window (rel_mean_profile builds the arrays over it), not just an axis
@@ -2904,6 +2919,18 @@ def fig_bed_brightness(out, preps, corr_series, corr_stats, segment,
 # figures (grayscale radargrams = sequential magnitude; profile series in
 # fixed categorical order with legend, one axis)
 # ========================================================================
+def _panel_scale(arr, vmin, vmax):
+    """(vmin, vmax, note) for one panel: the shared RADARGRAM_DB, or this
+    panel's own robust percentiles when RADARGRAM_SCALE == "per_panel"."""
+    if RADARGRAM_SCALE != "per_panel":
+        return vmin, vmax, ""
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return vmin, vmax, ""
+    lo, hi = np.percentile(finite, RADARGRAM_PCT)
+    return float(lo), float(hi), f"  [{lo:.0f}, {hi:.0f}] dB"
+
+
 def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
     """One simulated-pass panel: dB rel per-pass median simulated surface
     peak, surface-referenced twtt axis. NO bed overlay (see
@@ -2917,11 +2944,12 @@ def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
     rel_s = (twtt_s - surf_med_s) * 1e6
     ms = (rel_s >= y_lo) & (rel_s <= y_hi)
     s_sim = s0 + p["s_sim"] / 1e3
-    ax.imshow(_db(a["P"])[:, ms].T - ref_s, aspect="auto", cmap="gray",
-              vmin=vmin, vmax=vmax,
+    img = _db(a["P"])[:, ms].T - ref_s
+    vmin, vmax, note = _panel_scale(img, vmin, vmax)
+    ax.imshow(img, aspect="auto", cmap="gray", vmin=vmin, vmax=vmax,
               extent=[s_sim[0], s_sim[-1], rel_s[ms][-1], rel_s[ms][0]])
     ax.set_title(f"{key} sim {label} (ct ±{p['reach']['ct_m'] / 1e3:.1f} km,"
-                 f" {p['spacing']:.1f} m facets)", fontsize=10)
+                 f" {p['spacing']:.1f} m facets){note}", fontsize=10)
 
 
 def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
@@ -2963,8 +2991,10 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
             rel = (p["tw_m"] - surf_med) * 1e6
             m = (rel >= y_lo) & (rel <= y_hi)
             s_km = s0 + p["s_m"] / 1e3
-            ax.imshow(_db(a["meas_arr"])[:, m].T - ref_m, aspect="auto",
-                      cmap="gray", vmin=vmin, vmax=vmax,
+            img = _db(a["meas_arr"])[:, m].T - ref_m
+            vmin_m, vmax_m, note_m = _panel_scale(img, vmin, vmax)
+            ax.imshow(img, aspect="auto", cmap="gray",
+                      vmin=vmin_m, vmax=vmax_m,
                       extent=[s_km[0], s_km[-1], rel[m][-1], rel[m][0]])
             if bed_overlay:
                 ax.plot(s_km, (p["bot"] - surf_med) * 1e6,
@@ -2972,8 +3002,8 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
                 ax.set_ylim(y_hi, y_lo)
                 if k == 0:
                     ax.legend(fontsize=7, loc="lower left", framealpha=0.7)
-            ax.set_title(f"{key} measured ({p['h_med']:.0f} m AGL)",
-                         fontsize=10)
+            ax.set_title(f"{key} measured ({p['h_med']:.0f} m AGL)"
+                         f"{note_m}", fontsize=10)
         # sim row(s): picked-bed (labeled when ablation rows are present)
         _sim_radargram_panel(axs[1, k], p, a, key,
                              "(picked bed)" if ablation else "",
