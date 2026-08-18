@@ -60,7 +60,7 @@ def test_processing_chain_recorded(monkeypatch):
          "surf_sim": np.full(T, 6e-6)}
     out = rbc.process_standard(p, {"field": F, "twtt": twtt})
     ch = out["chain"]
-    assert ch["real_chain"] == rbc.REAL_CHAIN_2016
+    assert ch["real_chain"] == rbc.REAL_CHAIN
     assert "11 looks" in ch["real_chain"]["combine"]
     assert "f-k" in ch["real_chain"]["sar"]
     for g in ("g1", "g2", "g3", "g4", "g5", "g6"):
@@ -115,7 +115,7 @@ def test_synth_altitude_below_surface_raises():
 def test_syn30_pass_spec_and_tags():
     """The synthetic pass rides the LOW pass's frames; the proc tag composes
     into the coordinator's output-dir name."""
-    spec = rbc.PASSES[rbc.SYN30_KEY]
+    spec = rbc.PASSES["syn30km"]
     assert spec["full"] == rbc.PASSES["low"]["full"]
     assert spec["synthetic_msl_m"] == 30000.0
     assert rbc.case_tag(True, True, True) == "_pbed_rssnr_proc"

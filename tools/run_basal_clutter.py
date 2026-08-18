@@ -7,7 +7,7 @@ more mid-column ("basal") clutter power at altitude. Each pass's common
 segment is simulated COHERENT SURFACE+BED ONLY (REMA 32 m + BedMachine
 500 m; NO firn, NO internal layers) at its real altitude/nav/params, and the
 simulated clutter is DECOMPOSED per interface (the kernel returns per-layer
-fields) into SURFACE-borne vs BED-borne energy -- the discriminator for what
+fields) into SURFACE returns vs BED returns energy -- the discriminator for what
 the high-altitude clutter actually is.
 
 Cross-track reach is the science-critical parameter and is DERIVED per pass:
@@ -44,7 +44,13 @@ ArcticDEM 32 m + BedMachine Greenland v5 150 m (opr.py selects both from
 the hemisphere), has no grounding line, and mixes two seasons (one per
 pass, hence the per-pass "season" key).
 
-Run:  uv run python tools/run_basal_clutter.py                # 10 km pilot
+Run:  uv run python tools/run_basal_clutter.py \
+          --config config/experiments/ant_att20_klevel.yaml   # PREFERRED: a named,
+      # committed experiment spec (config/README.md). The flag front door
+      # below is unchanged and builds the same RunSpec, so both produce
+      # identical chunk cache keys.
+
+      uv run python tools/run_basal_clutter.py                # 10 km pilot
       uv run python tools/run_basal_clutter.py --segment full # 50 km (STOP:
       report pilot timings first; full run only on explicit go-ahead)
       uv run python tools/run_basal_clutter.py --segment full --picked-bed
@@ -76,6 +82,9 @@ from scipy.spatial import cKDTree  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+import clutter_analysis  # noqa: E402  measurement conventions
+import clutter_instruments  # noqa: E402  radar system definitions
+import clutter_lines  # noqa: E402  study-line definitions (YAML)
 import run_altitude_comparison as rac  # noqa: E402  shared machinery
 from run_opr_comparison import _db  # noqa: E402
 
@@ -86,93 +95,10 @@ from soundersim.opr import load_bottom_pick, load_frame  # noqa: E402
 from soundersim.physics import fresnel_normal  # noqa: E402
 
 C = 299792458.0
-# ---- LINE-SPECIFIC globals (see LINES / activate_line below) -------------
-# Everything in this block describes THE 2016 DC-8 Antarctic anchor line and
-# is the module default. A second study line (the Greenland pair) is a
-# sibling config block in LINES that rebinds exactly these names; the
-# Antarctic path is therefore untouched code and its caches stay valid.
-LINE = "antarctic_2016"    # active line key
-SEASON = "2016_Antarctica_DC8"          # default season (per-pass override)
-CRS = "EPSG:3031"                       # anchor along-track / pick-axis CRS
-CASE_PREFIX = "basal_clutter"
-OUT_DEFAULT = ROOT / "outputs" / "basal_clutter"
 VER_ROOT = ROOT / "outputs" / "verification"
 
-# Clutter coverage: off-nadir arrivals covered out to the nadir-bed delay
-# plus MARGIN_US, for both interfaces (the measured clutter fills the column
-# and hugs past the bed peak; scout: nadir bed at median 8.09 us below
-# surface). The fast-time window extends slightly further (POST_BED_US).
-MARGIN_US = 3.0
-POST_BED_US = 3.5
-PRE_SURF_US = 0.8
-CHUNK_M = 10500.0          # along-track chunk target; pilot (10 km) = 1 chunk
 
-# Analysis windows (twtt, relative to each dataset's OWN picks/geometry).
-SURF_WIN_US = 0.8          # surface peak search half-width
-MID_LO_US, MID_HI_US = 1.0, 0.5     # mid-column: surf+1.0 -> bed-0.5 us
-BED_LO_US, BED_HI_US = 0.5, 1.5     # bed window:  bed-0.5 -> bed+1.5 us
-SCOUT_LO_US, SCOUT_HI_US = 3.0, 0.6  # scout contrast: mean(bed-3..bed-0.6)
-SCOUT_PK_US = 0.3                    # ... over peak within +-0.3 us of bed
-# Measured noise floor: record end - [12, 8] us. Probed 2026-07-31: the
-# last ~4 us of every record are processing-rolled-off (reads 15-25 dB
-# below adjacent windows), and the PRE-surface region is unusable on the
-# low pass (TX leakage / img_comb shallow zone reads ~26 dB ABOVE its
-# mid-column); end-12..-8 sits >=26 us past the deepest bed on all passes
-# and agrees with end-30..-25 to ~1 dB (low), so it is a floor estimate
-# with at most a few dB of residual high-pass clutter tail (upper bound).
-FLOOR_TAIL_LO_US, FLOOR_TAIL_HI_US = 12.0, 8.0
-# ... BUT that window is only a floor if the record actually HAS that much
-# post-bed tail. The Greenland high pass records ~7.9 us past its deepest bed
-# pick, so end -[12, 8] us lands ON THE BED and the "floor" reads within
-# 0.6 dB of the measured bed-window level. floor_window() therefore derives
-# the window PER PASS: keep the established end -[12, 8] us whenever it sits
-# clear of (deepest bed + FLOOR_BED_GUARD_US), else slide it to start there
-# and stop FLOOR_ROLLOFF_US before the record end (the documented
-# processing roll-off). Passes with generous tails -- every 2016 DC-8 pass,
-# and the Greenland LOW pass -- are unaffected bit-identically.
-FLOOR_BED_GUARD_US = 1.5     # clearance past the deepest bed pick
-FLOOR_ROLLOFF_US = 4.0       # unusable rolled-off tail at the record end
-FLOOR_MIN_WIDTH_US = 1.0     # narrower than this -> no trustworthy floor
-# BED-RETURN TAIL (the "sim tails flatten above measured" observation).
-# Windows are relative to each trace's OWN bed reference -- the measured
-# Bottom pick for measured data, the SIM BED-LAYER NADIR TWTT for sims (the
-# per-pass surface registration aligns the surface only, so each dataset is
-# referenced to its own bed and the residual nadir-bed offset is reported
-# alongside, never used to shift a curve).
-TAIL_PROF_US = (-1.0, 4.0)          # bed-referenced profile extent
-TAIL_FIT_US = (0.5, 3.5)            # robust (Theil-Sen) slope fit window
-TAIL_EXCESS_US = (1.0, 2.0, 3.0)    # sim - measured sample delays
-TAIL_GUARD_DB = 10.0                # fair-comparison guard: the sim SURFACE
-                                    # returns must sit this far BELOW the sim
-                                    # BED returns across the fit window, else
-                                    # the "bed tail" is really surface clutter
-TAIL_FLOOR_MARGIN_DB = 3.0          # measured tail counted floor-limited below
-
-# ---- hypothesis-test knobs (campaign 2026-08-03) ----------------------
-# Shared carrier of the triplet (scout table: identical 190 MHz/50 MHz on all
-# three passes); asserted per pass in prep_pass whenever a knob needs it.
-FC_HZ = 190e6
 ANT_DEFAULT = "array"
-LAM_ICE_M = C / (FC_HZ * float(np.sqrt(3.17)))     # ~0.886 m at 190 MHz
-# LEVEL ANCHORING (--anchor level): the median-anchored K pins the median
-# |Gamma|^2 to the Fresnel constant, which makes the RECEIVED bed level
-# depend on A (received ~ K - RSSNR). Level anchoring instead pins the
-# received level: K is raised by the measured bed-window DEFICIT of the
-# same configuration, so the median simulated bed-window level across the
-# three real passes matches the median measured one. The deficit cannot be
-# computed without a run, so it is supplied as a recorded number and
-# VERIFIED post-run (per-pass residuals land in the metrics). The default
-# is the att = 31 DEMOGORGN unsplit sweep point:
-#   sim bed window -67.3 / -60.8 / -60.9 dB vs measured -54.3 / -46.0 / -46.1
-#   -> per-pass deficits 13.0 / 14.8 / 14.8 dB, median-to-median 14.8 dB.
-LEVEL_ANCHOR_DEFICIT_DB = 14.8
-LEVEL_ANCHOR_NOTE = (
-    "K_level = K_median + D, D = median(measured bed-window level) - "
-    "median(simulated bed-window level) over the three real passes of the "
-    "IDENTICALLY configured median-anchored run. Received bed level shifts "
-    "dB-for-dB with K (received ~ K - RSSNR, independent of A), so one "
-    "analytic step replaces an iteration; the post-run per-pass residuals "
-    "are recorded in rssnr_level_anchor and must land within ~2 dB.")
 SPEC_DIFFUSE_NOTE = (
     "Angle-dependent bed reflectivity: the RSSNR-mapped |Gamma_bed|^2(x) is "
     "split into a SPECULAR share f_s, weighted by the facet tilt "
@@ -185,192 +111,21 @@ SPEC_DIFFUSE_NOTE = (
     "derivation; f_s = 1 with s0 = 0 traces the unsplit program "
     "bit-identically). ONE scene-constant f_s is fitted across all three "
     "measured altitudes -- the over-determination test.")
-BED_ROUGH_VALIDITY = (
-    "Gerekos 2023 sub-facet roughness: l <= facet size (10.7/46.0/49.8/81.9 m "
-    "here) and up to a few lambda_ice (lambda_ice = 0.886 m at 190 MHz); "
-    "accuracy ~0.3 dB below lambda/10, ~1 dB near sigma = lambda/4 = 0.22 m "
-    "(the comfortable ceiling), degrading beyond ~0.4*lambda")
 
-N_TRACES_PILOT = 48
-N_TRACES_FULL = 240        # same ~210 m sim trace spacing as the pilot
-N_TRACES_EXT = 335         # 69.7 km at the same ~208 m sim trace spacing
-N_TRACES_LINE = 714        # 148.45 km at the same ~208 m sim trace spacing
-N_TRACES_BY_SEGMENT = {"pilot": N_TRACES_PILOT, "full": N_TRACES_FULL,
-                       "extended": N_TRACES_EXT, "full_line": N_TRACES_LINE}
 
-# Pass table (claude_notes/basal_clutter_scout.md). Slices are half-open
-# slow_time indices into each FULL frame; "rev" passes fly the line backwards
-# (slices reversed to align with increasing anchor s). "full"/"extended"
-# parts are listed in increasing-s order after reversal. param_frame: cached
-# mcords_params provenance (identical system within a segment).
-#
-# EXTENDED (anchor s = 0 -> 69.7 km, 2026-08-07): the study segment grown
-# up-track to the anchor start and down-track to the GROUNDING LINE (scout:
-# grounded ice ends at s = 69.7 km; beyond it BedMachine's "bed" is the
-# seafloor under a cavity, not the reflector the radar sees, so the segment
-# stops there). Slices derived from nav by projecting every candidate frame
-# onto the anchor polyline (claude_notes/extended_segment_slices.py); the
-# extension pulls in ONE new frame per high pass (mid _007, and more of the
-# already-used high _005/_004), all with matching twtt grids and 100%
-# populated bottom picks.
-#
-# FULL_LINE (anchor s = 0 -> 148.45 km, 2026-08-10): the WHOLE overlapping
-# line, grounding line included (GL at s = 69.7 km; grounded ice before it,
-# floating shelf beyond -- scout quirk 1). Slices re-derived from nav with
-# the same projection machinery (scratchpad full_line_slices.py, results
-# recorded in claude_notes/basal_clutter_pilot_findings.md): every pass
-# covers 0.00/0.01 -> 148.44 km with 100% populated bottom picks (floating
-# stretch included), matching twtt grids, one-trace part joins (+26..+34 m)
-# and lateral offsets med <= 23 m / max 30 m. The floating side is simulated
-# against the HYBRID bed (see apply_hybrid_bed), never against BedMachine's
-# seafloor.
-PASSES = {
-    "low": {
-        "agl_med_m": 442.0, "rev": False, "param_frame": "20161105_05_005",
-        "pilot": [("20161105_05_005", (2020, 2693))],
-        "full": [("20161105_05_005", (1212, 3333)),
-                 ("20161105_05_006", (0, 1244))],
-        "extended": [("20161105_05_005", (0, 3333)),
-                     ("20161105_05_006", (0, 1359))],
-        "full_line": [("20161105_05_005", (0, 3333)),
-                      ("20161105_05_006", (0, 3333)),
-                      ("20161105_05_007", (0, 3327))]},
-    "mid": {
-        "agl_med_m": 9150.0, "rev": True, "param_frame": "20161028_05_006",
-        "pilot": [("20161028_05_006", (858, 1532))],
-        "full": [("20161028_05_006", (0, 2341)),
-                 ("20161028_05_005", (2308, 3337))],
-        "extended": [("20161028_05_007", (0, 216)),
-                     ("20161028_05_006", (0, 3337)),
-                     ("20161028_05_005", (2194, 3337))],
-        "full_line": [("20161028_05_007", (0, 216)),
-                      ("20161028_05_006", (0, 3337)),
-                      ("20161028_05_005", (0, 3337)),
-                      ("20161028_05_004", (223, 3337))]},
-    "high": {
-        "agl_med_m": 10684.0, "rev": True, "param_frame": "20161031_07_005",
-        "pilot": [("20161031_07_005", (337, 1011))],
-        "full": [("20161031_07_005", (0, 1820)),
-                 ("20161031_07_004", (1786, 3336))],
-        "extended": [("20161031_07_005", (0, 3033)),
-                     ("20161031_07_004", (1671, 3336))],
-        "full_line": [("20161031_07_005", (0, 3033)),
-                      ("20161031_07_004", (0, 3336)),
-                      ("20161031_07_003", (0, 3340)),
-                      ("20161031_07_002", (3044, 3341))]},
-}
-ORDER = ["low", "mid", "high"]
-SEGMENTS = ("pilot", "full", "extended", "full_line")
-S0_KM = {"pilot": 30.0, "full": 18.0, "extended": 0.0,
-         "full_line": 0.0}                               # display origin
-# The RSSNR K anchoring stays on the segment it was calibrated on: the
-# extended run REUSES the established 50 km mapping (K = K_median(full) + D)
-# rather than re-deriving the median on the longer line, so the extended
-# results are directly comparable to the recorded att20_klevel family. The
-# resulting bed-window level residuals on the new extent are reported, not
-# re-anchored. The full-line run pins to the same 50 km mapping for the same
-# reason: K = +7.92 dB reused verbatim, never re-derived.
-K_ANCHOR_SEGMENT = {"extended": "full", "full_line": "full"}
-# Default location(s) of the SINGLE-TRACE decomposition (--trace-decomp-s,
-# anchor along-track km; a tuple means one figure panel per location).
-# s = 31.0 km is the scout's documented deep trough: "one wide bright
-# hyperbola from the deep trough at s ~ 31 km", inside the 30-40 km window
-# whose per-km bed relief is the highest on the grounded part of the line
-# (mean 103 m/km) -- structured, resolvable off-nadir bed clutter. The
-# full-line segment adds s = 120.0 km, a FLOATING location: past the last
-# BedMachine mask flicker at s = 110 km (unambiguously afloat), mid-shelf,
-# where the basal reflector is the smooth ice-ocean interface -- the
-# specular-regime counterpart to the grounded trough. The chosen s, the
-# per-pass trace indices, the measured mid-column percentile there and the
-# per-trace guard are all recorded.
-DECOMP_S_KM = {"pilot": 35.0, "full": 31.0, "extended": 31.0,
-               "full_line": (31.0, 120.0)}
-# Grounding line + hybrid-bed blend (full_line segment). GL from the
-# BedMachine mask (scout: grounded ice ends at s = 69.7 km); the blend ramp
-# runs GL -> GL + GL_RAMP_KM so the grounded side stays pure DEMOGORGN
-# (bit-identical bed source to the extended run) and the ~10-20 m
-# DEMOGORGN-vs-picks nadir offset and texture change cannot step at the GL.
-GL_S_KM = 69.7
-GL_RAMP_KM = 4.0
-EPS_SEAWATER = 80.0        # floating basal reflector: ice -> seawater
+def bed_rough_validity():
+    """Gerekos 2023 validity envelope for the ACTIVE line.
 
-# Synthetic stratospheric pass (--add-30km): the LOW pass's line geometry and
-# picks re-flown as a SMOOTH trajectory at constant SYN30_MSL_M ellipsoidal
-# height (rac platform_z 'msl' convention: 'MSL' is implemented as constant
-# ellipsoidal height -- recorded), roll = 0, same shared 2016 system params
-# (identical fc/B/window/dt across the triplet; the 10 us bed waveform is
-# what the tool simulates everywhere). No measured data exists: it renders
-# as a PREDICTION panel.
-SYN30_KEY = "syn30km"
-SYN30_MSL_M = 30000.0
-PASSES[SYN30_KEY] = {
-    "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
-    "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
-    "extended": PASSES["low"]["extended"],
-    "full_line": PASSES["low"]["full_line"],
-    "synthetic_msl_m": SYN30_MSL_M}
-
-# Synthetic ORBITAL pass (--add-500km): the same construction at 500 km, i.e.
-# a low-Earth-orbit sounder flying this line with the 2016 airborne system
-# parameters. Everything scales with the geometry: the cross-track reach that
-# keeps clutter coverage out to nadir-bed + MARGIN_US grows to ~45 km, the
-# beta = 0.5 Fresnel facet spacing to ~200 m, and the alias-limited aperture
-# at the product posting to ~27 km. The 3.3 ms window origin exercises the
-# f64 path/phase machinery far outside its airborne range -- a 2-trace pilot
-# checks the nadir delays and the first-call phase before the full run.
-SYN500_KEY = "syn500km"
-SYN500_MSL_M = 500000.0
-PASSES[SYN500_KEY] = {
-    "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
-    "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
-    "extended": PASSES["low"]["extended"],
-    "full_line": PASSES["low"]["full_line"],
-    "synthetic_msl_m": SYN500_MSL_M,
-    # build_facets strides the DEM by ONE integer for both axes, and the
-    # +-45 km scene window is anisotropic (~37 m x ~21 m pixels), so the
-    # beta = 0.5 spacing (333 m) builds 450 m facets along x and trips the
-    # Fresnel-zone LPA check (ratio 1.35). Requesting 0.7x snaps the stride
-    # down one notch and brings the built facets back under the limit;
-    # measured in the 2-trace pilot. Cache-safe: only this new pass.
-    "facet_spacing_scale": 0.7}
-
-# Altitude-campaign synthetics (--add-14km / --add-300km, 2026-08-10): the
-# same constant-ellipsoidal-height construction at 14 km (high-altitude
-# airborne, ~1.3x the high pass) and 300 km (low LEO). Each new altitude
-# gets the syn500km-style 2-trace phase/aperture pilot before its full run;
-# geometry (reach / facet spacing / alias-limited aperture / window origin)
-# is derived, recorded in the config and in the findings note.
-SYN14_KEY = "syn14km"
-SYN14_MSL_M = 14000.0
-PASSES[SYN14_KEY] = {
-    "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
-    "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
-    "extended": PASSES["low"]["extended"],
-    "full_line": PASSES["low"]["full_line"],
-    "synthetic_msl_m": SYN14_MSL_M}
-SYN300_KEY = "syn300km"
-SYN300_MSL_M = 300000.0
-PASSES[SYN300_KEY] = {
-    "agl_med_m": None, "rev": False, "param_frame": "20161105_05_005",
-    "pilot": PASSES["low"]["pilot"], "full": PASSES["low"]["full"],
-    "extended": PASSES["low"]["extended"],
-    "full_line": PASSES["low"]["full_line"],
-    "synthetic_msl_m": SYN300_MSL_M,
-    # 2-trace pilot (2026-08-10): beta = 0.5 spacing (258 m) builds 351 m
-    # facets on the anisotropic +-38 km window (LPA ratio 1.36 -- the
-    # syn500km failure class), so the same 0.7x request snaps the stride
-    # down and clears the check. Cache-safe: this pass is new.
-    "facet_spacing_scale": 0.7}
-SYNTHETIC_KEYS = (SYN30_KEY, SYN500_KEY, SYN14_KEY, SYN300_KEY)
-
-MEASURED_CAVEATS = (
-    "Measured references are CSARP_standard. Scout pitfalls recorded: the "
-    "low pass composites 1/3/10 us waveforms vs 3/10 us on the high passes "
-    "(do not compare the first ~3 us below the surface across passes as one "
-    "instrument); PRF differs (12000 vs 7500 Hz) though the posting does "
-    "not; BedMachine's 500 m bed reproduces only ~55% of the radar-pick "
-    "along-track bed roughness rms, so simulated basal clutter is expected "
-    "systematically smoother and weaker in fine texture than measured.")
+    A function, not a constant: the limits are quoted in lambda_ice, which is
+    line-specific, and a module-level string would freeze the Antarctic
+    190 MHz numbers into every Greenland run's recorded config."""
+    return (
+        "Gerekos 2023 sub-facet roughness: l <= facet size (10.7/46.0/49.8/"
+        f"81.9 m on the Antarctic line) and up to a few lambda_ice "
+        f"(lambda_ice = {LAM_ICE_M:.3f} m at {FC_HZ / 1e6:.0f} MHz); accuracy "
+        "~0.3 dB below lambda/10, ~1 dB near sigma = lambda/4 = "
+        f"{LAM_ICE_M / 4.0:.3f} m (the comfortable ceiling), degrading "
+        "beyond ~0.4*lambda")
 
 
 # ========================================================================
@@ -429,24 +184,6 @@ def derive_reach(h_max, dbs_max, d_min):
             "margin_us": MARGIN_US, "capped": False}
 
 
-# ========================================================================
-# picked-bed correction (--picked-bed): radar bed picks as an along-track
-# residual on BedMachine
-# ========================================================================
-# ONE reference pass supplies the picks for ALL THREE simulations: per-pass
-# beds would make the three scenes different and confound the altitude
-# comparison with a scene change. The reference is the LOW pass
-# (20161105_05_005-007, 442 m AGL) because its picks are the cleanest of the
-# triplet -- scout registration table: 2.45 m surface-pick scatter (sigma)
-# vs 10.80 / 10.92 m for mid / high, p5..p95 spread 7.7 m vs ~30 m -- and at
-# 442 m the bed echo sits ~20 dB above the mid-column clutter (measured
-# midcol/bed-peak -36.7 dB) whereas at altitude off-nadir arrivals crowd the
-# bed to within a few dB (-17.7 / -16.1 dB), so the high passes' picks are
-# both noisier and more likely to have followed a clutter arc. It is also
-# the anchor line's own flight, i.e. the axis everything is registered to.
-REF_PASS = "low"
-REF_FRAMES = ("20161105_05_005", "20161105_05_006", "20161105_05_007")
-ROUGH_WIN_M = 5000.0        # scout's along-track bed-roughness detrend window
 PBED_TAG = "_pbed"          # output/cache suffix; BedMachine runs stay cached
 PICKED_BED_NOTE = (
     "bed = BedMachine + resid(s), resid(s) = picked_bed(s) - BedMachine at "
@@ -464,190 +201,136 @@ PICKED_BED_NOTE = (
     "runs are directly comparable.")
 
 
-# ========================================================================
-# STUDY-LINE REGISTRY (--line)
-# ========================================================================
-# Everything above describes the 2016 DC-8 Antarctic anchor line and IS the
-# module default, so `--line antarctic_2016` is a no-op and that path stays
-# byte-identical (caches included). A second line is a sibling config block
-# that rebinds exactly the LINE-SPECIFIC globals; nothing else in the tool
-# knows a line exists.
-#
-# GREENLAND PAIR (claude_notes/greenland_altitude_scout.md, 2026-08-11): the
-# only genuine multi-altitude repeat found in 26 Greenland collections --
-# 20140421_01_069 at 465 m AGL and 20170424_01_067 at 2483 m AGL over the
-# SAME central-west interior line, 5.3x altitude ratio, offsets med 14 /
-# max 45 m, trace counts matching to 1, and an IDENTICAL radar
-# configuration (195 MHz / 30 MHz / 1-3-10 us / PRF 12 kHz / hanning /
-# k = 4). It is a PAIR, not a triplet: the synthetic 14 km pass supplies the
-# third altitude. Differences from the Antarctic line that the registry
-# carries: two SEASONS (one per pass, hence the per-pass "season" key),
-# EPSG:3413, no grounding line (all grounded interior ice, gl_s_km None),
-# fc 195 MHz, and BedMachine GREENLAND v5 at 150 m (opr.py picks the
-# product from the hemisphere -- nothing to configure).
 ANTARCTIC_LINE = "antarctic_2016"
 GREENLAND_LINE = "greenland_2014_2017"
 
-_GL_SEASON_LOW = "2014_Greenland_P3"
-_GL_SEASON_HIGH = "2017_Greenland_P3"
-# Slices are half-open slow_time indices into each FULL frame, derived from
-# nav by projecting both passes onto the anchor polyline (the scout's
-# segment table). Neither pass is reversed (both fly increasing anchor s)
-# and neither segment crosses a frame boundary -- one frame per pass.
-_GL_PASSES = {
-    "low": {
-        "agl_med_m": 465.0, "rev": False, "season": _GL_SEASON_LOW,
-        "param_frame": "20140421_01_069",
-        "pilot": [("20140421_01_069", (1672, 2341))],
-        "full": [("20140421_01_069", (736, 2675))]},
-    "high": {
-        "agl_med_m": 2483.0, "rev": False, "season": _GL_SEASON_HIGH,
-        "param_frame": "20170424_01_067",
-        "pilot": [("20170424_01_067", (973, 1641))],
-        "full": [("20170424_01_067", (36, 1976))]},
-}
-# Synthetic constant-altitude pass: the Antarctic --add-14km construction
-# (constant ELLIPSOIDAL height, roll 0, real line geometry and picks, the
-# LOW pass's real system params) on this line. Carrier = low, so its season
-# is the 2014 one.
-_GL_PASSES[SYN14_KEY] = {
-    "agl_med_m": None, "rev": False, "season": _GL_SEASON_LOW,
-    "param_frame": "20140421_01_069",
-    "pilot": _GL_PASSES["low"]["pilot"], "full": _GL_PASSES["low"]["full"],
-    "synthetic_msl_m": SYN14_MSL_M,
-    # 2-trace geometry/phase gate (2026-08-11), the syn500km/syn300km
-    # failure class: the beta = 0.5 spacing (54.97 m) builds 79.2 m facets
-    # on the anisotropic +-12.05 km window and trips the Fresnel-zone LPA
-    # check (limit 54.4 m, ratio 1.46). Requesting 0.7x snaps the DEM stride
-    # down one notch, clears the check with no warnings, and leaves the
-    # field finite with nadir surface/bed delays matching the picks to
-    # <= 15 ns (< 1 frame bin; DEM-vs-pick, not a phase error). Cache-safe:
-    # this pass is new.
-    "facet_spacing_scale": 0.7}
 
-_GL_MEASURED_CAVEATS = (
-    "Measured references are CSARP_standard. Scout quirks recorded: the two "
-    "passes share fc/B/waveforms/PRF/SAR params exactly, but the product "
-    "fast-time bin differs 0.16% (33.3859 vs 33.3333 ns) and t0 by 167 ns "
-    "(5 bins), so every depth/delay comparison is made in METRES or "
-    "MICROSECONDS on each pass's OWN lattice and never by bin index; "
-    "img_comb blend lengths differ (low [3 us, -inf, 2.64 us; 10 us, -inf, "
-    "3.5 us] vs high [3, -inf, 1; 10, -inf, 3]) so the first ~3 us below "
-    "the surface is NOT one instrument across passes; the ft_wind decode "
-    "falls back on both passes and the scout hand-verified the true value "
-    "IS hanning; param_csarp.combine.method reads 'mvdr' on the 2017 frames "
-    "while param_combine reads 'standard' (param_combine is the one that "
-    "describes CSARP_standard). The 2017 surface pick sits ~25 m (5 range "
-    "bins) below the 2014 one against ArcticDEM while the picked ice "
-    "thicknesses agree to 7 m -- a common-mode twtt/elevation reference "
-    "offset, removed per frame by the surface registration gate, never "
-    "shared between passes. BedMachine Greenland v5 (150 m) reproduces only "
-    "23-46% of the radar-pick along-track bed roughness rms, so simulated "
-    "basal clutter is expected systematically smoother in fine texture than "
-    "measured (the --picked-bed residual corrects the NADIR bed onto the "
-    "low pass's picks). The high pass records only ~7.9 us of post-bed tail "
-    "(vs ~21.1 us for the low pass): bed-tail metrics beyond +3 us are "
-    "coverage-limited at altitude and tail_coverage records it.")
+# ========================================================================
+# STUDY-LINE REGISTRY (--line): definitions live in config/lines/*.yaml
+# ========================================================================
+# A line used to be ~250 lines of dict literal here, with the Antarctic one
+# spelled as the module's own defaults and the Greenland one as a sibling
+# override -- an asymmetry that made activation irreversible and let shared
+# constants (REAL_CHAIN) leak across lines. Both are now validated YAML
+# documents (tools/clutter_lines.py); this module holds only the mechanism.
+#
+# activate_line() still rebinds module globals, so none of the analysis code
+# below knows a line is data rather than a literal.
+ANTARCTIC_LINE = "antarctic_2016"
+GREENLAND_LINE = "greenland_2014_2017"
 
-LINES = {
-    ANTARCTIC_LINE: {},          # the module defaults (no-op activation)
-    GREENLAND_LINE: {
-        "LINE": GREENLAND_LINE,
-        "SEASON": _GL_SEASON_LOW,
-        "CRS": "EPSG:3413",
-        "CASE_PREFIX": "greenland_pair",
-        "OUT_DEFAULT": ROOT / "outputs" / "greenland_pair",
-        "FC_HZ": 195e6,
-        "LAM_ICE_M": C / (195e6 * float(np.sqrt(3.17))),
-        "PASSES": _GL_PASSES,
-        "ORDER": ["low", "high"],
-        "SEGMENTS": ("pilot", "full"),
-        # display origin = anchor along-track s of each segment's start
-        "S0_KM": {"pilot": 25.0, "full": 11.0},
-        "DECOMP_S_KM": {"pilot": 30.0, "full": 30.0},
-        "N_TRACES_BY_SEGMENT": {"pilot": 48, "full": 140},
-        "REF_PASS": "low",
-        "REF_SEASON": _GL_SEASON_LOW,
-        # Both low-pass frames supply the pick axis (the segment lives
-        # inside _069, but the axis spans the whole 99.7 km line so the
-        # scene window is always covered contiguously).
-        "REF_FRAMES": ("20140421_01_069", "20140421_01_070"),
-        "GL_S_KM": None,          # no grounding line: all grounded interior
-        # bed sits 26-31 us below the surface here (2.4-2.5 km of ice) and
-        # ~108 dB below the low pass's own surface peak -- both far outside
-        # the Antarctic line's -1..13.5 us / -90..5 dB framing.
-        "RADARGRAM_Y_US": (-1.0, 34.0),
-        "RADARGRAM_DB": (-120.0, 5.0),
-        # ... but a shared 125 dB ramp cannot render a bed that stands only
-        # 6-16 dB above its own background (bisection 2026-08-12), so this
-        # line scales per panel and annotates the range.
-        "RADARGRAM_SCALE": "per_panel",
-        # ... and the same for the surface-referenced profile figures. The
-        # DATA extent must reach past the deepest bed (31.2 us) or the bed
-        # returns are never computed, not merely cropped.
-        "PROFILE_REL_US": (-1.5, 34.5),
-        "PROFILE_X_US": (-1.0, 34.0),
-        "PROFILE_DB": (-140.0, 5.0),
-        # Required-surface-SNR store for THIS line (scouted 2026-08-11: the
-        # greenland store holds 5 698 frames / 182 segments, and BOTH of the
-        # pair's segments are in it -- 20140421_01 with 66 frames and
-        # 20170424_01 with 65). The mapping is driven off the ANCHOR pass's
-        # frames (REF_FRAMES = the low pass), the same pick/reference
-        # convention the picked bed uses.
-        "RSSNR_SNAPSHOT": "GEAMAHQ7BRVPG9SQPK20",
-        "RSSNR_STORE": {"bucket": "opr-radar-metrics",
-                        "prefix": "icechunk/greenland",
-                        "region": "us-west-2"},
-        "RSSNR_CACHE": ROOT / "outputs" / "greenland_pair"
-        / "rssnr_anchor.npz",
-        # LEVEL ANCHORING deficit for this line, derived CONTAMINATION-AWARE
-        # (see LEVEL_ANCHOR_NOTE): D = median(measured bed window) -
-        # median(simulated BED-RETURNS bed window) on the LOW pass only.
-        # The high pass is excluded on purpose -- its bed window is
-        # surface-clutter dominated (bed returns sit 4.1 dB BELOW surface
-        # returns at A = 14), so its total-field level moves only 0.19 dB
-        # per dB/km and would bias D toward the clutter floor. From the
-        # A = 14.0 constant-gamma full-segment run:
-        #   measured -107.76 dB, sim bed returns -99.87 dB -> D = -7.89 dB.
-        # The high pass's post-run residual is the TRANSFER TEST.
-        "LEVEL_ANCHOR_DEFICIT_DB": -7.89,
-        "LEVEL_ANCHOR_NOTE": (
-            "K_level = K_median + D. CONTAMINATION-AWARE derivation for this "
-            "line: D = median(measured bed window) - median(simulated "
-            "BED-RETURNS bed window) on the LOW pass ONLY, taken from the "
-            "A = 14.0 constant-gamma full-segment run (-107.76 - (-99.87) = "
-            "-7.89 dB). The decomposition is used rather than the total "
-            "field because the total also holds A-independent surface "
-            "clutter; the HIGH pass is excluded entirely because its bed "
-            "window is surface-dominated (bed returns 4.1 dB BELOW surface "
-            "returns), so its total level moves only 0.19 dB per dB/km and "
-            "would drag D toward the clutter floor. Received bed level "
-            "shifts dB-for-dB with K, so one analytic step replaces an "
-            "iteration; the LOW pass's post-run residual verifies the "
-            "solve and the HIGH pass's is the TRANSFER TEST."),
-        "SYNTHETIC_KEYS": (SYN14_KEY,),
-        "MEASURED_CAVEATS": _GL_MEASURED_CAVEATS,
-        # products this line does NOT have wired (guarded in run())
-        "UNSUPPORTED": ("demogorgn_bed", "hybrid"),
-    },
-}
-# Season of the pick-axis frames (REF_FRAMES); the Antarctic line's is its
-# single SEASON.
-REF_SEASON = SEASON
-UNSUPPORTED = ()
+INSTRUMENTS = clutter_instruments.load_all()
+LINE_SPECS = clutter_lines.load_all()
+clutter_instruments.validate_line_instruments(LINE_SPECS, INSTRUMENTS)
+LINES = {name: spec.to_globals(ROOT) for name, spec in LINE_SPECS.items()}
+# The names a line definition binds. Exported so the tests assert against ONE
+# list; every entry sets all of them, so activation is total and reversible.
+LINE_GLOBALS = tuple(sorted(next(iter(LINES.values()))))
+
+
+# ---- the contract config/analysis.yaml fills ---------------------------
+# Study-wide measurement conventions: what the metrics MEAN. Bound at import
+# and re-bound by activate_line() when a LINE overrides a subset. Declared
+# explicitly for the same reason as the line contract above.
+MARGIN_US: float = 0.0                 # clutter coverage margin (reach)
+POST_BED_US: float = 0.0
+PRE_SURF_US: float = 0.0
+SURF_WIN_US: float = 0.0               # surface peak search half-width
+MID_LO_US: float = 0.0                 # mid-column: surf+lo -> bed-hi
+MID_HI_US: float = 0.0
+BED_LO_US: float = 0.0                 # bed window: bed-lo -> bed+hi
+BED_HI_US: float = 0.0
+SCOUT_LO_US: float = 0.0               # scout contrast metric
+SCOUT_HI_US: float = 0.0
+SCOUT_PK_US: float = 0.0
+FLOOR_TAIL_LO_US: float = 0.0          # measured noise-floor window
+FLOOR_TAIL_HI_US: float = 0.0
+FLOOR_BED_GUARD_US: float = 0.0
+FLOOR_ROLLOFF_US: float = 0.0
+FLOOR_MIN_WIDTH_US: float = 0.0
+TAIL_PROF_US: tuple = ()               # bed-referenced tail profile extent
+TAIL_FIT_US: tuple = ()                # robust slope fit window
+TAIL_EXCESS_US: tuple = ()
+TAIL_GUARD_DB: float = 0.0             # sim bed vs surface returns guard
+TAIL_FLOOR_MARGIN_DB: float = 0.0
+CORR_WIN_M: float = 0.0                # bed-brightness smoothing scale
+ROUGH_WIN_M: float = 0.0               # bed-roughness detrend window
+GL_RAMP_KM: float = 0.0                # hybrid-bed blend ramp past the GL
+EPS_SEAWATER: float = 0.0              # floating reflector: ice -> seawater
+N_LOOKS_SIM: int = 0                   # incoherent looks in matched proc
+RADARGRAM_PCT: tuple = ()              # per_panel robust scaling limits
+CHUNK_M: float = 0.0                   # along-track chunk target
+CHUNK_M_PROC: float = 0.0              # ... at fine posting
+
+ANALYSIS = clutter_analysis.load_analysis()
+ANALYSIS_GLOBALS = tuple(sorted(ANALYSIS.to_globals()))
+# Per-line resolved conventions: the study defaults with that line's declared
+# overrides merged in, plus what changed (recorded in every run config).
+LINE_ANALYSIS = {}
+for _n, _s in LINE_SPECS.items():
+    LINE_ANALYSIS[_n] = ANALYSIS.merged(_s.analysis)
+
+
+# ---- the contract a line definition fills ------------------------------
+# Every name here is (re)bound by activate_line() from config/lines/*.yaml,
+# which runs at import below -- these placeholders are never observable. They
+# are declared explicitly so the set is visible in one place to readers,
+# editors and static analysis, which cannot see through globals().update().
+LINE: str = ""                         # line key
+SEASON: str = ""                       # default season; passes may override
+CRS: str = ""                          # anchor along-track / pick-axis CRS
+CASE_PREFIX: str = ""                  # output + verification case prefix
+OUT_DEFAULT: Path = ROOT               # outputs/<case_prefix>
+FC_HZ: float = 0.0                     # carrier of the line's instrument
+LAM_ICE_M: float = 0.0                 # in-ice wavelength at FC_HZ
+PASSES: dict = {}                      # pass table (geometry + instrument)
+ORDER: list = []                       # real passes, altitude order
+SEGMENTS: tuple = ()                   # study segments
+S0_KM: dict = {}                       # per-segment display origin
+DECOMP_S_KM: dict = {}                 # per-segment single-trace location(s)
+N_TRACES_BY_SEGMENT: dict = {}         # per-segment simulated trace count
+K_ANCHOR_SEGMENT: dict = {}            # segment -> segment whose K it reuses
+REF_PASS: str = ""                     # pick-axis / RSSNR anchor pass
+REF_SEASON: str = ""                   # that pass's season
+REF_FRAMES: tuple = ()                 # frames supplying the pick axis
+GL_S_KM: float | None = None           # grounding line, None if all grounded
+SYNTHETIC_KEYS: tuple = ()             # line-declared synthetic passes
+MEASURED_CAVEATS: str = ""             # recorded product caveats
+UNSUPPORTED: tuple = ()                # features not wired for this line
+REAL_CHAIN: dict = {}                  # the measured product's own chain
+RADARGRAM_Y_US: tuple = ()             # radargram framing
+RADARGRAM_DB: tuple = ()
+RADARGRAM_SCALE: str = "shared"
+PROFILE_REL_US: tuple = ()             # profile DATA window (not just axes)
+PROFILE_X_US: tuple = ()
+PROFILE_DB: tuple = ()
+RSSNR_SNAPSHOT: str = ""               # pinned required-surface-SNR snapshot
+RSSNR_STORE: dict = {}
+RSSNR_CACHE: Path = ROOT
 
 
 def activate_line(name):
-    """Rebind the line-specific module globals to registry entry ``name``.
+    """Rebind the line-specific module globals to line definition ``name``.
 
-    ``antarctic_2016`` is the module's own default, so activating it is a
-    no-op and that line's behaviour/caches are bit-identical to before the
-    registry existed.
+    Total and reversible: every line supplies every name in LINE_GLOBALS, so
+    switching lines cannot leave a previous line's value bound.
     """
     if name not in LINES:
         raise ValueError(f"unknown line {name!r}; have {sorted(LINES)}")
+    missing = set(LINE_GLOBALS) - set(LINES[name])
+    if missing:
+        raise ValueError(f"line {name!r} defines no {sorted(missing)}")
+    # study measurement conventions first, then this line's overrides of
+    # them, then its geometry -- so a line override is visible but a line
+    # can never redefine a name the study does not have.
+    resolved, _changed = LINE_ANALYSIS[name]
+    globals().update(resolved.to_globals())
     globals().update(LINES[name])
     return name
+
+
+# bind the default line at import; every module global below is a line value
+activate_line(ANTARCTIC_LINE)
 
 
 def pass_season(spec):
@@ -712,10 +395,11 @@ def project_to_track(px, py, tx, ty, s_ref):
     return s_ref[i] + (px - tx[i]) * ux[i] + (py - ty[i]) * uy[i]
 
 
-def roughness_rms(s, z, win_m=ROUGH_WIN_M):
+def roughness_rms(s, z, win_m=None):
     """rms of z about a running mean of width win_m -- the scout's along-track
     bed roughness metric (BedMachine 33.3 m vs radar picks 60.5 m over the
     50 km segment). NaNs are linearly interpolated first."""
+    win_m = ROUGH_WIN_M if win_m is None else win_m   # active line, call time
     ok = np.isfinite(z)
     z = np.interp(s, s[ok], z[ok])
     n = max(3, int(round(win_m / float(np.median(np.diff(s))))))
@@ -783,32 +467,6 @@ def apply_picked_bed(base, ref):
             "note": PICKED_BED_NOTE}
 
 
-# ========================================================================
-# RSSNR-driven bed reflectivity (--gamma-from-rssnr): required-surface-SNR
-# along the anchor line -> per-facet bed gamma
-# ========================================================================
-# Dataset + mapping: claude_notes/required_snr_dataset.md. The store's main
-# branch was mid-rebuild at scouting time, so the completed 5,646-frame
-# version is PINNED by snapshot id. RSSNR removes exactly the differential
-# geometric spreading the simulator re-applies (r_bed_eff = r_surf + H/n ==
-# the kernel's refracted nadir spreading), so the mapping
-#   |Gamma_bed|^2 dB = 2*A*H(s) - RSSNR(s) + K
-# double-counts nothing; H(s) from the DATASET's own twtts (self-consistent
-# with its RSSNR), A = the run's --att. K is MEDIAN-ANCHORED: the segment
-# median |Gamma|^2 equals the constant run's Fresnel ice->bed value, so the
-# dataset supplies along-track RELATIVE structure while the absolute level
-# stays continuous with the constant-gamma results (RSSNR is surface-
-# referenced and attenuation-inclusive, so a physical K would transfer the
-# attenuation/surface-model uncertainty straight into the bed level; the
-# K - K_phys diagnostic records that gap). ONE anchor-derived gamma field is
-# shared by all three passes (same reasons as the picked bed: per-pass fields
-# would confound the altitude comparison; the low pass's RSSNR is the
-# cleanest). The 1-D profile extends CROSS-TRACK AS A CONSTANT -- same caveat
-# class as the picked-bed residual.
-RSSNR_SNAPSHOT = "3YH47013745B2T5ZZR50"   # antarctica store, 2026-07-29
-RSSNR_STORE = {"bucket": "opr-radar-metrics", "prefix": "icechunk/antarctica",
-               "region": "us-west-2"}
-RSSNR_CACHE = OUT_DEFAULT / "rssnr_anchor.npz"
 GRSSNR_TAG = "_rssnr"
 RSSNR_GAMMA_NOTE = (
     "bed reflectivity driven along-track by required_surface_snr_dB "
@@ -954,21 +612,38 @@ def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi,
             "med_sample_spacing_m": round(float(np.median(np.diff(s[o]))), 0)}
 
 
-def bed_rough_nadir_db(sigma_m, f0=FC_HZ, eps_ice=None):
+# How level anchoring works. This describes the ALGORITHM and so stays with
+# the code; the per-run number D and the derivation that produced it live in
+# the experiment spec (reflectivity.level_deficit_db: {value, from, how}).
+LEVEL_ANCHOR_METHOD = (
+    "K_level = K_median + D. The median-anchored K pins the median "
+    "|Gamma|^2 to the Fresnel constant, which makes the RECEIVED bed level "
+    "depend on A; level anchoring instead pins the received level by raising "
+    "K with a measured bed-window deficit D. Received bed level shifts "
+    "dB-for-dB with K (received ~ K - RSSNR, independent of A), so one "
+    "analytic step replaces an iteration; the post-run per-pass residuals "
+    "land in rssnr_level_anchor and must be verified there.")
+
+
+def bed_rough_nadir_db(sigma_m, f0=None, eps_ice=None):
     """Gerekos coherent-term mean-POWER attenuation at NADIR on a buried bed
     facet, in dB: 10*log10(exp(-sigma^2 K^2)) with K = 2*k_ice*cos(0) (the
     facet's LOCAL medium is ice -- docs/roughness.md). Returned NEGATIVE."""
-    k_ice = 2.0 * np.pi * f0 * np.sqrt(eps_ice or rac.EPS_ICE) / C
+    # f0 defaults to the ACTIVE line's carrier, resolved here rather than
+    # bound at import (the Greenland pair is 195 MHz, not 190).
+    k_ice = (2.0 * np.pi * (f0 or FC_HZ)
+             * np.sqrt(eps_ice or rac.EPS_ICE) / C)
     return float(-(sigma_m * 2.0 * k_ice) ** 2 * 10.0 / np.log(10.0))
 
 
-def zone_g2_stats(gmap, run_lo, run_hi, gl_km=GL_S_KM):
+def zone_g2_stats(gmap, run_lo, run_hi, gl_km=None):
     """ZONE-AWARE implied-reflectivity physicality (full_line): the mapped
     |Gamma_bed|^2 judged against each zone's OWN Fresnel ceiling -- grounded
     traces vs the ice->rock anchor (the -12.9 dB Fresnel constant the median
     anchoring used) with 0 dB as the hard physical bound, floating traces vs
     the ice->SEAWATER coefficient (~-3.5 dB), which is a genuine CEILING for
     a specular ice-ocean interface (nothing at the shelf base can beat it)."""
+    gl_km = GL_S_KM if gl_km is None else gl_km    # active line, call time
     ceil_f = float(20.0 * np.log10(abs(
         fresnel_normal(rac.EPS_ICE, EPS_SEAWATER))))
     gl_m = gl_km * 1e3
@@ -1007,7 +682,8 @@ def zone_g2_stats(gmap, run_lo, run_hi, gl_km=GL_S_KM):
 
 def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
                       extra_db=0.0, anchor="median", level_deficit_db=None,
-                      k_anchor_segment=None, zone_gl_km=None):
+                      k_anchor_segment=None, zone_gl_km=None,
+                      level_deficit_note=None):
     """Fetch + map: the shared anchor G2(s) profile dict (rssnr_gamma_profile
     output + fetch provenance), on the anchor along-track axis ``axis``
     (ref_bed_picks).
@@ -1036,8 +712,14 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
              if bed_rough_sigma else 0.0)
     lvl = 0.0
     if anchor == "level":
-        lvl = (LEVEL_ANCHOR_DEFICIT_DB if level_deficit_db is None
-               else float(level_deficit_db))
+        if level_deficit_db is None:
+            raise ValueError(
+                "anchor 'level' needs an explicit level_deficit_db. D is "
+                "solved against a particular constant-gamma run at a "
+                "particular attenuation, so it is a property of that run "
+                "PAIR, not of the line -- state it in the experiment spec "
+                "(reflectivity.level_deficit_db) with its provenance.")
+        lvl = float(level_deficit_db)
         shift = shift + lvl
     elif anchor != "median":
         raise ValueError(f"unknown anchor {anchor!r}")
@@ -1084,9 +766,8 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
             "deficit_db": round(lvl, 2),
             "k_median_db": round(prof["k_db"] - shift, 2),
             "k_level_db": prof["k_db"],
-            "source": (f"registry default for line {LINE!r}"
-                       if level_deficit_db is None else "supplied"),
-            "note": LEVEL_ANCHOR_NOTE}
+            "source": level_deficit_note or "supplied",
+            "note": LEVEL_ANCHOR_METHOD}
     prof["provenance"] = prov
     prof["note"] = RSSNR_GAMMA_NOTE
     return prof
@@ -1439,47 +1120,6 @@ FIG_WIDTH_SCALE = 1.0   # --fig-width-scale: radargram panel width multiplier
 # so drawing it there invites reading a tautology as agreement.
 BED_OVERLAY_STYLE = dict(color="tab:cyan", lw=1.1, ls=":", alpha=0.9)
 BED_OVERLAY = True      # --no-bed-overlay
-# Radargram panel window (surface-referenced twtt, us) and dB colour range.
-# LINE-SPECIFIC: the 2016 DC-8 anchor's bed sits ~8 us below the surface, so
-# -1..13.5 us frames the whole ice column there; the Greenland pair carries
-# 2.4-2.5 km of ice (bed 26-31 us below the surface) and its bed -- and any
-# bed overlay -- falls completely outside that window. The dB range likewise
-# has to reach the Greenland bed, which sits ~108 dB below its own surface
-# peak on the low pass (vs ~55 dB on the Antarctic line).
-RADARGRAM_Y_US = (-1.0, 13.5)
-RADARGRAM_DB = (-90.0, 5.0)
-# How the radargram panels are scaled. "shared" (the Antarctic design) puts
-# every panel on RADARGRAM_DB so panels are directly comparable by eye.
-# That only works while the passes' bed levels are within the ramp's
-# resolving power: on the Greenland line the LOW pass's bed sits at -99 dB
-# rel its own surface peak and the HIGH pass's at -81 dB, an 18 dB
-# separation, while each bed stands only 6-16 dB above its own local
-# background -- so NO single 125 dB ramp can render both. "per_panel" scales
-# each panel to its own robust percentiles and prints the range in the panel
-# title, trading a shared ramp for annotated comparability.
-RADARGRAM_SCALE = "shared"
-RADARGRAM_PCT = (2.0, 99.8)   # per_panel percentile limits
-# Surface-referenced PROFILE windows, shared by fig_decomposition,
-# fig_decomposition_trace and fig_decomposition_zones. PROFILE_REL_US is a
-# DATA window (rel_mean_profile builds the arrays over it), not just an axis
-# limit -- too short and the bed is not merely off-plot, it is never
-# computed. Same line-specific sizing as RADARGRAM_*: the 2016 DC-8 bed sits
-# ~8 us below the surface and ~55 dB down, the Greenland bed ~29 us below and
-# ~108 dB down.
-PROFILE_REL_US = (-1.5, 14.5)      # rel_mean_profile extent (data)
-PROFILE_X_US = (-1.0, 13.5)        # plotted x range
-PROFILE_DB = (-110.0, 5.0)         # plotted y range
-N_LOOKS_SIM = 3
-CHUNK_M_PROC = 3000.0    # fine-posting chunks: ~200 traces/chunk (memory)
-REAL_CHAIN_2016 = {
-    "product": "CSARP_standard",
-    "sar": "motion-compensated f-k migration, sigma_x 2.5 m SLC, start_eps "
-           "3.15 (2016 param_csarp/param_sar, scout-verified)",
-    "combine": "delay-and-sum channels; rline_rng [-5..5] = 11 looks, "
-               "dline 6 -> 14.85 m posting, ~25 m effective along-track "
-               "resolution (M24 CReSIS-standard convention; 11/6 not "
-               "directly read from the 2016 structs -- recorded assumption)",
-    "window": "ft_wind hanning (scout hand-verified)"}
 
 
 def alias_limited_aperture(lam, spacing_m, r_ref_m):
@@ -1577,7 +1217,7 @@ def process_standard(p, sim):
     # Fs/Fb (complex64, the focuser's native output) ride along so the
     # proc cache can persist the exact source of P/Ps/Pb.
     chain = {
-        "real_chain": REAL_CHAIN_2016,
+        "real_chain": REAL_CHAIN,
         "sim_posting_m": round(spacing, 3),
         "aperture_m": round(L, 1), "half_angle_deg": round(theta_deg, 3),
         "aperture_traces": int(round(L / spacing)) + 1,
@@ -1841,7 +1481,8 @@ def upsample_fsub(fsub, bot, div):
     return up, np.interp(pos, src, np.asarray(bot, np.float64))
 
 
-def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
+def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window,
+               antenna=None):
     """rac.radar_grid with this study's margins (post-bed window POST_BED_US
     > clutter margin MARGIN_US): alias-free dt/oversample grid anchored on a
     frame-dt bin so decimating [::oversample] lands on the frame lattice."""
@@ -1853,8 +1494,12 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
     wave = WaveformConfig(kind="chirp", bandwidth=wf["bandwidth_Hz"],
                           pulse_length=wf["bed_waveform_pulse_length_s"],
                           window=window)
-    ant = AntennaConfig(kind="array", n_elements=rac.N_ELEMENTS,
-                        spacing_lam=rac.SPACING_LAM, roll_source="nav")
+    ant = (AntennaConfig(kind="array", n_elements=rac.N_ELEMENTS,
+                         spacing_lam=rac.SPACING_LAM, roll_source="nav")
+           if antenna is None else
+           AntennaConfig(kind=antenna.kind, n_elements=antenna.n_elements,
+                         spacing_lam=antenna.spacing_lam,
+                         roll_source=antenna.roll_source))
     f0 = wf["center_frequency_Hz"]
     t0 = t0f + b0 * dt
     rc_sim = RadarConfig(dt=dt / oversample, n_samples=oversample * (nb - 1) + 1,
@@ -1865,7 +1510,7 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window):
 
 def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
               fine_posting=False, dgn_seed=None, posting_div=1,
-              spec_diffuse=None, hybrid=False):
+              spec_diffuse=None, hybrid=False, instrument=None):
     """Slice (+reverse) the pass's frames onto the common window, derive the
     reach and grids, and build the base scene (REMA + BedMachine, cached).
     ``ref`` (ref_bed_picks) applies the picked-bed residual to that scene;
@@ -1922,8 +1567,19 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
         fsub_sim, bot_sim_full = upsample_fsub(fsub, bot_sub, posting_div)
         n_traces = int(fsub_sim.sizes["slow_time"])
 
+    # INSTRUMENT: the line pins the radar that actually flew this pass; an
+    # experiment may swap it while keeping the geometry (that is the point of
+    # the line/instrument split). A real instrument reads every simulated
+    # parameter from the pass's OWN OPR frame, so the default path resolves
+    # to exactly the values this tool has always used.
+    inst_name = instrument or spec["instrument"]
+    if inst_name not in INSTRUMENTS:
+        raise ValueError(f"unknown instrument {inst_name!r}; have "
+                         f"{sorted(INSTRUMENTS)}")
+    inst = INSTRUMENTS[inst_name]
     params = rac.mcords_params(season, spec["param_frame"])
-    wf = params["waveform"]
+    wf, ant_cfg, inst_dev = inst.resolve(params["waveform"])
+    params = {**params, "waveform": wf}
     f0, bw = wf["center_frequency_Hz"], wf["bandwidth_Hz"]
     window, win_note = rac.map_window(wf["pulse_compression_freq_window"])
     # Scout quirk 7: ft_wind decode falls back on all three 2016 passes; the
@@ -1949,7 +1605,7 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
         "facet_spacing_scale", 1.0)
     bed_fill = np.where(np.isfinite(bot_sub), bot_sub, np.nanmax(bot_sub))
     rc_sim, rc_frame, b0 = radar_grid(params, surf, bed_fill, dt, t0f,
-                                      oversample, window)
+                                      oversample, window, antenna=ant_cfg)
 
     base, aux = _retry(f"base_scene {key}",
                        lambda: rac.base_scene(fsub_sim, n_traces,
@@ -2004,6 +1660,9 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
             "picked_bed": bool(ref), "gamma_rssnr": bool(gmap),
             "proc": bool(fine_posting), "synthetic": synth_note,
             "dgn": dgn_seed is not None, "hybrid": bool(hybrid),
+            "instrument": inst_name,
+            "instrument_default": spec["instrument"],
+            "instrument_provenance": inst.provenance_block(inst_dev),
             "h_med": float(np.nanmedian(agl)), "thick_med": thick_med,
             "tw_m": tw_ref}
 
@@ -2078,11 +1737,14 @@ def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
         ant = AntennaConfig(kind="isotropic")
     elif antenna == "array8":
         # more-directive BRACKET: the same 0.5-lambda cross-track array with
-        # 8 elements (1.6x the recorded 5-element aperture). Not a claim
-        # about the real antenna -- the physical element pattern (dipoles
-        # over structure) always makes the true pattern MORE directive than
-        # the bare 5-element array factor the baseline uses, and this
-        # brackets that direction the way 'isotropic' brackets the other.
+        # 8 elements. NOT a claim about the real antenna -- the physical
+        # element pattern (dipoles over structure) always makes the true
+        # pattern MORE directive than the bare array factor the baseline
+        # uses, and this brackets that direction the way 'isotropic' brackets
+        # the other. The bracket is MILD: against the baseline's
+        # rac.N_ELEMENTS the aperture ratio is (8-1)/(N-1), i.e. ~1.17x at
+        # N = 7 -- earlier comments claimed 1.6x by computing against a
+        # 5-element baseline this tool has never used.
         ant = AntennaConfig(kind="array", n_elements=8,
                             spacing_lam=rac.SPACING_LAM, roll_source="nav")
     return SimConfig(
@@ -2114,7 +1776,10 @@ def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
             + ("" if p.get("posting_div", 1) == 1
                else f"_pdiv{p['posting_div']:d}")
             + ("" if not spec
-               else f"_fs{spec[0]:g}_s0{spec[1]:g}_n{spec[2]:g}"))
+               else f"_fs{spec[0]:g}_s0{spec[1]:g}_n{spec[2]:g}")
+            + ("" if p.get("instrument") in (None,
+                                             p.get("instrument_default"))
+               else f"_i{p['instrument']}"))
 
 
 def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
@@ -2147,6 +1812,9 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
                else {"posting_div": int(p["posting_div"])}),
             **({} if not spec else {"spec_diffuse": [float(v)
                                                      for v in spec]}),
+            **({} if p.get("instrument") in (None,
+                                             p.get("instrument_default"))
+               else {"instrument": p["instrument"]}),
             "window": p["window"], "surf_rough": bool(surf_rough),
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
             "t0_us": round(p["rc_sim"].t0 * 1e6, 5),
@@ -2483,7 +2151,7 @@ def bed_tail_entry(key, p, a, sources):
 
 def analyze_pass(p, sim, proc=None, trace_s_km=None):
     """Per-pass sim-vs-measured clutter metrics + per-interface (surface- vs
-    bed-borne) decomposition + profiles for the figures. ``proc``
+    bed returns) decomposition + profiles for the figures. ``proc``
     (process_standard output) analyzes the PROCESSED powers on the same
     lattice; a synthetic pass (p['synthetic']) skips every measured-side
     quantity (no measured data exists at that geometry). ``trace_s_km``
@@ -2521,8 +2189,8 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
                      "bed_rel_surf_db": _med_db_rel(bed, spk)}
     dmid = (dec["surface"]["midcol_rel_surf_db"]
             - dec["bed"]["midcol_rel_surf_db"])
-    verdict = ("surface-borne" if dmid > 3.0 else
-               "bed-borne" if dmid < -3.0 else "mixed")
+    verdict = ("surface returns" if dmid > 3.0 else
+               "bed returns" if dmid < -3.0 else "mixed")
 
     profs = {
         "sim_total": rel_mean_profile(P, tw, dtf, t_s, spk),
@@ -2648,17 +2316,18 @@ def analyze_pass(p, sim, proc=None, trace_s_km=None):
 # ========================================================================
 # ZONE-SPLIT analysis (full_line): grounded vs floating sub-windows
 # ========================================================================
-# TERMINOLOGY (user-set): "surface returns" = the surface-borne layer,
+# TERMINOLOGY (user-set): "surface returns" = the surface returns layer,
 # "bed returns" = the basal-layer returns -- on the floating side the
 # "bed" is the ice-ocean shelf base. All levels dB rel each trace's OWN
 # surface-return peak, as everywhere in this tool.
-def zone_analysis(p, a, gl_km=GL_S_KM):
+def zone_analysis(p, a, gl_km=None):
     """Grounded/floating split of the standard per-pass metrics: clutter
     windows, decomposition, bed-referenced tail (slope/excess/guard) and the
     bed-window level residual vs measured -- each zone judged only against
     its own traces. Returns {zone: {"metrics": ..., "profs": ...,
     "bed_profs": ...}}; the key science number is the floating bed-window
     residual (does the fixed K reproduce the shelf-base brightness?)."""
+    gl_km = GL_S_KM if gl_km is None else gl_km    # active line, call time
     s0 = S0_KM[p["segment"]]
     tw, dtf = a["twtt_sim"], p["rc_frame"].dt
     P, Ps, Pb = a["P"], a["Ps"], a["Pb"]
@@ -2751,11 +2420,12 @@ def zone_analysis(p, a, gl_km=GL_S_KM):
     return out
 
 
-def fig_decomposition_zones(out, key, zres, gl_km=GL_S_KM,
+def fig_decomposition_zones(out, key, zres, gl_km=None,
                             fname="decomposition_zones.png", src=None):
     """Trace-averaged decomposition of ONE pass split into the grounded and
     floating sub-windows: measured vs sim total vs surface/bed returns,
     surface-referenced, one panel per zone (fig_decomposition's series)."""
+    gl_km = GL_S_KM if gl_km is None else gl_km    # active line, call time
     series = [("measured", "measured", dict(color="black", lw=1.8)),
               ("sim_total", "sim total", dict(color="tab:blue", lw=1.4)),
               ("sim_surface", "sim surface returns",
@@ -2797,14 +2467,9 @@ def fig_decomposition_zones(out, key, zres, gl_km=GL_S_KM,
     return fp
 
 
-# ========================================================================
-# RSSNR-gamma acceptance analysis: bed-window brightness along-track
-# ========================================================================
-CORR_WIN_M = 1000.0    # profile smoothing scale (~ the RSSNR sampling)
-
-
-def _smooth_db(s, v, win_m=CORR_WIN_M):
+def _smooth_db(s, v, win_m=None):
     """~win_m running mean of a per-trace dB profile (NaNs interpolated)."""
+    win_m = CORR_WIN_M if win_m is None else win_m    # active line, call time
     ok = np.isfinite(v)
     if ok.sum() < 2:
         return np.full_like(np.asarray(v, float), np.nan)
@@ -2831,7 +2496,7 @@ def bed_profile_correlations(p, a, a_const, gmap, axis):
                      _smooth_db(s_meas, a["meas_bed_prof_db"]))
     sim_r = _smooth_db(s_sim, a["sim_bed_prof_db"])
     sim_c = _smooth_db(s_sim, a_const["sim_bed_prof_db"])
-    sim_rl = _smooth_db(s_sim, a["sim_bedlayer_prof_db"])  # bed-borne only
+    sim_rl = _smooth_db(s_sim, a["sim_bedlayer_prof_db"])  # bed returns only
     # implied pattern -RSSNR(s) + K (== G2 - 2AH), at the sim traces'
     # anchor-axis position
     tr = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
@@ -3047,25 +2712,25 @@ def fig_radargrams(out, preps, analyses, segment, keys=None, ablation=None,
 def fig_decomposition(out, preps, analyses, keys=None, ablation=None,
                       fname="decomposition.png", src=None):
     """Per pass: measured vs sim total vs the sim's per-interface split
-    (surface-borne vs bed-borne) mean-power profiles below the surface.
+    (surface returns vs bed returns) mean-power profiles below the surface.
 
     ``ablation`` = list of (preps, analyses, label) bed-source variants
-    (radargram row order): the panel then shows measured, ONE surface-borne
+    (radargram row order): the panel then shows measured, ONE surface returns
     curve (verified bed-source-invariant; all variants drawn and flagged if
-    they deviate beyond speckle/numerical noise) and one BED-borne curve per
+    they deviate beyond speckle/numerical noise) and one BED returns curve per
     bed source; sim totals are dropped for legibility."""
     series = [("measured", "measured", dict(color="black", lw=1.8)),
               ("sim_total", "sim total", dict(color="tab:blue", lw=1.4)),
-              ("sim_surface", "sim surface-borne",
+              ("sim_surface", "sim surface returns",
                dict(color="tab:orange", lw=1.2, ls="--")),
-              ("sim_bed", "sim bed-borne",
+              ("sim_bed", "sim bed returns",
                dict(color="tab:green", lw=1.2, ls="-."))]
     ab_styles = [dict(color="tab:red", lw=1.2, ls=":"),
                  dict(color="tab:purple", lw=1.2, ls=(0, (4, 2)))]
     keys = keys or ORDER
     if ablation:
         series = [s for s in series if s[0] != "sim_total"]
-        series[-1] = ("sim_bed", "sim bed-borne (picked bed)",
+        series[-1] = ("sim_bed", "sim bed returns (picked bed)",
                       dict(color="tab:green", lw=1.2, ls="-."))
     fig, axs = plt.subplots(1, len(keys), figsize=(5.2 * len(keys), 4.8),
                             sharey=True, squeeze=False)
@@ -3077,7 +2742,7 @@ def fig_decomposition(out, preps, analyses, keys=None, ablation=None,
                 ax.plot(*a["profs"][pk], label=label, **st)
         for (pr_v, an_v, label), st in zip(ablation or [], ab_styles):
             av = an_v[key]
-            # surface-borne must be bed-source-invariant (same surface DEM,
+            # surface returns must be bed-source-invariant (same surface DEM,
             # geometry, speckle seeds): verify, plot only if it deviates
             x0, y0 = a["profs"]["sim_surface"]
             xv, yv = av["profs"]["sim_surface"]
@@ -3085,14 +2750,14 @@ def fig_decomposition(out, preps, analyses, keys=None, ablation=None,
                 np.interp(x0, xv, yv) - y0)[(x0 >= PROFILE_X_US[0])
                                             & (x0 <= PROFILE_X_US[1])
                                             & (y0 > PROFILE_DB[0] + 5.0)]))
-            print(f"  decomposition {key} [{label}]: surface-borne max "
+            print(f"  decomposition {key} [{label}]: surface returns max "
                   f"deviation {dev:.3f} dB vs picked-bed run", flush=True)
             if dev > 0.3:
                 ax.plot(xv, yv, color=st["color"], lw=0.9, ls="--",
-                        label=f"sim surface-borne ({label}) DEVIATES "
+                        label=f"sim surface returns ({label}) DEVIATES "
                               f"{dev:.1f} dB")
             ax.plot(*av["profs"]["sim_bed"],
-                    label=f"sim bed-borne ({label})", **st)
+                    label=f"sim bed returns ({label})", **st)
         tb = a["bed_delay_med_us"]
         ax.axvspan(1.0, tb - MID_HI_US, color="tab:blue", alpha=0.06,
                    label="mid-column window" if k == 0 else None)
@@ -3121,7 +2786,7 @@ def fig_decomposition(out, preps, analyses, keys=None, ablation=None,
 def fig_decomposition_trace(out, preps, analyses, keys=None,
                             fname="decomposition_trace.png", src=None):
     """SINGLE-TRACE variant of fig_decomposition: the same measured / sim
-    total / sim surface-borne / sim bed-borne curves at ONE slow-time
+    total / sim surface returns / sim bed returns curves at ONE slow-time
     location (``--trace-decomp-s``, recorded per pass in the config) instead
     of the trace ensemble average. Single-trace curves are speckly BY
     CONSTRUCTION -- that is the point: it shows what one sounding looks like
@@ -3305,17 +2970,40 @@ def emit_pass_figs(out, key, p, a, zres, segment, gl_s_km, plot_s_max_km,
 def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         surf_rough=True, out_root=None, force=False, make_report=True,
         picked_bed=False, gamma_rssnr=False, processing="none",
-        add_30km=False, add_500km=False, bed_ablation=False,
+        bed_ablation=False,
         demogorgn_bed=False,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
         bed_rough_extra_db=0.0, passes=None, spec=None,
-        anchor="median", level_deficit_db=None, trace_decomp_s_km=None,
-        add_14km=False, add_300km=False, per_pass_figs=False,
+        anchor="median", level_deficit_db=None, level_deficit_note=None,
+        trace_decomp_s_km=None,
+        per_pass_figs=False,
         plot_s_max_km=None, proc_cache=False, line=None,
-        companion_name=None):
-    if line:
-        activate_line(line)
+        companion_name=None, spec_doc=None, spec_path=None,
+        instruments=None, extra_passes=None):
+    # Always re-activate: this resets PASSES to the line definition, so
+    # extra_passes added below cannot leak into a later run in-process.
+    activate_line(line or LINE)
+    instruments = dict(instruments or {})
+    if extra_passes:
+        extra, syn = {}, list(SYNTHETIC_KEYS)
+        for name, ep in extra_passes.items():
+            if ep["carrier"] not in PASSES:
+                raise ValueError(f"extra pass {name!r}: carrier "
+                                 f"{ep['carrier']!r} is not a pass of line "
+                                 f"{LINE!r}")
+            base = dict(PASSES[ep["carrier"]])
+            base["agl_med_m"] = None
+            base["synthetic_msl_m"] = float(ep["altitude_m"])
+            if ep.get("facet_spacing_scale"):
+                base["facet_spacing_scale"] = ep["facet_spacing_scale"]
+            if ep.get("instrument"):
+                base["instrument"] = ep["instrument"]
+                instruments.setdefault(name, ep["instrument"])
+            extra[name] = base
+            syn.append(name)
+        globals()["PASSES"] = {**PASSES, **extra}
+        globals()["SYNTHETIC_KEYS"] = tuple(syn)
     if segment not in SEGMENTS:
         raise ValueError(f"line {LINE!r} has no {segment!r} segment; "
                          f"have {list(SEGMENTS)}")
@@ -3376,20 +3064,20 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     if demogorgn_bed and picked_bed:
         raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
                          "follow-up, not wired (clean three-way ablation)")
-    order = (ORDER + ([SYN30_KEY] if add_30km else [])
-             + ([SYN500_KEY] if add_500km else [])
-             + ([SYN14_KEY] if add_14km else [])
-             + ([SYN300_KEY] if add_300km else []))
-    missing = [k for k in order if k not in PASSES]
-    if missing:
-        raise ValueError(f"line {LINE!r} defines no pass(es) {missing}; "
-                         f"synthetics available: "
-                         f"{[k for k in SYNTHETIC_KEYS if k in PASSES]}")
+    # Naming a synthetic in ``passes`` is the only way to request it: the
+    # line definition declares which synthetics exist, so the old
+    # --add-14km/--add-30km/--add-300km/--add-500km flags carried no
+    # information the pass list did not already have.
     if passes:
-        unknown = [k for k in passes if k not in order]
+        unknown = [k for k in passes if k not in PASSES]
         if unknown:
-            raise ValueError(f"unknown pass(es) {unknown}; have {order}")
-        order = [k for k in order if k in passes]
+            raise ValueError(
+                f"line {LINE!r} defines no pass(es) {unknown}; real passes "
+                f"{list(ORDER)}, synthetics {list(SYNTHETIC_KEYS)}")
+        order = [k for k in list(ORDER) + list(SYNTHETIC_KEYS)
+                 if k in passes]
+    else:
+        order = list(ORDER)
     n_traces = n_traces or N_TRACES_BY_SEGMENT[segment]
     ts_km = (DECOMP_S_KM[segment] if trace_decomp_s_km is None
              else trace_decomp_s_km)
@@ -3415,6 +3103,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                  extra_db=bed_rough_extra_db,
                                  anchor=anchor,
                                  level_deficit_db=level_deficit_db,
+                                 level_deficit_note=level_deficit_note,
                                  k_anchor_segment=K_ANCHOR_SEGMENT.get(
                                      segment),
                                  zone_gl_km=GL_S_KM if hybrid else None)
@@ -3451,7 +3140,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                       fine_posting=proc, posting_div=posting_div,
                       spec_diffuse=spec,
                       dgn_seed=demogorgn_seed if demogorgn_bed else None,
-                      hybrid=hybrid)
+                      hybrid=hybrid, instrument=instruments.get(key))
         if p["aux"]["demogorgn"]:
             d = p["aux"]["demogorgn"]
             print(f"  DEMOGORGN bed: seed {d['seed_id']}, snapshot "
@@ -3597,7 +3286,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "bed+1.5 us; scout_midcol_over_bedpeak matches the scout table "
             "metric (mean bed-3.0..bed-0.6 us over bed peak +-0.3 us). "
             "decomposition_db: same windows on the per-interface coherent "
-            "fields (surface-borne vs bed-borne). measured floor: deep "
+            "fields (surface returns vs bed returns). measured floor: deep "
             "record tail (last 0.2-3.2 us; pre-surface is TX-leakage/"
             "img_comb-contaminated on the low pass). " + rec}
     # headline: altitude trend of mid-column clutter, sim vs measured
@@ -3854,7 +3543,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 "own surface peak) between sim and MEASURED, RSSNR-driven "
                 "vs constant bed gamma (same bed geometry). "
                 "r_bedlayer_rssnr_vs_implied is the by-construction sanity "
-                "check (bed-borne layer only -- geometry/speckle-limited); "
+                "check (bed returns layer only -- geometry/speckle-limited); "
                 "r_sim_rssnr_vs_implied uses the TOTAL field, whose bed "
                 "window is surface-clutter-crowded at altitude (the "
                 "study's own finding), so it is expected to degrade "
@@ -3891,7 +3580,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "sigma_m": bed_rough[0], "corr_length_m": bed_rough[1],
             "interface": "bed only (the surface keeps its own "
                          "representative roughness)",
-            "gerekos_validity": BED_ROUGH_VALIDITY,
+            "gerekos_validity": bed_rough_validity(),
             "gamma_double_count_guard": gmap["bed_rough_guard"]
             if gamma_rssnr else None}),
         "trace_decomp_s_km": ts_km,
@@ -3906,6 +3595,15 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                         "applies": "all passes of this run (one hybrid "
                         "construction per pass scene)"} if hybrid else None),
         "passes": {}, "measured_caveats": MEASURED_CAVEATS}
+    _resolved, _overrides = LINE_ANALYSIS[LINE]
+    config["analysis"] = {
+        **_resolved.model_dump(),
+        **({"line_overrides": _overrides,
+            "note": f"line {LINE!r} overrides these study-wide conventions "
+                    "(config/analysis.yaml); every other value is the study "
+                    "default"} if _overrides else
+           {"note": "study-wide conventions (config/analysis.yaml), "
+                    "unmodified by this line"})}
     if demogorgn_bed:
         config["demogorgn"] = {**preps[order[0]]["aux"]["demogorgn"],
                                "license": "NONE FOUND -- internal "
@@ -3967,6 +3665,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "n_samples_sim": p["rc_sim"].n_samples,
             "dt_ns": round(p["dt"] * 1e9, 4),
             "window_modeled": p["window"], "window_note": p["win_note"],
+            "instrument": p["instrument_provenance"],
             "dropped_power_fraction": s["dropped_power_fraction"],
             "surf_fill_frac": p["aux"]["surf_fill"],
             "bed_clamp_frac": p["aux"]["clamp_frac"],
@@ -4022,16 +3721,24 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
            "standard product); the real chain, our chain and the recorded "
            "gap list g1-g6 are in each pass's config 'processing' block."
            if proc else "")
-        + (f" 30 KM: synthetic smooth pass at {SYN30_MSL_M:.0f} m constant "
-           "ellipsoidal height on the same line (prediction only -- no "
-           "measured data)." if add_30km else "")
-        + (f" 500 KM: synthetic ORBITAL pass at {SYN500_MSL_M:.0f} m on the "
-           "same line and the same 2016 system parameters -- the reach, "
-           "facet spacing and alias-limited aperture all follow the "
-           "geometry (prediction only)." if add_500km else ""))
+        + ("".join(
+            f" {k.upper()}: synthetic constant-ellipsoidal-height pass at "
+            f"{PASSES[k]['synthetic_msl_m'] / 1e3:g} km on the same line and "
+            "system parameters; reach, facet spacing and alias-limited "
+            "aperture all follow the geometry (prediction only -- no "
+            "measured data exists there)."
+            for k in order if k in SYNTHETIC_KEYS)))
+    config["config_schema_version"] = CONFIG_SCHEMA_VERSION
+    config["provenance"] = run_provenance(spec_doc=spec_doc,
+                                          spec_path=spec_path)
+    fp = config_fingerprint(config)
+    config["config_fingerprint"] = fp
     doc = {"case": case, "group": "xOPR clutter",
            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+           "config_schema_version": CONFIG_SCHEMA_VERSION,
+           "config_fingerprint": fp,
            "metrics": metrics, "notes": notes}
+    doc = merge_metrics_doc(out / "metrics.json", doc, order)
     (out / "metrics.json").write_text(json.dumps(doc, indent=1) + "\n")
     (out / "run_config.json").write_text(json.dumps(config, indent=1) + "\n")
 
@@ -4071,8 +3778,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 figs.append(fz)
     if gamma_rssnr and corr_stats is not None:
         syn = None
-        if add_30km and SYN30_KEY in order:
-            p30, a30 = preps[SYN30_KEY], analyses[SYN30_KEY]
+        syn_key = next((k for k in order if k in SYNTHETIC_KEYS), None)
+        if syn_key is not None:
+            p30, a30 = preps[syn_key], analyses[syn_key]
             s30 = p30["s_sim"]
             tr = Transformer.from_crs("EPSG:4326", CRS,
                                       always_xy=True)
@@ -4080,7 +3788,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                   p30["base"].nav_llh[:, 0])
             s_anchor = project_to_track(px, py, axis["x"], axis["y"],
                                         axis["s"])
-            syn = (SYN30_KEY, {
+            syn = (syn_key, {
                 "s_sim": s30,
                 "sim_rssnr": _smooth_db(s30, a30["sim_bed_prof_db"]),
                 "implied": (np.interp(s_anchor, gmap["s"], gmap["g2_db"])
@@ -4103,6 +3811,123 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
          + f"/{analyses[k]['sim']['midcol_rel_surf_db']:+.1f} "
          f"[{analyses[k]['verdict']}]") for k in order), flush=True)
     return metrics, config, out
+
+
+# ========================================================================
+# run provenance + staged-metrics merge
+# ========================================================================
+CONFIG_SCHEMA_VERSION = 1
+# Physics-relevant config keys. Their hash fingerprints a run so a STAGED
+# build (one --passes per invocation) can accumulate into one metrics.json
+# while a CHANGED configuration refuses to merge into the old one.
+_FINGERPRINT_KEYS = ("line", "segment", "att_db_per_km", "surf_rough",
+                     "picked_bed", "gamma_rssnr", "demogorgn_bed", "antenna",
+                     "posting_div", "spec_diffuse", "bed_roughness",
+                     "n_traces", "hybrid_bed")
+
+
+def _git_provenance():
+    """(short sha, dirty) of the working tree, or (None, None) outside git."""
+    import subprocess
+    try:
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             cwd=ROOT, capture_output=True, text=True,
+                             timeout=5, check=True).stdout.strip()
+        st = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                            capture_output=True, text=True, timeout=10,
+                            check=True).stdout.strip()
+        return sha, bool(st)
+    except Exception:
+        return None, None
+
+
+def run_provenance(spec_doc=None, spec_path=None):
+    """What code, invoked how, produced this directory.
+
+    Recorded because a resolved physics config alone cannot identify the
+    program that resolved it: two generations of this tool write configs that
+    differ in which keys exist at all."""
+    import hashlib
+    import platform
+
+    import soundersim
+    sha, dirty = _git_provenance()
+    prov = {"argv": list(sys.argv),
+            "git_sha": sha, "git_dirty": dirty,
+            "soundersim_version": soundersim.__version__,
+            "python": platform.python_version(),
+            "host": platform.node(),
+            "created_utc": datetime.datetime.now(
+                datetime.timezone.utc).isoformat()}
+    if spec_path is not None:
+        raw = Path(spec_path).read_bytes()
+        prov["spec_path"] = str(spec_path)
+        prov["spec_sha256"] = hashlib.sha256(raw).hexdigest()[:16]
+    if spec_doc is not None:
+        # the output directory literally contains its runnable input
+        prov["spec"] = spec_doc
+    return prov
+
+
+def config_fingerprint(config):
+    import hashlib
+    blob = json.dumps({k: config.get(k) for k in _FINGERPRINT_KEYS},
+                      sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def merge_metrics_doc(path, doc, order):
+    """Accumulate a STAGED build into one metrics.json.
+
+    run() used to overwrite metrics.json per invocation, so building a
+    segment one --passes at a time left a canonical file describing only the
+    LAST pass (outputs/basal_clutter/full_line held syn300km alone while the
+    directory carried figures for six passes). Metric keys are namespaced by
+    pass, so merging is well defined: existing entries survive, this
+    invocation's entries win, and nothing is ever silently dropped.
+
+    Merging only happens when the stored fingerprint matches -- a changed
+    configuration starts a fresh file rather than blending two runs."""
+    doc = dict(doc)
+    prior = None
+    if path.exists():
+        try:
+            old = json.loads(path.read_text())
+            if old.get("config_fingerprint") == doc.get("config_fingerprint"):
+                prior = old
+            else:
+                print(f"  [metrics] {path.name}: fingerprint differs from the "
+                      "stored run -- starting a fresh file", flush=True)
+        except Exception as e:
+            print(f"  [metrics] {path.name} unreadable ({e}); overwriting",
+                  flush=True)
+    if prior:
+        merged = dict(prior.get("metrics", {}))
+        merged.update(doc["metrics"])
+        # the one additive aggregate: per-pass wall times accumulate
+        pw = dict(prior.get("metrics", {}).get(
+            "simulation_wall_s", {}).get("per_pass_s", {}))
+        pw.update(doc["metrics"].get("simulation_wall_s", {})
+                  .get("per_pass_s", {}))
+        if "simulation_wall_s" in merged and pw:
+            merged["simulation_wall_s"] = {**merged["simulation_wall_s"],
+                                           "per_pass_s": pw,
+                                           "value": round(sum(pw.values()), 1)}
+        doc["metrics"] = merged
+        was = set(prior.get("passes_present", []))
+        print(f"  [metrics] merged into {len(merged)} entries "
+              f"(had {len(prior.get('metrics', {}))})", flush=True)
+    else:
+        was = set()
+    doc["passes_present"] = sorted(was | set(order))
+    doc["passes_this_invocation"] = list(order)
+    if set(doc["passes_present"]) != set(order):
+        doc["staged_note"] = (
+            "STAGED build: this file accumulates across invocations that each "
+            "ran a subset of passes. Aggregates needing the whole set "
+            "(altitude_trend) are present only if one invocation ran them "
+            "together; per-pass entries are complete for passes_present.")
+    return doc
 
 
 def _report(out, case, config, metrics, notes, figs):
@@ -4141,14 +3966,63 @@ def _report(out, case, config, metrics, notes, figs):
     print(f"wrote {out / 'report.html'}", flush=True)
 
 
+def main_config():
+    """``--config`` front door: an config/experiments/*.yaml spec IS the run input.
+
+    Only EXECUTION-level overrides are accepted alongside it -- every physics
+    knob has to come from the file, so a published result and the spec that
+    names it cannot drift apart. The spec builds exactly the keyword dict the
+    flag front door builds (tools/clutter_spec.py), so run() -- and every
+    chunk cache key -- is unaffected by which door was used.
+    """
+    from clutter_spec import load_spec
+
+    ap = argparse.ArgumentParser(
+        description="Run one declarative experiment spec.")
+    ap.add_argument("--config", required=True, metavar="YAML",
+                    help="path to an config/experiments/*.yaml run spec")
+    ap.add_argument("--out", default=None,
+                    help="override the spec's run.out_root (execution only)")
+    ap.add_argument("--force", action="store_true",
+                    help="re-simulate cached chunks")
+    args = ap.parse_args()
+    spec = load_spec(args.config)
+    kw = spec.to_run_kwargs()
+    if args.out:
+        kw["out_root"] = args.out
+    kw["force"] = args.force
+    # the spec travels into run_config.json, so the output directory carries
+    # the exact input that produced it
+    kw["spec_doc"] = spec.model_dump(mode="json", by_alias=True)
+    kw["spec_path"] = args.config
+    # figure knobs are module globals rather than run() kwargs (a wart the
+    # RunSpec inherits; folded into the spec object in a later phase)
+    global FIG_WIDTH_SCALE, BED_OVERLAY
+    FIG_WIDTH_SCALE = spec.run.figures.width_scale
+    BED_OVERLAY = spec.run.figures.bed_overlay
+    print(f"spec {spec.meta.name!r} [{spec.meta.status}] <- {args.config}",
+          flush=True)
+    if spec.meta.requires:
+        print(f"  requires: {', '.join(spec.meta.requires)}", flush=True)
+    return run(**kw)
+
+
 def main():
     # --line is pre-parsed so the parser below advertises the ACTIVE
-    # line's segments/defaults in its choices and help text.
+    # line's segments/defaults in its choices and help text. --config is
+    # pre-parsed alongside it: a spec run takes a different, much smaller
+    # parser (main_config) and never reaches the flag set below.
     pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config", default=None, metavar="YAML",
+                     help="run a declarative config/experiments/*.yaml spec instead "
+                     "of the flags below (accepts only --out / --force "
+                     "alongside it)")
     pre.add_argument("--line", choices=sorted(LINES),
                      default=ANTARCTIC_LINE)
-    line = pre.parse_known_args()[0].line
-    activate_line(line)
+    known = pre.parse_known_args()[0]
+    if known.config:
+        return main_config()
+    activate_line(known.line)
     ap = argparse.ArgumentParser(description=__doc__, parents=[pre])
     ap.add_argument("--segment", choices=list(SEGMENTS), default="pilot",
                     help="study segment: 'pilot' 10 km, 'full' 50 km "
@@ -4160,11 +4034,16 @@ def main():
                     "bed, requires --demogorgn-bed; K likewise pinned to "
                     "'full')")
     ap.add_argument("--n-traces", type=int, default=None,
-                    help=f"sim traces (default {N_TRACES_PILOT} pilot / "
-                    f"{N_TRACES_FULL} full)")
+                    help="sim traces (default: this line's per-segment value, "
+                    f"{ {k: N_TRACES_BY_SEGMENT[k] for k in SEGMENTS} })")
     ap.add_argument("--att", type=float, default=31.0,
-                    help="one-way ice attenuation dB/km (default 31: the "
-                    "hypothesis-campaign T2 value the user adopted 2026-08 -- "
+                    help="one-way ice attenuation dB/km. THE DEFAULT (31) IS "
+                    "NOT AN ADOPTED VALUE: the family analysis rejected it in "
+                    "favour of A = 20 (Antarctic, level-anchored); the "
+                    "Greenland line currently runs A = 14 with A = 16 +/- 2 "
+                    "under consideration. Use a spec from config/experiments/ rather "
+                    "than the flag defaults for anything reproducible. "
+                    "Historical note -- 31 was "
                     "confirmed independently by run_cross_season repeat-pass "
                     "calibration and by the RSSNR K-K_phys diagnostic, and "
                     "the only tested change that improved the bed-return "
@@ -4201,26 +4080,6 @@ def main():
                     f"{N_LOOKS_SIM}-look averaging) identically to every "
                     "simulated pass; recorded real-chain/gap list in the "
                     f"config; outputs/caches get the {PROC_TAG} suffix")
-    ap.add_argument("--add-30km", action="store_true",
-                    help="add a SYNTHETIC smooth pass at "
-                    f"{SYN30_MSL_M:.0f} m constant ellipsoidal height on "
-                    "the same line (same 2016 system params, roll 0): a "
-                    "prediction panel -- no measured data exists")
-    ap.add_argument("--add-500km", action="store_true",
-                    help="add a SYNTHETIC orbital pass at "
-                    f"{SYN500_MSL_M:.0f} m constant ellipsoidal height on "
-                    "the same line (same 2016 system params, roll 0); the "
-                    "reach (~45 km), facet spacing (~200 m) and "
-                    "alias-limited aperture (~27 km) follow from the "
-                    "geometry -- a prediction panel, no measured data")
-    ap.add_argument("--add-14km", action="store_true",
-                    help="add a SYNTHETIC pass at "
-                    f"{SYN14_MSL_M:.0f} m constant ellipsoidal height "
-                    "(high-altitude airborne; syn30km construction)")
-    ap.add_argument("--add-300km", action="store_true",
-                    help="add a SYNTHETIC low-LEO pass at "
-                    f"{SYN300_MSL_M:.0f} m constant ellipsoidal height "
-                    "(syn500km construction; derived reach/facets/aperture)")
     ap.add_argument("--per-pass-figs", action="store_true",
                     help="STAGED DELIVERY: write each pass's complete "
                     "figure set as separate suffixed files "
@@ -4262,23 +4121,30 @@ def main():
                     "(default '<segment><tag>'); hypothesis tests use it to "
                     "keep one directory + cache per variable. Requires "
                     "--no-companion and no --bed-ablation")
+    _n = rac.N_ELEMENTS
     ap.add_argument("--antenna", choices=["array", "isotropic", "array8"],
                     default=ANT_DEFAULT,
-                    help="antenna pattern (default array = the MCoRDS-like "
-                    "5-element cross-track array); 'isotropic' is the "
-                    "pattern-sensitivity worst case and 'array8' the "
-                    "more-directive bracket (8 elements, 1.6x aperture)")
+                    help=f"antenna pattern (default array = the MCoRDS-like "
+                    f"{_n}-element {rac.SPACING_LAM}-lambda cross-track "
+                    "array); 'isotropic' is the pattern-sensitivity worst "
+                    "case and 'array8' the more-directive bracket (8 "
+                    f"elements, {(8 - 1) / (_n - 1):.2f}x aperture). "
+                    f"PROVENANCE CAVEAT: {_n} elements is the 2017 P-3 "
+                    "centre-array readme value; it is applied unchanged to "
+                    "the 2016 DC-8 line, which is an unverified transfer")
     ap.add_argument("--bed-rough", nargs=2, type=float, default=None,
                     metavar=("SIGMA_M", "CORR_LEN_M"),
                     help="Gerekos sub-facet roughness on the BED interface "
                     "(the surface keeps its own); the RSSNR gamma is raised "
                     "by the nadir coherent attenuation so the nadir bed "
-                    "level is conserved. " + BED_ROUGH_VALIDITY)
+                    "level is conserved. " + bed_rough_validity())
     ap.add_argument("--passes", nargs="+", default=None,
                     metavar="KEY",
-                    help="simulate only these passes (default all; e.g. "
-                    "'--passes low' for a cheap pilot). The altitude-trend "
-                    "metric needs the whole triplet and is skipped otherwise")
+                    help=f"passes to simulate (default: the real ones, "
+                    f"{list(ORDER)}). Naming a synthetic is how you request "
+                    f"it -- this line declares {list(SYNTHETIC_KEYS)}. The "
+                    "altitude-trend metric needs the whole triplet and is "
+                    "skipped otherwise")
     ap.add_argument("--bed-rough-extra-db", type=float, default=0.0,
                     help="extra dB added to the --bed-rough gamma guard (the "
                     "pilot-measured residual that also compensates the added "
@@ -4288,11 +4154,14 @@ def main():
                     help="RSSNR K anchoring: 'median' (default, backward "
                     "compatible) pins the median |Gamma|^2 to the Fresnel "
                     "constant; 'level' pins the simulated bed-window LEVEL "
-                    "to the measured one by raising K with the recorded "
-                    f"deficit (default {LEVEL_ANCHOR_DEFICIT_DB} dB)")
+                    "to the measured one by raising K with the deficit D "
+                    "supplied via --level-deficit-db (no default)")
     ap.add_argument("--level-deficit-db", type=float, default=None,
-                    help="override the --anchor level deficit D (dB); "
-                    "default is the att 31 DEMOGORGN unsplit measurement")
+                    help="the --anchor level deficit D (dB). REQUIRED with "
+                    "--anchor level: D is solved against a particular "
+                    "constant-gamma run at a particular attenuation, so "
+                    "there is no line default. Experiment specs state it "
+                    "with its provenance; see config/README.md")
     ap.add_argument("--specular-fraction", type=float, default=None,
                     metavar="F_S",
                     help="split the RSSNR-mapped bed reflectivity into a "
@@ -4345,7 +4214,6 @@ def main():
         surf_rough=not args.smooth_surface, out_root=args.out,
         force=args.force, picked_bed=args.picked_bed,
         gamma_rssnr=args.gamma_from_rssnr, processing=args.processing,
-        add_30km=args.add_30km, add_500km=args.add_500km,
         bed_ablation=args.bed_ablation,
         demogorgn_bed=args.demogorgn_bed, demogorgn_seed=args.demogorgn_seed,
         companion=not args.no_companion, out_name=args.out_name,
@@ -4355,7 +4223,6 @@ def main():
         bed_rough_extra_db=args.bed_rough_extra_db,
         anchor=args.anchor, level_deficit_db=args.level_deficit_db,
         trace_decomp_s_km=args.trace_decomp_s,
-        add_14km=args.add_14km, add_300km=args.add_300km,
         per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,
         proc_cache=args.proc_cache, line=args.line,
         companion_name=args.companion_name,

@@ -34,7 +34,7 @@ def test_pass_table_matches_scout():
     # entry (--add-30km), which rides the LOW pass's frames
     assert rbc.ORDER == ["low", "mid", "high"]
     assert list(rbc.PASSES) == rbc.ORDER + list(rbc.SYNTHETIC_KEYS)
-    assert rbc.PASSES[rbc.SYN30_KEY]["synthetic_msl_m"] == 30000.0
+    assert rbc.PASSES["syn30km"]["synthetic_msl_m"] == 30000.0
 
     p = rbc.PASSES["low"]
     assert not p["rev"]

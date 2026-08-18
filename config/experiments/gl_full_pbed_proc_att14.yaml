@@ -1,0 +1,33 @@
+schema_version: 1
+
+meta:
+  name:    full_pbed_proc_att14
+  status:  adopted
+  backs:   greenland_pair_findings.md 3.5 (constant-gamma A=14 baseline)
+  runtime: ~65 min sim + processing
+  note: >
+    Constant-gamma A = 14.0 baseline. Serves two roles for the RSSNR run:
+    it is the cached CONSTANT-GAMMA COMPANION of the acceptance analysis,
+    and its LOW-pass bed-returns decomposition is where the
+    contamination-aware level deficit D = -7.89 dB is solved. Build this
+    BEFORE gl_full_pbed_proc_att14_rssnr.
+
+run:
+  line:     greenland_2014_2017
+  segment:  full
+  out_name: full_pbed_proc_att14
+  passes:   [low, high, syn14km]
+
+  bed:
+    source: picked
+
+  physics:
+    att_db_per_km:     14.0
+    surface_roughness: true
+
+  processing:
+    chain:      standard
+    proc_cache: true
+
+  figures:
+    trace_decomp_s_km: [30.0]

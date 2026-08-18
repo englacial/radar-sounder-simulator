@@ -1,0 +1,110 @@
+schema_version: 1
+name: greenland_2014_2017
+identity:
+  case_prefix: greenland_pair
+  season: 2014_Greenland_P3
+  crs: EPSG:3413
+  fc_hz: 195000000.0
+  grounding_line_s_km: null
+reference:
+  pass: low
+  frames:
+  - '20140421_01_069'
+  - '20140421_01_070'
+order:
+- low
+- high
+passes:
+  low:
+    agl_med_m: 465.0
+    season: 2014_Greenland_P3
+    param_frame: '20140421_01_069'
+    instrument: mcords3_p3_greenland
+    reversed: false
+    segments:
+      pilot:
+      - frame: '20140421_01_069'
+        slice:
+        - 1672
+        - 2341
+      full:
+      - frame: '20140421_01_069'
+        slice:
+        - 736
+        - 2675
+  high:
+    agl_med_m: 2483.0
+    season: 2017_Greenland_P3
+    param_frame: '20170424_01_067'
+    instrument: mcords3_p3_greenland
+    reversed: false
+    segments:
+      pilot:
+      - frame: '20170424_01_067'
+        slice:
+        - 973
+        - 1641
+      full:
+      - frame: '20170424_01_067'
+        slice:
+        - 36
+        - 1976
+synthetic_passes:
+  syn14km:
+    altitude_m: 14000.0
+    carrier: low
+    facet_spacing_scale: 0.7
+    why: |-
+      2-trace geometry/phase gate (2026-08-11), the syn500km/syn300km failure class: the beta = 0.5 spacing (54.97 m) builds 79.2 m facets on the anisotropic +-12.05 km window and trips the Fresnel-zone LPA check (limit 54.4 m, ratio 1.46). 0.7x snaps the DEM stride down one notch, clears the check with no warnings, and leaves the field finite with nadir surface/bed delays matching the picks to <= 15 ns.
+segments:
+  pilot:
+    s0_km: 25.0
+    n_traces: 48
+    decomp_s_km:
+    - 30.0
+  full:
+    s0_km: 11.0
+    n_traces: 140
+    decomp_s_km:
+    - 30.0
+figures:
+  radargram:
+    y_us:
+    - -1.0
+    - 34.0
+    db:
+    - -120.0
+    - 5.0
+    scale: per_panel
+  profile:
+    rel_us:
+    - -1.5
+    - 34.5
+    x_us:
+    - -1.0
+    - 34.0
+    db:
+    - -140.0
+    - 5.0
+rssnr:
+  snapshot: GEAMAHQ7BRVPG9SQPK20
+  store:
+    bucket: opr-radar-metrics
+    prefix: icechunk/greenland
+    region: us-west-2
+unsupported:
+- demogorgn_bed
+- hybrid
+provenance:
+  measured_caveats: |-
+    Measured references are CSARP_standard. Scout quirks recorded: the two passes share fc/B/waveforms/PRF/SAR params exactly, but the product fast-time bin differs 0.16% (33.3859 vs 33.3333 ns) and t0 by 167 ns (5 bins), so every depth/delay comparison is made in METRES or MICROSECONDS on each pass's OWN lattice and never by bin index; img_comb blend lengths differ (low [3 us, -inf, 2.64 us; 10 us, -inf, 3.5 us] vs high [3, -inf, 1; 10, -inf, 3]) so the first ~3 us below the surface is NOT one instrument across passes; the ft_wind decode falls back on both passes and the scout hand-verified the true value IS hanning; param_csarp.combine.method reads 'mvdr' on the 2017 frames while param_combine reads 'standard' (param_combine is the one that describes CSARP_standard). The 2017 surface pick sits ~25 m (5 range bins) below the 2014 one against ArcticDEM while the picked ice thicknesses agree to 7 m -- a common-mode twtt/elevation reference offset, removed per frame by the surface registration gate, never shared between passes. BedMachine Greenland v5 (150 m) reproduces only 23-46% of the radar-pick along-track bed roughness rms, so simulated basal clutter is expected systematically smoother in fine texture than measured (the --picked-bed residual corrects the NADIR bed onto the low pass's picks). The high pass records only ~7.9 us of post-bed tail (vs ~21.1 us for the low pass): bed-tail metrics beyond +3 us are coverage-limited at altitude and tail_coverage records it.
+  real_chain:
+    product: CSARP_standard
+    sar: |-
+      motion-compensated f-k migration (2014/2017 P-3 param_csarp/param_sar; the pair shares fc/B/waveforms/PRF/SAR params exactly per the scout table)
+    combine: |-
+      delay-and-sum channels; the CReSIS-standard look/decimation convention is ASSUMED here -- not read from the 2014/2017 structs. param_csarp.combine.method reads 'mvdr' on the 2017 frames while param_combine reads 'standard' (param_combine is the one describing CSARP_standard)
+    window: |-
+      ft_wind hanning (decode falls back on both passes; scout hand-verified the true value IS hanning)
+    caveat: |-
+      product fast-time bin differs 0.16% between the passes (33.3859 vs 33.3333 ns) and t0 by 167 ns, so every depth/delay comparison is made in metres or microseconds on each pass's OWN lattice

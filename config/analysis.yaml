@@ -1,0 +1,74 @@
+schema_version: 1
+
+# Study-wide measurement conventions for the clutter studies.
+#
+# These define what the metrics MEAN, so they are NOT settable per experiment:
+# a per-run window invites moving the bed window until the residual looks
+# right. A LINE may override a subset (config/lines/<name>.yaml, `analysis:`)
+# where the DATA genuinely differs -- the override is merged over these and
+# recorded in every run config that uses it.
+
+coverage:
+  # THE science-critical parameter: off-nadir arrivals are covered out to the
+  # nadir-bed delay plus this margin, for BOTH interfaces. The fast-time
+  # window reaches slightly further (post_bed_window_us).
+  clutter_margin_us: 3.0
+  post_bed_window_us: 3.5
+  pre_surface_us: 0.8
+
+windows:
+  # All relative to each dataset's OWN picks/geometry, in twtt.
+  surface_peak_halfwidth_us: 0.8
+  midcolumn:                    # surf + 1.0 -> bed - 0.5 us
+    after_surface_us: 1.0
+    before_bed_us: 0.5
+  bed:                          # bed - 0.5 -> bed + 1.5 us
+    before_us: 0.5
+    after_us: 1.5
+  scout_contrast:               # mean(bed-3.0 .. bed-0.6) over the bed peak
+    lo_us: 3.0
+    hi_us: 0.6
+    peak_halfwidth_us: 0.3
+
+noise_floor:
+  # Default is the record end minus [12, 8] us. Probed 2026-07-31: the last
+  # ~4 us of every record are processing-rolled-off, and the PRE-surface
+  # region is unusable on the low pass (TX leakage / img_comb shallow zone).
+  # Slid clear of the deepest bed pick when a pass's post-bed tail is short.
+  record_end_window_us: [12.0, 8.0]
+  bed_guard_us: 1.5
+  rolloff_us: 4.0
+  min_width_us: 1.0
+
+bed_tail:
+  # The SHAPE of the decay past the bed echo, where sim and measurement
+  # visibly diverge. Referenced to each dataset's OWN bed.
+  profile_us: [-1.0, 4.0]
+  fit_us: [0.5, 3.5]            # robust Theil-Sen slope fit window
+  excess_delays_us: [1.0, 2.0, 3.0]
+  # The sim SURFACE returns must sit this far BELOW the sim BED returns
+  # across the fit window, else the "bed tail" is really surface clutter.
+  guard_db: 10.0
+  floor_margin_db: 3.0          # measured tail counted floor-limited below
+
+smoothing:
+  profile_m: 1000.0             # bed-brightness correlation scale (~ RSSNR)
+  roughness_detrend_m: 5000.0   # along-track bed-roughness detrend window
+
+hybrid_bed:
+  # Grounded DEMOGORGN blended into the floating radar picks across the
+  # grounding line, so the ~10-20 m nadir offset cannot step at the GL.
+  gl_ramp_km: 4.0
+  seawater_eps: 80.0            # floating basal reflector: ice -> seawater
+
+processing:
+  n_looks: 3                    # stride-1 incoherent averaging (posting kept)
+
+figures:
+  radargram_percentiles: [2.0, 99.8]   # per_panel robust scaling limits
+
+compute:
+  # Tuning, not science -- but chunk_m sets the chunk COUNT, which is part of
+  # the chunk cache key, so changing it re-simulates everything.
+  chunk_m: 10500.0
+  chunk_m_fine_posting: 3000.0

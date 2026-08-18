@@ -1,0 +1,42 @@
+schema_version: 1
+
+meta:
+  name:     extended
+  status:   adopted
+  requires: [ant_att20_klevel]
+  backs:    basal_clutter_pilot_findings.md "EXTENDED segment" (2026-08-07)
+  runtime:  ~55 min sim (5 passes x 23 chunks)
+  note: >
+    s = 0 -> 69.7 km (anchor start to the grounding line; beyond it
+    BedMachine's "bed" is the seafloor under a cavity). K stays anchored on
+    the 'full' segment (K_ANCHOR_SEGMENT), so the mapping is bit-identical
+    to the recorded att20_klevel family and the results stay comparable.
+
+run:
+  line:     antarctic_2016
+  segment:  extended
+  out_name: extended
+  passes:   [low, mid, high, syn30km, syn500km]
+
+  bed:
+    source:         demogorgn
+    demogorgn_seed: 0
+
+  reflectivity:
+    gamma_from_rssnr: true
+    anchor:           level
+    level_deficit_db:
+      value: 3.56
+      from:  att20
+      how:   see ant_att20_klevel.yaml -- the same contamination-aware D
+
+  physics:
+    att_db_per_km:     20.0
+    surface_roughness: true
+
+  processing:
+    chain:     standard
+    companion: false
+
+  figures:
+    trace_decomp_s_km: [31.0]

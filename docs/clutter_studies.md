@@ -22,10 +22,12 @@ line registry (`--line`).
   anchoring (`--anchor`). An optional specular/diffuse split with a
   tilt-gated specular component models angle-dependent bed scattering.
 - Englacial attenuation: constant one-way dB/km per line (`--att`).
-  Adopted values: Antarctic 20161105_05 line 20 dB/km (level-anchored
-  family analysis); Greenland 20140421_01 line 16 ± 2 dB/km (derived from
-  the MacGregor 2015 method re-applied to archived reflection intensities,
-  with a Robin-profile full-column correction).
+  Antarctic 20161105_05 line: **20 dB/km, adopted** (level-anchored family
+  analysis). Greenland 20140421_01 line: **14 dB/km is what the current runs
+  use**; the MacGregor 2015 method re-applied to archived reflection
+  intensities (with a Robin-profile full-column correction) arbitrates for
+  16 ± 2 dB/km, but adopting it means re-deriving the level-anchor deficit
+  against a new constant-gamma run, so it is pending rather than in force.
 - Processing: the simulated stacks can be passed through a chain matched to
   CSARP_standard (product-posting simulation, motion compensation,
   time-domain backprojection at the alias-limited aperture, multilook)
@@ -60,6 +62,18 @@ line registry (`--line`).
 - On the thick Greenland interior line, surface+bed geometry cannot explain
   the measured column power (flat with altitude where geometry predicts
   +17 dB): the column there is englacial-scattering dominated.
+
+## Reproducing a study
+
+Each named result is a committed declarative spec:
+
+```
+uv run python tools/run_basal_clutter.py --config experiments/<name>.yaml
+```
+
+`config/README.md` indexes them with status, dependencies, and runtime;
+`tests/test_experiment_specs.py` asserts that every spec reproduces the
+`run_config.json` of the directory it claims to build.
 
 Detailed chronology, per-study findings, and data-source scouting notes
 live in `claude_notes/` (see `agent_handoff_2026-08-17.md` for the index).

@@ -391,8 +391,11 @@ def test_level_anchor_raises_k_by_the_recorded_deficit(monkeypatch):
     median must be bit-identical to the pre-feature mapping."""
     axis = _fake_rssnr(monkeypatch)
     med = rbc.build_rssnr_gamma(axis, "full", 31.0)
-    lvl = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level")
-    d = rbc.LEVEL_ANCHOR_DEFICIT_DB
+    # D is stated by the caller: it is solved against a particular run at a
+    # particular attenuation, so there is no line-level default to read.
+    d = 14.8
+    lvl = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level",
+                                level_deficit_db=d)
     assert med["anchor"] == "median" and "level_anchor" not in med
     assert lvl["k_db"] == pytest.approx(med["k_db"] + d, abs=0.01)
     assert np.allclose(lvl["g2_db"], med["g2_db"] + d, atol=1e-9)
@@ -423,8 +426,9 @@ def test_level_anchor_composes_with_the_bed_roughness_guard(monkeypatch):
     axis = _fake_rssnr(monkeypatch)
     base = rbc.build_rssnr_gamma(axis, "full", 31.0)
     both = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level",
+                                 level_deficit_db=14.8,
                                  bed_rough_sigma=0.05, extra_db=-1.0)
-    want = (rbc.LEVEL_ANCHOR_DEFICIT_DB - rbc.bed_rough_nadir_db(0.05) - 1.0)
+    want = (14.8 - rbc.bed_rough_nadir_db(0.05) - 1.0)
     assert both["k_db"] == pytest.approx(base["k_db"] + want, abs=0.02)
 
 
@@ -435,9 +439,9 @@ def test_syn500km_pass_entry_follows_the_syn30km_pattern():
     constant 500 km ellipsoidal height, and carries the cache-safe facet
     spacing scale that keeps the built facets inside the Fresnel-zone LPA
     limit on the anisotropic wide-reach scene grid."""
-    s30, s500 = rbc.PASSES[rbc.SYN30_KEY], rbc.PASSES[rbc.SYN500_KEY]
-    assert rbc.SYN500_MSL_M == 500000.0
-    assert s500["synthetic_msl_m"] == rbc.SYN500_MSL_M
+    s30, s500 = rbc.PASSES["syn30km"], rbc.PASSES["syn500km"]
+    assert 500000.0 == 500000.0
+    assert s500["synthetic_msl_m"] == 500000.0
     for k in ("param_frame", "rev", "pilot", "full"):
         assert s500[k] == s30[k]
     assert s500["pilot"] == rbc.PASSES["low"]["pilot"]
@@ -448,9 +452,9 @@ def test_syn500km_pass_entry_follows_the_syn30km_pattern():
     assert "facet_spacing_scale" not in s30
     for k in ("low", "mid", "high"):
         assert "facet_spacing_scale" not in rbc.PASSES[k]
-    assert rbc.SYNTHETIC_KEYS == (rbc.SYN30_KEY, rbc.SYN500_KEY,
-                                  rbc.SYN14_KEY, rbc.SYN300_KEY)
-    assert rbc.SYN500_KEY not in rbc.ORDER
+    assert rbc.SYNTHETIC_KEYS == ("syn30km", "syn500km",
+                                  "syn14km", "syn300km")
+    assert "syn500km" not in rbc.ORDER
 
 
 def test_syn500km_geometry_scales_as_expected():
@@ -501,7 +505,7 @@ def test_extended_segment_table_is_a_superset_of_the_full_segment():
     for seg in rbc.SEGMENTS:
         assert seg in rbc.S0_KM and seg in rbc.DECOMP_S_KM
     assert rbc.S0_KM["extended"] == 0.0
-    assert rbc.N_TRACES_EXT > rbc.N_TRACES_FULL
+    assert rbc.N_TRACES_BY_SEGMENT['extended'] > rbc.N_TRACES_BY_SEGMENT['full']
 
 
 def test_extended_cache_names_are_distinct_from_the_full_segment():
@@ -646,7 +650,7 @@ def test_full_line_segment_table_spans_the_whole_line():
         assert rbc.PASSES[skey]["full_line"] == rbc.PASSES["low"]["full_line"]
     assert rbc.S0_KM["full_line"] == 0.0
     assert rbc.K_ANCHOR_SEGMENT["full_line"] == "full"
-    assert rbc.N_TRACES_LINE > rbc.N_TRACES_EXT
+    assert rbc.N_TRACES_BY_SEGMENT['full_line'] > rbc.N_TRACES_BY_SEGMENT['extended']
     # the default single-trace decomposition pair: one grounded, one floating
     lo, hi = rbc.DECOMP_S_KM["full_line"]
     assert lo < rbc.GL_S_KM < hi
@@ -842,8 +846,8 @@ def test_run_rejects_full_line_without_the_hybrid_bed():
 def test_new_synthetic_altitude_passes_follow_the_pattern():
     """syn14km/syn300km mirror the syn30km construction: LOW-pass line and
     picks on every segment, constant ellipsoidal height, not in ORDER."""
-    assert rbc.SYN14_MSL_M == 14000.0 and rbc.SYN300_MSL_M == 300000.0
-    for skey, msl in ((rbc.SYN14_KEY, 14000.0), (rbc.SYN300_KEY, 300000.0)):
+    assert 14000.0 == 14000.0 and 300000.0 == 300000.0
+    for skey, msl in (("syn14km", 14000.0), ("syn300km", 300000.0)):
         s = rbc.PASSES[skey]
         assert s["synthetic_msl_m"] == msl
         assert s["param_frame"] == rbc.PASSES["low"]["param_frame"]
@@ -856,9 +860,9 @@ def test_new_synthetic_altitude_passes_follow_the_pattern():
     # pilot-measured LPA verdicts: syn300km needs the syn500km-class 0.7x
     # facet-spacing scale (ratio 1.36 unscaled); syn14km stays unscaled
     # (ratio 1.26, milder than the accepted airborne-family 1.43 class)
-    assert rbc.PASSES[rbc.SYN300_KEY]["facet_spacing_scale"] \
+    assert rbc.PASSES["syn300km"]["facet_spacing_scale"] \
         == pytest.approx(0.7)
-    assert "facet_spacing_scale" not in rbc.PASSES[rbc.SYN14_KEY]
+    assert "facet_spacing_scale" not in rbc.PASSES["syn14km"]
 
 
 def test_new_synthetic_altitude_geometry_scales():
@@ -968,3 +972,12 @@ def test_proc_from_stacks_matches_the_processing_tail():
         np.abs(Fs) ** 2, rbc.N_LOOKS_SIM, axis=0, mode="nearest"))
     assert pr["Fs"] is Fs and pr["Fb"] is Fb and pr["chain"] == {
         "real_chain": "x"}
+
+
+def test_level_anchor_without_a_deficit_is_refused(monkeypatch):
+    """There is no line-level D any more. Silently falling back to one is
+    how the Antarctic 14.8 (a rejected att-31 measurement) stayed wired in
+    after the adopted config moved to 3.56."""
+    axis = _fake_rssnr(monkeypatch)
+    with pytest.raises(ValueError, match="explicit level_deficit_db"):
+        rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level")
