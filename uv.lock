@@ -3962,6 +3962,8 @@ dependencies = [
     { name = "earthaccess", version = "0.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "earthaccess", version = "0.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "h5netcdf" },
+    { name = "icechunk", version = "1.1.21", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "icechunk", version = "2.1.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "jax" },
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -3969,23 +3971,22 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyproj" },
     { name = "pystac-client" },
+    { name = "pyyaml" },
     { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "rasterio", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "xarray" },
     { name = "xopr" },
+    { name = "zarr", version = "3.1.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "zarr", version = "3.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "icechunk", version = "1.1.21", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "icechunk", version = "2.1.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "mpmath" },
     { name = "pytest" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "simc" },
-    { name = "zarr", version = "3.1.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "zarr", version = "3.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
 [package.metadata]
@@ -3993,25 +3994,26 @@ requires-dist = [
     { name = "affine" },
     { name = "earthaccess", specifier = ">=0.17.0" },
     { name = "h5netcdf" },
+    { name = "icechunk", specifier = ">=1.1.21" },
     { name = "jax" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyproj" },
     { name = "pystac-client" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rasterio" },
+    { name = "scipy", specifier = ">=1.17.1" },
     { name = "xarray" },
     { name = "xopr" },
+    { name = "zarr", specifier = ">=3.1.6" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "icechunk", specifier = ">=1.1.21" },
     { name = "mpmath", specifier = ">=1.4.1" },
     { name = "pytest" },
-    { name = "scipy" },
     { name = "simc", git = "https://github.com/lpl-tapir/simc?rev=bac8b97a66bc8bc327ff48a793031a6d1fcd6915" },
-    { name = "zarr", specifier = ">=3.1.6" },
 ]
 
 [[package]]

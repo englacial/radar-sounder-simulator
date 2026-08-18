@@ -36,7 +36,6 @@ Thresholds were set from the first run (repo convention); measured then
 """
 
 import numpy as np
-import pytest
 
 import soundersim
 from soundersim import synthetic as syn

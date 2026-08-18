@@ -4,7 +4,6 @@ left/right split, block padding, and f32 kernel vs f64 NumPy reference."""
 import numpy as np
 import pytest
 
-from soundersim.config import FacetConfig, RadarConfig, SimConfig
 from soundersim.kernels.incoherent import incoherent_cluttergram
 from soundersim.nav import nav_to_frame
 from soundersim.scene import LocalFrame, build_facets

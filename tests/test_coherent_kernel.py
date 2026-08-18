@@ -28,7 +28,6 @@ the subtracted argument tracks only the in-scene range spread.
 """
 
 import numpy as np
-import pytest
 
 from soundersim.compare.brute_force import _contributions
 from soundersim.kernels.coherent import coherent_cluttergram, lpa_contributions

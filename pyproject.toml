@@ -16,16 +16,17 @@ dependencies = [
     "xopr",
     "pystac-client",
     "earthaccess>=0.17.0",
+    "pyyaml>=6.0.3",
+    "scipy>=1.17.1",
+    "icechunk>=1.1.21",
+    "zarr>=3.1.6",
 ]
 
 [dependency-groups]
 dev = [
-    "icechunk>=1.1.21",
     "mpmath>=1.4.1",
     "pytest",
-    "scipy",
     "simc",
-    "zarr>=3.1.6",
 ]
 
 [build-system]
@@ -43,3 +44,16 @@ markers = [
 
 [tool.uv.sources]
 simc = { git = "https://github.com/lpl-tapir/simc", rev = "bac8b97a66bc8bc327ff48a793031a6d1fcd6915" }
+
+[tool.ruff]
+line-length = 88
+# session artifacts (CLAUDE.md), not maintained code
+exclude = ["claude_notes"]
+
+[tool.ruff.lint]
+# E402: module-level imports after `matplotlib.use("Agg")` and the
+#       sys.path bootstrap in tools/ -- deliberate and load-bearing.
+# E741: `l` is correlation length throughout the roughness/Gerekos work;
+#       renaming it would make the code harder to read against the paper.
+# E731: short lambdas assigned for _retry(...) call sites.
+ignore = ["E402", "E741", "E731"]
