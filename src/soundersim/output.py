@@ -17,12 +17,31 @@ Documented conventions:
 
 import datetime
 import json
+from pathlib import Path
 import warnings
 
 import numpy as np
 import xarray as xr
 
 import soundersim
+
+
+def _git_commit():
+    """Short SHA of the working tree, "<sha>-dirty" when modified, or None
+    outside a checkout. Documented in docs/output.md as part of the run
+    provenance every Dataset carries."""
+    import subprocess
+    root = Path(__file__).resolve().parents[2]
+    try:
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             cwd=root, capture_output=True, text=True,
+                             timeout=5, check=True).stdout.strip()
+        st = subprocess.run(["git", "status", "--porcelain"], cwd=root,
+                            capture_output=True, text=True, timeout=10,
+                            check=True).stdout.strip()
+        return f"{sha}-dirty" if st else sha
+    except Exception:
+        return None
 
 
 def build_dataset(power, dropped_power, *, scene, frame, facets, track,
@@ -97,6 +116,7 @@ def build_dataset(power, dropped_power, *, scene, frame, facets, track,
             "mode": sim_config.mode,
             "config": sim_config.model_dump_json(),
             "soundersim_version": soundersim.__version__,
+            "git_commit": _git_commit(),
             "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "dem_source": f"synthetic:{scene.name}",
             "dem_crs": str(scene.crs),
