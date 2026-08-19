@@ -133,6 +133,12 @@ count, which is part of the cache key: changing it re-simulates everything.
 acceptance numbers to score against. Real-instrument lines are the natural
 benchmarks: their measured data is the reference.
 
+A **segment is a window on the line, not a roll-call**: a pass may omit
+windows it does not reach. Requiring every pass to cover every window caps a
+multi-year line at the extent of its shortest flight — on the west coast,
+15.2 km instead of 49.8. A window still needs at least two passes, one of
+which must be the reference (there has to be an axis to project onto).
+
 ## Surveying a line
 
 ```
@@ -160,8 +166,8 @@ comparable across seasons.
 | line | kind | passes | notes |
 |---|---|---|---|
 | `antarctica_getz` | altitude | 3 real (0.4/9.2/10.7 km) + 2 synthetic | grounding line at s 69.7 km |
-| `greenland_geikie01_transit` | altitude | 2 real (0.5/2.5 km) + 1 synthetic | `full` and `far` are two windows; the flights diverge up to 1.3 km between them |
-| `greenland_westcoast` | **instrument** | 6 real, all ~470 m AGL | four radars, 195/30 to 315/270 MHz, on one 15.2 km span |
+| `greenland_geikie01_transit` | altitude | 2 real (0.5/2.5 km) + 1 synthetic | `transit` is one 139 km path; it contains a turn the two aircraft flew on different radii (up to 1.3 km apart over s 40-80) |
+| `greenland_westcoast` | **instrument** | 6 real, all ~470 m AGL | four radars, 195/30 to 315/270 MHz; `full` = all six over 15.2 km, `long` = the three that reach 49.8 km |
 
 ### Experiments
 

@@ -93,7 +93,14 @@ def measure(spec, segment):
     """Project every real pass onto the reference pass's axis."""
     ref_key = spec.reference.pass_key
     crs = spec.identity.crs
-    keys = [k for k in spec.order if k in spec.passes]
+    # a pass may not reach every window; those simply are not in this survey
+    keys = [k for k in spec.order
+            if k in spec.passes and segment in spec.passes[k].segments]
+    absent = [k for k in spec.order if k in spec.passes
+              and segment not in spec.passes[k].segments]
+    if absent:
+        print(f"  segment {segment!r}: {absent} do not reach this window",
+              flush=True)
     data = {}
     for k in keys:
         d = load_pass(spec, k, segment)

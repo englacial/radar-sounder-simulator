@@ -93,8 +93,14 @@ def test_pass_and_segment_tables_agree(name):
     segs = set(spec.segments)
     assert set(spec.order) <= set(spec.passes)
     assert spec.reference.pass_key in spec.passes
+    ref = spec.passes[spec.reference.pass_key]
     for key, ps in spec.passes.items():
-        assert set(ps.segments) == segs, f"{key} segment mismatch"
+        # a pass may omit windows it does not reach, but never invent one
+        assert set(ps.segments) <= segs, f"{key} invents a segment"
+    for name in segs:
+        covering = [k for k, ps in spec.passes.items() if name in ps.segments]
+        assert len(covering) >= 2, f"{name} covered by {covering}"
+        assert name in ref.segments, f"{name} missing from the reference pass"
     for key, syn in spec.synthetic_passes.items():
         assert syn.carrier in spec.passes, f"{key} carrier undefined"
     for sname, seg in spec.segments.items():

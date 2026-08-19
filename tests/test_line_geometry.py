@@ -69,22 +69,54 @@ def test_slice_to_span_is_contiguous_and_reports_coverage():
 LINES = load_all()
 
 
-def test_geikie_far_segment_is_a_second_window_not_one_long_one():
-    """The 2014 and 2017 flights diverge by up to 1.3 km over s 40-80 km, so
-    the extension is a separate window at s 120-150 where they re-converge --
-    not a single 139 km segment straddling the divergence."""
+def test_geikie_transit_is_one_path_through_all_three_frames():
+    """The extension is a single continuous path, not a stitched pair of
+    clean windows. It contains a known misalignment -- the two aircraft flew
+    the s 40-60 km TURN on different radii, up to 1.3 km apart -- which is
+    accepted so that the line is one path."""
     ln = LINES["greenland_geikie01_transit"]
-    assert set(ln.segments) >= {"full", "far"}
-    assert ln.segments["far"].s0_km == 120.0
+    assert set(ln.segments) >= {"full", "transit"}
     assert "20140421_01_071" in ln.reference.frames      # axis must reach it
-    far = {k: [p.frame for p in ps.segments["far"]]
-           for k, ps in ln.passes.items()}
-    assert far["low"] == ["20140421_01_071"]
-    assert far["high"] == ["20170424_01_069"]
-    # one frame per pass, trace counts matching to one -- as 'full' is
-    n = {k: sum(p.slice[1] - p.slice[0] for p in ps.segments["far"])
+    tr = {k: [p.frame for p in ps.segments["transit"]]
+          for k, ps in ln.passes.items()}
+    assert tr["low"] == ["20140421_01_069", "20140421_01_070",
+                         "20140421_01_071"]
+    assert tr["high"] == ["20170424_01_067", "20170424_01_068",
+                          "20170424_01_069"]
+    n = {k: sum(p.slice[1] - p.slice[0] for p in ps.segments["transit"])
          for k, ps in ln.passes.items()}
-    assert abs(n["low"] - n["high"]) <= 1
+    assert abs(n["low"] - n["high"]) / max(n.values()) < 0.01
+    # the decomposition locations must sit in the WELL-ALIGNED stretches,
+    # not in the turn
+    for v in ln.segments["transit"].decomp_s_km:
+        assert not (40.0 < v < 80.0), v
+
+
+def test_westcoast_long_window_trades_passes_for_extent():
+    """Six passes reach only 15 km together; three reach 50. A segment is a
+    window on the line, so the passes that do not reach it are absent from
+    it rather than capping the line at its shortest flight."""
+    ln = LINES["greenland_westcoast"]
+    cover = {s: [k for k, ps in ln.passes.items() if s in ps.segments]
+             for s in ln.segments}
+    assert len(cover["full"]) == 6
+    assert len(cover["long"]) == 3
+    assert set(cover["long"]) < set(cover["full"])
+    # three DISTINCT radars, which is the point of the trade
+    insts = {ln.passes[k].instrument for k in cover["long"]}
+    assert len(insts) == 3, insts
+    assert ln.reference.pass_key in cover["long"]        # axis must exist
+
+
+def test_a_window_needs_at_least_two_passes_and_the_reference():
+    from clutter_lines import LineSpec
+    d = LINES["greenland_westcoast"].model_dump(by_alias=True)
+    for ps in d["passes"].values():
+        ps["segments"].pop("long", None)
+    d["passes"]["p3_2019"]["segments"]["long"] = [
+        {"frame": "20190514_01_045", "slice": [0, 100]}]
+    with pytest.raises(ValueError, match="at least two passes"):
+        LineSpec.model_validate(d)
 
 
 def test_westcoast_is_an_instrument_line_not_an_altitude_line():

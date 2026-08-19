@@ -544,7 +544,9 @@ def segment_s_range(ref, segment):
     off = dict(zip(ref["frames"],
                    np.concatenate([[0], np.cumsum(ref["frame_len"])[:-1]])))
     ss = []
-    for fid, (a, b) in PASSES["low"][segment]:
+    # the REFERENCE pass, not a hardcoded name: this is the pass whose picks
+    # define the axis, and 'low' stopped existing when the passes were renamed
+    for fid, (a, b) in PASSES[REF_PASS][segment]:
         ss += [ref["s"][off[fid] + a], ref["s"][off[fid] + b - 1]]
     return float(min(ss)), float(max(ss))
 
@@ -3117,6 +3119,18 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                  if k in passes]
     else:
         order = list(ORDER)
+    # A segment is a WINDOW on the line, and not every flight reaches every
+    # window. Passes that do not cover this one are dropped with a note
+    # rather than failing: the alternative is a line that can only have
+    # windows its shortest flight covers.
+    absent = [k for k in order if segment not in PASSES[k]]
+    if absent:
+        print(f"  segment {segment!r}: no data for {absent} (that flight "
+              "does not reach this window) -- skipped", flush=True)
+        order = [k for k in order if k not in absent]
+    if not order:
+        raise ValueError(f"no pass covers segment {segment!r} on line "
+                         f"{LINE!r}")
     n_traces = n_traces or N_TRACES_BY_SEGMENT[segment]
     ts_km = (DECOMP_S_KM[segment] if trace_decomp_s_km is None
              else trace_decomp_s_km)

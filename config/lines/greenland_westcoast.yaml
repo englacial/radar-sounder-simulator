@@ -65,6 +65,11 @@ passes:
         slice:
         - 1618
         - 2638
+      long:
+      - frame: '20150425_02_039'
+        slice:
+        - 0
+        - 3332
   c130_2015_315:
     agl_med_m: 501.0
     season: 2015_Greenland_C130
@@ -93,6 +98,15 @@ passes:
         slice:
         - 0
         - 597
+      long:
+      - frame: '20160511_03_038'
+        slice:
+        - 1292
+        - 3332
+      - frame: '20160511_03_039'
+        slice:
+        - 0
+        - 1290
   p3_2017:
     agl_med_m: 511.0
     season: 2017_Greenland_P3
@@ -121,8 +135,29 @@ passes:
         slice:
         - 0
         - 447
+      long:
+      - frame: '20190514_01_045'
+        slice:
+        - 1144
+        - 3333
+      - frame: '20190514_01_046'
+        slice:
+        - 0
+        - 1140
 
 segments:
+  # LONG window (added 2026-08-18): s 17.11 -> 66.89 km, 49.78 km, covered by
+  # the three passes that reach it -- p3_2019 (195/30), p3_2016 (200/100) and
+  # c130_2015_205 (205/50). Three distinct radars over 50 km rather than six
+  # over 15. The other three flights do not reach this window and are simply
+  # absent from it: a segment is a WINDOW on the line, not a roll-call, and
+  # requiring every pass to cover every window caps a multi-year line at the
+  # extent of its shortest flight.
+  long:
+    s0_km: 17.1
+    n_traces: 240
+    decomp_s_km:
+    - 42.0
   # The six-way common span, s 41.30 -> 56.54 km on the 2019 axis. It is
   # short because the 2011 pass stops at s 56.5 and the 2017 pass starts at
   # s 41.3; dropping either buys ~10 km, at the cost of an instrument. No

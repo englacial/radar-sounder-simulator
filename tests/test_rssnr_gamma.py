@@ -140,7 +140,10 @@ def test_segment_s_range():
            "s": np.arange(8, dtype=float) * 1000.0}
     old = rbc.PASSES
     try:
-        rbc.PASSES = {"low": {"seg": [("A", (1, 4)), ("B", (0, 2))]}}
+        # keyed on the REFERENCE pass, not a hardcoded 'low': the pick axis
+        # is what defines a segment's along-track range, and the pass names
+        # are line data
+        rbc.PASSES = {rbc.REF_PASS: {"seg": [("A", (1, 4)), ("B", (0, 2))]}}
         lo, hi = rbc.segment_s_range(ref, "seg")
     finally:
         rbc.PASSES = old

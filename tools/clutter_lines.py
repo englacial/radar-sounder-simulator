@@ -170,15 +170,28 @@ class LineSpec(_Base):
                 raise ValueError(f"{key}: carrier {syn.carrier!r} is not a "
                                  "defined pass")
         segs = set(self.segments)
+        # A segment is a WINDOW on the line. Not every flight reaches every
+        # window -- on a multi-year repeat line the flights start and stop in
+        # different places -- so a pass may omit segments, but may never
+        # invent one.
         for key, ps in self.passes.items():
-            missing = segs - set(ps.segments)
-            if missing:
-                raise ValueError(f"pass {key!r} has no slices for segment(s) "
-                                 f"{sorted(missing)}")
             stray = set(ps.segments) - segs
             if stray:
                 raise ValueError(f"pass {key!r} defines segment(s) "
                                  f"{sorted(stray)} absent from segments:")
+        ref = self.passes[self.reference.pass_key]
+        for name in segs:
+            covering = [k for k, ps in self.passes.items()
+                        if name in ps.segments]
+            if len(covering) < 2:
+                raise ValueError(f"segment {name!r} is covered by "
+                                 f"{covering or 'no pass'}: a window needs at "
+                                 "least two passes to compare")
+            if name not in ref.segments:
+                raise ValueError(
+                    f"segment {name!r} is not covered by the reference pass "
+                    f"{self.reference.pass_key!r}, so there is no axis to "
+                    "project the others onto")
         if self.rssnr is None and "gamma_rssnr" not in self.unsupported:
             raise ValueError(
                 f"line {self.name!r} configures no rssnr store, so it must "
@@ -206,6 +219,7 @@ class LineSpec(_Base):
                 entry["season"] = ps.season
             for seg, parts in ps.segments.items():
                 entry[seg] = [(p.frame, tuple(p.slice)) for p in parts]
+            entry["_segments"] = tuple(ps.segments)
             out[key] = entry
         for key, syn in self.synthetic_passes.items():
             carrier = out[syn.carrier]
@@ -214,8 +228,9 @@ class LineSpec(_Base):
                      "instrument": carrier["instrument"]}
             if "season" in carrier:
                 entry["season"] = carrier["season"]
-            for seg in self.segments:
+            for seg in carrier.get("_segments", ()):
                 entry[seg] = carrier[seg]
+            entry["_segments"] = carrier.get("_segments", ())
             entry["synthetic_msl_m"] = syn.altitude_m
             if syn.facet_spacing_scale != 1.0:
                 entry["facet_spacing_scale"] = syn.facet_spacing_scale
