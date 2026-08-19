@@ -105,6 +105,30 @@ passes:
         - 0
         - 3146
 
+synthetic_passes:
+  # Constant-ellipsoidal-height passes riding the reference pass's geometry,
+  # picks and system params (the 195/30 MHz 2017 P-3): the design-study
+  # altitudes. Not benchmark members -- the std_benchmark protocol runs the
+  # real passes only; request these explicitly via passes: in an experiment.
+  syn14km:
+    altitude_m: 14000.0
+    carrier: p3_2017
+    facet_spacing_scale: 0.7
+    why: >
+      Inherited from the geikie syn14km gate (2026-08-11), the
+      syn500km/syn300km failure class: at 14 km the beta = 0.5 facet spacing
+      builds facets that trip the Fresnel-zone LPA check on the anisotropic
+      wide-reach EPSG:3413 scene window, and 0.7x snaps the DEM stride down
+      one notch to clear it. Same DEM, similar latitude and reach here, so
+      the same scale is carried -- RE-GATE with a 2-trace pilot on this
+      line's first synthetic run rather than trusting the transfer.
+  syn20km:
+    altitude_m: 20000.0
+    carrier: p3_2017
+    facet_spacing_scale: 0.7
+    why: >
+      Same class as syn14km, larger reach. Re-gate on first run.
+
 segments:
   # s 2.77 -> 99.68 km on the 2017 axis: the three-way overlap, from nav.
   full:
