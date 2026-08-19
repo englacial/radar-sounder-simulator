@@ -3350,21 +3350,38 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "fields (surface returns vs bed returns). measured floor: deep "
             "record tail (last 0.2-3.2 us; pre-surface is TX-leakage/"
             "img_comb-contaminated on the low pass). " + rec}
-    # headline: altitude trend of mid-column clutter, sim vs measured
+    # headline: altitude trend of mid-column clutter, sim vs measured.
+    # Derived from the line's ALTITUDE ORDERING, not from pass names: the
+    # old hardcoded pass-name literals silently skipped this metric --
+    # the line's KEY DELIVERABLE -- the moment the passes were renamed. The
+    # lowest measured pass present is the baseline; every higher measured
+    # pass pairs against it. A line whose real passes all fly one altitude
+    # (the westcoast instrument line) produces no pairs and no metric, which
+    # is correct: there is no altitude trend to report there.
+    meas_keys = [k for k in ORDER if k in order
+                 and analyses[k]["meas"] is not None]
+    meas_keys.sort(key=lambda k: preps[k]["h_med"])
     trend = {}
-    for hi in [k for k in ("mid", "high")
-               if k in order and "low" in order]:
-        trend[f"{hi}-low"] = {
-            "measured_db": round(analyses[hi]["meas"]["midcol_rel_surf_db"]
-                                 - analyses["low"]["meas"]["midcol_rel_surf_db"], 2),
-            "sim_db": round(analyses[hi]["sim"]["midcol_rel_surf_db"]
-                            - analyses["low"]["sim"]["midcol_rel_surf_db"], 2)}
-        trend[f"{hi}-low"]["error_db"] = round(
-            trend[f"{hi}-low"]["sim_db"] - trend[f"{hi}-low"]["measured_db"], 2)
-    if "high-low" in trend:      # needs the whole triplet (--passes subsets)
+    if len(meas_keys) >= 2:
+        lo_k = meas_keys[0]
+        for hi in [k for k in meas_keys[1:]
+                   if preps[k]["h_med"] > 2.0 * preps[lo_k]["h_med"]]:
+            pair = f"{hi}-{lo_k}"
+            trend[pair] = {
+                "measured_db": round(
+                    analyses[hi]["meas"]["midcol_rel_surf_db"]
+                    - analyses[lo_k]["meas"]["midcol_rel_surf_db"], 2),
+                "sim_db": round(
+                    analyses[hi]["sim"]["midcol_rel_surf_db"]
+                    - analyses[lo_k]["sim"]["midcol_rel_surf_db"], 2)}
+            trend[pair]["error_db"] = round(
+                trend[pair]["sim_db"] - trend[pair]["measured_db"], 2)
+    if trend:
+        head = f"{meas_keys[-1]}-{meas_keys[0]}"
         metrics["altitude_trend"] = {
-            "value": trend["high-low"]["sim_db"], "threshold": None,
+            "value": trend[head]["sim_db"], "threshold": None,
             "op": "record", "pass": True, "pairs": trend,
+            "baseline_pass": meas_keys[0],
             "note": "KEY DELIVERABLE: mid-column clutter power delta (dB, "
             "rel own surface peaks -- gain-free) high/mid pass minus low "
             "pass, sim vs measured; the scout's measured whole-line value is "

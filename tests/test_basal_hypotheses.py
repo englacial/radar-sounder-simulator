@@ -954,3 +954,17 @@ def test_level_anchor_without_a_deficit_is_refused(monkeypatch):
     axis = _fake_rssnr(monkeypatch)
     with pytest.raises(ValueError, match="explicit level_deficit_db"):
         rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level")
+
+
+def test_altitude_trend_derives_from_altitude_not_pass_names():
+    """The metric used to loop over ("mid", "high") vs "low" literally --
+    so renaming the passes silently DROPPED the line's key deliverable from
+    metrics.json (caught on the 2026-08-18 getz re-run). It must key on the
+    measured passes' actual altitudes."""
+    import re
+    src = (ROOT / "tools" / "run_basal_clutter.py").read_text()
+    blk = src[src.index("headline: altitude trend"):
+              src.index('metrics["simulation_wall_s"]')]
+    assert not re.search(r'"(mid|high|low)"', blk), \
+        "altitude_trend must not hardcode pass names"
+    assert "h_med" in blk                       # altitude is the ordering

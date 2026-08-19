@@ -1,0 +1,44 @@
+schema_version: 1
+
+meta:
+  name:    full_pbed
+  status:  exploratory
+  role:    benchmark
+  backs: >
+    First simulation of the west-coast instrument line. Its purpose is
+    fidelity benchmarking across radars rather than a physics result: three
+    systems (205/50, 200/100, 195/30 MHz) over one 49.8 km window of
+    identical geometry, so a simulator change that helps one and hurts
+    another shows up as a spread rather than a single number.
+  runtime: unknown -- first run on this line, cold cache
+  note: >
+    CONSTANT bed reflectivity. This line has no required-surface-SNR mapping
+    calibrated (gamma_rssnr is unsupported on it) and no Antarctic bed
+    ensemble, so the bed is BedMachine Greenland v5 corrected onto the
+    reference pass's radar picks along track.
+    ATTENUATION IS NOT CALIBRATED HERE. 15 dB/km is the tool's long-standing
+    default, not a value derived for this line; the Greenland interior line
+    runs 14 and its MacGregor arbitration favours 16 +/- 2. Coastal ice at
+    ~1.25 km is likely warmer than either. Read absolute bed levels from this
+    run as uncalibrated, and the CROSS-INSTRUMENT spread as the signal.
+
+run:
+  line:     greenland_westcoast
+  segment:  full
+  out_name: full_pbed
+  passes:   [c130_2015_205, p3_2016, p3_2019]
+
+  bed:
+    source: picked
+
+  physics:
+    att_db_per_km:     15.0
+    surface_roughness: true
+
+  processing:
+    chain:      standard
+    proc_cache: true
+    companion:  false     # no RSSNR mapping on this line, so no arm to compare
+
+  figures:
+    trace_decomp_s_km: [42.0]
