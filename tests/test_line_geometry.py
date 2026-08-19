@@ -107,8 +107,6 @@ def test_westcoast_is_an_instrument_line_not_an_altitude_line():
     assert not any("c130" in k for k in ln.passes)
     # the same-instrument repeat: two passes read from OPR frames whose
     # simulated params are identical 195/30 (the 2017 and 2019 P-3s)
-    from clutter_instruments import load_all as load_inst
-    insts = load_inst()
     fc = {}
     for k, ps in ln.passes.items():
         import json

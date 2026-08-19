@@ -111,6 +111,16 @@ config, so a line that measures differently says so out loud. Neither shipped
 line currently overrides anything, and a test asserts that — so the first one
 has to be deliberate.
 
+`attenuation_rule` derives the englacial attenuation A the same way D is
+derived: as an **output**, never a carried number. The default,
+`chain_closure`, chooses A so the level-anchored K equals K_phys — the
+absolute chain made self-consistent — solved analytically around a run with
+one verification evaluation. A line where a derivation was **tried and
+rejected** may override with `{method: fixed, value_db_per_km, why}`; the
+number then lives in that line's file with its rejection history (getz:
+A = 20, closure rejected by the family analysis, surface-reference audit
+open). No attenuation rate appears in code or in any experiment spec.
+
 `level_anchor` is the one rule the whole study shares for solving the
 level-anchor deficit D — contamination-aware (`bed·10^(D/10) + surface =
 measured`), median over the passes whose bed returns stand ≥ 10 dB clear of
@@ -171,6 +181,22 @@ radargram exists to show.
 | `greenland_geikie01_transit` | altitude | 2 real (0.5/2.5 km) + 1 synthetic | `transit` is one 139 km path; it contains a turn the two aircraft flew on different radii (up to 1.3 km apart over s 40-80) |
 | `greenland_westcoast` | **instrument** | 3 real, all ~460 m AGL | three radars (195/30, 200/100, 205/50 MHz) over one 49.8 km window |
 
+### Multi-line protocols
+
+A benchmark experiment may state `run.lines: [...]` instead of one line and
+be selected at run time:
+
+```
+uv run python tools/run_basal_clutter.py \
+    --config config/experiments/gl_std_benchmark.yaml --line <name>
+```
+
+Outputs cannot collide: each line's `case_prefix` gives the same experiment
+name its own directory and cache. With `level_deficit_db: solve` and
+`att_db_per_km: solve` the spec carries no numbers at all — D comes from the
+run's own constant-gamma arm, A from the line's attenuation rule, both
+recorded in the run config.
+
 ### Experiments
 
 | experiment | line | instruments | status |
@@ -178,8 +204,7 @@ radargram exists to show.
 | `ant_att20_klevel` | antarctic_2016 | as flown | **adopted** |
 | `ant_extended` | antarctic_2016 | as flown | **adopted** |
 | `ant_full_line` | antarctic_2016 | as flown | **adopted** |
-| `gl_full_pbed_proc_att14` | greenland_2014_2017 | as flown | **adopted** |
-| `gl_full_pbed_proc_att14_rssnr` | greenland_2014_2017 | as flown | **adopted** |
+| `gl_std_benchmark` | geikie OR westcoast (`--line`) | as flown | **adopted** |
 | `gl_haps60_at_14km` | greenland_2014_2017 | swap → `haps_60mhz` @ 14 km | exploratory |
 
 `gl_full_pbed_proc_att14` must exist before `gl_full_pbed_proc_att14_rssnr`

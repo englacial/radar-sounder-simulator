@@ -253,6 +253,7 @@ TAIL_EXCESS_US: tuple = ()
 TAIL_GUARD_DB: float = 0.0             # sim bed vs surface returns guard
 TAIL_FLOOR_MARGIN_DB: float = 0.0
 LEVEL_ANCHOR_RULE: dict = {}           # how the level deficit D is solved
+ATTENUATION_RULE: dict = {}            # how the attenuation A is derived
 CORR_WIN_M: float = 0.0                # bed-brightness smoothing scale
 ROUGH_WIN_M: float = 0.0               # bed-roughness detrend window
 GL_RAMP_KM: float = 0.0                # hybrid-bed blend ramp past the GL
@@ -3156,6 +3157,52 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"({'/'.join(ref['frames'])}), {ref['n']} picks over "
               f"{ref['line_len_km']} km, line gap frac "
               f"{ref['gap_frac_line']:.4f}", flush=True)
+    solve_rec = None
+    if gamma_rssnr and anchor == "level" and level_deficit_db == "solve":
+        # D SOLVED IN-RUN: simulate the constant-gamma arm of this exact
+        # configuration first, read each real pass's bed-window decomposition
+        # off it, and solve D under the study-wide level_anchor rule. The
+        # constant arm lands in this run's own cache, so the acceptance
+        # analysis later replays it for free. No hand-carried deficit
+        # remains anywhere: D is an OUTPUT.
+        print("level anchor: solving D from this configuration's "
+              "constant-gamma arm (config/analysis.yaml level_anchor rule)",
+              flush=True)
+        per = {}
+        for key in [k for k in order
+                    if not PASSES[k].get("synthetic_msl_m")]:
+            print(f"== {key} constant-gamma arm (D solve) ==", flush=True)
+            p_c = prep_pass(key, segment, n_traces, ref=ref, gmap=None,
+                            axis=axis, fine_posting=proc,
+                            posting_div=posting_div,
+                            dgn_seed=demogorgn_seed if demogorgn_bed
+                            else None, hybrid=hybrid,
+                            instrument=instruments.get(key))
+            s_c = simulate_pass(p_c, runs_dir, att, surf_rough, force)
+            pr_c = (process_standard_cached(p_c, s_c, out, att, surf_rough,
+                                            force=force)
+                    if (proc and proc_cache)
+                    else process_standard(p_c, s_c) if proc else None)
+            a_c = analyze_pass(p_c, s_c, proc=pr_c)
+            if a_c["meas"] is None:
+                continue
+            per[key] = {
+                "measured": a_c["meas"]["bed_rel_surf_db"],
+                "sim_bed": a_c["decomposition"]["bed"]["bed_rel_surf_db"],
+                "sim_surface":
+                    a_c["decomposition"]["surface"]["bed_rel_surf_db"]}
+        level_deficit_db, solve_rec = solve_level_deficit(per)
+        level_deficit_note = ("SOLVED IN-RUN from this configuration's "
+                              "constant-gamma arm under the study-wide "
+                              "level_anchor rule (config/analysis.yaml)")
+        parts_txt = []
+        for k, v in solve_rec["per_pass"].items():
+            excl = "" if v["qualifies"] else " EXCL"
+            parts_txt.append(f"{k} {v['d_db']} "
+                             f"({v['bed_over_surface_db']:+.1f} margin{excl})")
+        print(f"  D = {level_deficit_db:+.2f} dB from "
+              f"{solve_rec['n_qualifying']} qualifying pass(es); per pass "
+              + ", ".join(parts_txt), flush=True)
     gmap = None
     if gamma_rssnr:
         gmap = build_rssnr_gamma(axis, segment, att,
@@ -3572,6 +3619,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         med = float(np.median(list(res.values()))) if res else float("nan")
         la = gmap["level_anchor"]
         metrics["rssnr_level_anchor"] = {
+            **({"solved_in_run": solve_rec} if solve_rec else {}),
             "value": round(med, 2), "threshold": 2.0, "op": "<=",
             "pass": bool(abs(med) <= 2.0),
             "median_residual_db": round(med, 2),
@@ -4044,6 +4092,80 @@ def _report(out, case, config, metrics, notes, figs):
     print(f"wrote {out / 'report.html'}", flush=True)
 
 
+def run_with_solved_attenuation(kw):
+    """Derive A under the active line's attenuation_rule, then run.
+
+    No attenuation rate is encoded in code or in any experiment spec: the
+    rule (config/analysis.yaml, line-overridable) supplies either a
+    documented fixed value -- a line where a derivation was tried and
+    REJECTED -- or the chain_closure solve. Closure is analytic around a
+    run: the mapping already records implied_eff_att_db_per_km =
+    A + (K - K_phys)/(2 H_med), which IS the closure update, so each
+    evaluation is one full run and convergence is checked by the next.
+    The solved A and the full evaluation history are recorded in the run
+    config; every chunk cache is keyed on A, so a moved A re-simulates
+    (correct: different physics) while a converged one replays free.
+    """
+    activate_line(kw["line"] or DEFAULT_LINE)
+    rule = dict(ATTENUATION_RULE)
+    if rule["method"] == "fixed":
+        print(f"attenuation rule [{LINE}]: FIXED at "
+              f"{rule['value_db_per_km']} dB/km -- {rule['why'][:120]}",
+              flush=True)
+        kw = {**kw, "att": float(rule["value_db_per_km"])}
+        return run(**kw)
+    if not (kw.get("gamma_rssnr") and kw.get("anchor") == "level"):
+        raise ValueError(
+            "attenuation_rule chain_closure needs the RSSNR mapping with "
+            "level anchoring (K does not exist without it); this run has "
+            f"gamma_rssnr={kw.get('gamma_rssnr')}, anchor={kw.get('anchor')}")
+    a = float(rule["initial_db_per_km"])
+    tol = float(rule["tolerance_db_per_km"])
+    history = []
+    for ev in range(int(rule["max_evaluations"])):
+        a = round(a, 2)
+        print(f"attenuation solve [{LINE}]: evaluation {ev + 1} at "
+              f"A = {a} dB/km", flush=True)
+        metrics, config, out = run(**{**kw, "att": a})
+        implied = metrics["rssnr_gamma_mapping"]["implied_eff_att_db_per_km"]
+        resid = implied - a
+        history.append({"evaluation": ev + 1, "att_db_per_km": a,
+                        "k_minus_kphys_db":
+                            metrics["rssnr_gamma_mapping"]
+                            ["k_minus_kphys_db"],
+                        "implied_eff_att_db_per_km": implied,
+                        "residual_db_per_km": round(resid, 2)})
+        print(f"  closure: K - K_phys = "
+              f"{metrics['rssnr_gamma_mapping']['k_minus_kphys_db']} dB -> "
+              f"implied A = {implied} (residual {resid:+.2f} dB/km, "
+              f"tol {tol})", flush=True)
+        if abs(resid) <= tol:
+            converged = True
+            break
+        a = implied
+    else:
+        converged = False
+        print(f"attenuation solve DID NOT CONVERGE in "
+              f"{rule['max_evaluations']} evaluations (last residual "
+              f"{resid:+.2f} dB/km) -- results are at the LAST evaluation's "
+              "A and must be read with that caveat", flush=True)
+    solve_doc = {"rule": rule, "history": history,
+                 "converged": converged,
+                 "solved_att_db_per_km": history[-1]["att_db_per_km"],
+                 "note": "A derived under the study-wide attenuation_rule; "
+                 "the solved value is an OUTPUT of this run, not an input "
+                 "carried in any config"}
+    cfg_path = Path(out) / "run_config.json"
+    doc = json.loads(cfg_path.read_text())
+    doc["attenuation_solve"] = solve_doc
+    cfg_path.write_text(json.dumps(doc, indent=1) + "\n")
+    print(f"attenuation solve [{LINE}]: A = "
+          f"{solve_doc['solved_att_db_per_km']} dB/km "
+          f"({'converged' if converged else 'NOT CONVERGED'}, "
+          f"{len(history)} evaluation(s))", flush=True)
+    return metrics, doc, out
+
+
 def main_config():
     """``--config`` front door: an config/experiments/*.yaml spec IS the run input.
 
@@ -4059,6 +4181,10 @@ def main_config():
         description="Run one declarative experiment spec.")
     ap.add_argument("--config", required=True, metavar="YAML",
                     help="path to an config/experiments/*.yaml run spec")
+    ap.add_argument("--line", default=None,
+                    help="which line to run a MULTI-line protocol on "
+                    "(required when the spec states run.lines; an execution "
+                    "selector, not physics)")
     ap.add_argument("--out", default=None,
                     help="override the spec's run.out_root (execution only)")
     ap.add_argument("--force", action="store_true",
@@ -4066,6 +4192,15 @@ def main_config():
     args = ap.parse_args()
     spec = load_spec(args.config)
     kw = spec.to_run_kwargs()
+    if spec.run.lines:
+        if not args.line or args.line not in spec.run.lines:
+            raise SystemExit(
+                f"spec {spec.meta.name!r} is a multi-line protocol: pass "
+                f"--line, one of {spec.run.lines}")
+        kw["line"] = args.line
+    elif args.line and args.line != spec.run.line:
+        raise SystemExit(f"spec pins line {spec.run.line!r}; --line may only "
+                         "select within a multi-line protocol")
     if args.out:
         kw["out_root"] = args.out
     kw["force"] = args.force
@@ -4082,6 +4217,8 @@ def main_config():
           flush=True)
     if spec.meta.requires:
         print(f"  requires: {', '.join(spec.meta.requires)}", flush=True)
+    if kw["att"] == "solve":
+        return run_with_solved_attenuation(kw)
     return run(**kw)
 
 

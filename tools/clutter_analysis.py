@@ -80,6 +80,32 @@ class BedTail(_Base):
     floor_margin_db: float
 
 
+class AttenuationRule(_Base):
+    method: Literal["chain_closure", "fixed"]
+    # chain_closure only
+    initial_db_per_km: float | None = None
+    tolerance_db_per_km: float | None = None
+    max_evaluations: int | None = None
+    # fixed only (a line-level override where a derivation was REJECTED)
+    value_db_per_km: float | None = None
+    why: str | None = None
+
+    @property
+    def resolved(self):
+        if self.method == "fixed":
+            if self.value_db_per_km is None or not self.why:
+                raise ValueError("attenuation_rule 'fixed' needs "
+                                 "value_db_per_km AND a why: -- a pinned "
+                                 "number without its rejection history is "
+                                 "exactly what this rule exists to prevent")
+            return self
+        for f in ("initial_db_per_km", "tolerance_db_per_km",
+                  "max_evaluations"):
+            if getattr(self, f) is None:
+                raise ValueError(f"attenuation_rule chain_closure needs {f}")
+        return self
+
+
 class LevelAnchor(_Base):
     method: Literal["contamination_aware", "plain_difference"]
     min_bed_over_surface_db: float
@@ -119,6 +145,7 @@ class AnalysisSpec(_Base):
     noise_floor: NoiseFloor
     bed_tail: BedTail
     level_anchor: LevelAnchor
+    attenuation_rule: AttenuationRule
     smoothing: Smoothing
     hybrid_bed: HybridBed
     processing: Processing
@@ -151,6 +178,7 @@ class AnalysisSpec(_Base):
             "TAIL_GUARD_DB": bt.guard_db,
             "TAIL_FLOOR_MARGIN_DB": bt.floor_margin_db,
             "LEVEL_ANCHOR_RULE": self.level_anchor.model_dump(),
+            "ATTENUATION_RULE": self.attenuation_rule.resolved.model_dump(),
             "CORR_WIN_M": sm.profile_m,
             "ROUGH_WIN_M": sm.roughness_detrend_m,
             "GL_RAMP_KM": hb.gl_ramp_km,

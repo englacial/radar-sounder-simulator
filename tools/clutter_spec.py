@@ -116,7 +116,11 @@ class SpecularDiffuse(_Base):
 class Reflectivity(_Base):
     gamma_from_rssnr: bool = False
     anchor: Literal["median", "level"] = "median"
-    level_deficit_db: Derived | float | None = None
+    # a stated {value, how}, a bare float, or "solve" -- derive D in-run
+    # from this configuration's own constant-gamma arm under the study-wide
+    # level_anchor rule, so the deficit is an output rather than a carried
+    # number.
+    level_deficit_db: Derived | float | Literal["solve"] | None = None
     specular_diffuse: SpecularDiffuse | None = None
 
     @model_validator(mode="after")
@@ -149,8 +153,10 @@ class Reflectivity(_Base):
 class Physics(_Base):
     # REQUIRED, no default: a silent default is how a run reproduced a
     # REJECTED attenuation (see claude_notes/foundations_review_2026-08-17.md
-    # section A2). Every spec states the number that defines its result.
-    att_db_per_km: float
+    # section A2). Either a stated number (exploratory runs, sweeps) or the
+    # literal "solve" -- derive A under the active line's attenuation_rule
+    # (config/analysis.yaml), so no rate is carried in any spec or in code.
+    att_db_per_km: float | Literal["solve"]
     surface_roughness: bool = True
     antenna: Literal["array", "isotropic", "array8"] = "array"
     bed_roughness: BedRoughness | None = None
@@ -199,10 +205,14 @@ def known_lines():
 
 
 class Run(_Base):
-    # validated against the LINES registry, not just typed as str: the whole
-    # point of a schema is that a typo fails at load rather than after the
-    # scene prep
-    line: str
+    # ONE line, or a LIST of lines the experiment is valid on -- a benchmark
+    # protocol that runs identically on several lines. With `lines`, the
+    # line is chosen at run time (--line); outputs cannot collide because
+    # each line's case_prefix gives the same experiment name its own
+    # directory and cache. Validated against config/lines/, so a typo fails
+    # at load rather than after the scene prep.
+    line: str | None = None
+    lines: list[str] | None = None
     segment: str
     out_name: str | None = None
     out_root: str | None = None
@@ -223,10 +233,14 @@ class Run(_Base):
 
     @model_validator(mode="after")
     def _line_is_registered(self):
+        if (self.line is None) == (self.lines is None):
+            raise ValueError("state exactly one of run.line (single) or "
+                             "run.lines (a multi-line protocol)")
         have = known_lines()
-        if have is not None and self.line not in have:
-            raise ValueError(f"unknown line {self.line!r}; registered lines "
-                             f"are {sorted(have)}")
+        for name in ([self.line] if self.line else self.lines):
+            if have is not None and name not in have:
+                raise ValueError(f"unknown line {name!r}; registered lines "
+                                 f"are {sorted(have)}")
         return self
 
     @model_validator(mode="after")
@@ -285,7 +299,8 @@ class RunSpec(_Base):
                                   self.run.figures)
         src = r.bed.source
         kw = {
-            "line": r.line,
+            "line": r.line,          # None for a multi-line protocol:
+                                     # main_config resolves --line into it
             "segment": r.segment,
             "out_name": r.out_name or self.meta.name,
             "out_root": r.out_root,

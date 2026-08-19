@@ -13,14 +13,29 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import run_basal_clutter as rbc  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _restore_line():
+    """activate_line mutates module state; tests here switch lines to read
+    their rules and must not leak the last line into other modules."""
+    saved = {k: getattr(rbc, k) for k in rbc.LINE_GLOBALS}
+    saved_a = {k: getattr(rbc, k) for k in rbc.ANALYSIS_GLOBALS}
+    yield
+    for k, v in {**saved, **saved_a}.items():
+        setattr(rbc, k, v)
 from clutter_analysis import load_analysis  # noqa: E402
 from clutter_spec import RunSpec  # noqa: E402
 
 
 def test_shipped_analysis_binds_every_declared_global():
+    """The bound values are the ACTIVE line's resolved conventions -- the
+    study defaults with that line's declared overrides merged -- so the
+    comparison target is LINE_ANALYSIS, not the bare study file."""
     g = load_analysis().to_globals()
     assert set(g) == set(rbc.ANALYSIS_GLOBALS)
-    for k, v in g.items():
+    resolved, _ = rbc.LINE_ANALYSIS[rbc.LINE]
+    for k, v in resolved.to_globals().items():
         assert getattr(rbc, k) == v, k
 
 
@@ -57,11 +72,40 @@ def test_line_override_merges_and_reports_what_changed():
         == (12.0, 8.0)
 
 
-def test_shipped_lines_declare_no_overrides():
-    """Both study lines currently measure by the study conventions. If that
-    changes, the override must be deliberate -- this test is the prompt."""
+def test_line_overrides_are_exactly_the_documented_ones():
+    """An override must be deliberate. The ONLY one shipped is getz's pinned
+    attenuation (family analysis rejected closure; surface-reference audit
+    open) -- and it must carry its rejection history."""
     for name, (_resolved, changed) in rbc.LINE_ANALYSIS.items():
-        assert changed == {}, f"{name} overrides {sorted(changed)}"
+        if name == "antarctica_getz":
+            assert set(k.split(".")[0] for k in changed) == \
+                {"attenuation_rule"}, changed
+        else:
+            assert changed == {}, f"{name} overrides {sorted(changed)}"
+    rbc.activate_line("antarctica_getz")
+    assert rbc.ATTENUATION_RULE["method"] == "fixed"
+    assert rbc.ATTENUATION_RULE["value_db_per_km"] == 20.0
+    assert "rejected closure" in rbc.ATTENUATION_RULE["why"]
+    for name in ("greenland_geikie01_transit", "greenland_westcoast"):
+        rbc.activate_line(name)
+        assert rbc.ATTENUATION_RULE["method"] == "chain_closure", name
+
+
+def test_fixed_attenuation_without_a_why_is_refused():
+    """A pinned number without its rejection history is exactly what the
+    rule exists to prevent."""
+    from clutter_analysis import AttenuationRule
+    with pytest.raises(ValueError, match="why"):
+        AttenuationRule(method="fixed", value_db_per_km=20.0).resolved
+    ok = AttenuationRule(method="fixed", value_db_per_km=20.0,
+                         why="rejected because ...").resolved
+    assert ok.value_db_per_km == 20.0
+
+
+def test_closure_rule_needs_its_solver_fields():
+    from clutter_analysis import AttenuationRule
+    with pytest.raises(ValueError, match="chain_closure needs"):
+        AttenuationRule(method="chain_closure").resolved
 
 
 def test_an_experiment_cannot_set_measurement_conventions():
@@ -140,14 +184,16 @@ def test_no_qualifying_pass_fails_loudly():
         rbc.solve_level_deficit(only_high)
 
 
-def test_committed_specs_state_the_rule_solved_value():
-    """A spec's D must equal what the rule yields; otherwise the declared
-    convention and the number in use disagree."""
+def test_the_benchmark_carries_no_numbers():
+    """The merged Greenland benchmark derives everything: D and A are the
+    literal sentinel 'solve', so no rate or deficit is carried in the spec
+    (getz keeps its stated values -- its rule is the documented exception
+    and it is not part of the multi-line protocol)."""
     from clutter_spec import load_spec
-    exp = ROOT / "config" / "experiments"
-    want = {"ant_full_line": 3.56, "gl_full_pbed_rssnr": -11.56}
-    for name, d in want.items():
-        fp = exp / f"{name}.yaml"
-        if not fp.exists():
-            pytest.skip(f"{name} not present")
-        assert load_spec(fp).run.reflectivity.deficit_db == pytest.approx(d)
+    sp = load_spec(ROOT / "config" / "experiments" / "gl_std_benchmark.yaml")
+    assert sp.run.lines == ["greenland_geikie01_transit",
+                            "greenland_westcoast"]
+    assert sp.run.reflectivity.level_deficit_db == "solve"
+    assert sp.run.physics.att_db_per_km == "solve"
+    ant = load_spec(ROOT / "config" / "experiments" / "ant_full_line.yaml")
+    assert ant.run.reflectivity.deficit_db == pytest.approx(3.56)

@@ -176,7 +176,6 @@ def test_derived_number_carries_its_provenance():
 # spec name -> the output directory it claims to build
 RECORDED = {
     "ant_full_line": "outputs/antarctica_getz/full_line",
-    "gl_full_pbed_rssnr": "outputs/greenland_geikie/full_pbed_rssnr",
 }
 # ant_full_line was built STAGED (one --passes per invocation), so its
 # recorded config holds only the last pass -- see foundations review A3.
@@ -245,4 +244,29 @@ def test_unknown_line_rejected_at_load():
 
 def test_every_spec_names_a_registered_line():
     for fp in sorted(EXPERIMENTS.glob("*.yaml")):
-        assert load_spec(fp).run.line in rbc.LINES, fp.name
+        r = load_spec(fp).run
+        for name in ([r.line] if r.line else r.lines):
+            assert name in rbc.LINES, fp.name
+
+
+def test_multi_line_protocol_requires_exactly_one_of_line_or_lines():
+    d = _doc()
+    d["run"]["lines"] = [LINE]
+    with pytest.raises(ValueError, match="exactly one"):
+        RunSpec.model_validate(d)
+    del d["run"]["line"]
+    ok = RunSpec.model_validate(d)
+    assert ok.to_run_kwargs()["line"] is None    # resolved by --line at run
+    del d["run"]["lines"]
+    with pytest.raises(ValueError, match="exactly one"):
+        RunSpec.model_validate(d)
+
+
+def test_solve_sentinels_reach_run_kwargs_verbatim():
+    d = _doc(reflectivity={"gamma_from_rssnr": True, "anchor": "level",
+                           "level_deficit_db": "solve"})
+    d["run"]["physics"]["att_db_per_km"] = "solve"
+    kw = RunSpec.model_validate(d).to_run_kwargs()
+    assert kw["level_deficit_db"] == "solve"
+    assert kw["att"] == "solve"
+    assert kw["level_deficit_note"] is None      # the solve writes its own

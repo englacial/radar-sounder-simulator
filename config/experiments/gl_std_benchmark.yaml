@@ -1,0 +1,53 @@
+schema_version: 1
+
+meta:
+  name:   std_benchmark
+  status: adopted
+  role:   benchmark
+  backs: >
+    THE Greenland fidelity benchmark, merging the former gl_full_pbed_rssnr
+    (geikie) and wc_full_pbed (westcoast) into one protocol that runs
+    identically on either line. Its purpose is the "did a simulator change
+    help or hurt" loop: re-run per line, compare the recorded metrics.
+  runtime: >
+    per line, cold cache: geikie ~2 h + the constant-gamma arm; westcoast
+    ~2.2 h + arm. A moved solved-A re-simulates (different physics); a
+    converged one replays from cache.
+  note: >
+    NO NUMBERS. Every quantity that used to be hand-carried is now derived
+    and recorded as an output: the bed comes from the reference pass's picks,
+    the reflectivity structure from the pinned RSSNR store, D from this
+    run's own constant-gamma arm under the level_anchor rule, and A from the
+    line's attenuation_rule (chain_closure on both Greenland lines; the
+    getz line pins A=20 with its rejection history, but getz is not part of
+    this protocol -- different bed machinery, own experiment).
+    Run:  uv run python tools/run_basal_clutter.py \
+            --config config/experiments/gl_std_benchmark.yaml --line <name>
+    Passes default to the line's real ones (synthetics are design studies,
+    not benchmark members); the single-trace decomposition location defaults
+    to the line's own.
+
+run:
+  lines:
+  - greenland_geikie01_transit
+  - greenland_westcoast
+  segment: full
+
+  bed:
+    source: picked
+
+  reflectivity:
+    gamma_from_rssnr: true
+    anchor:           level
+    level_deficit_db: solve
+
+  physics:
+    att_db_per_km:     solve
+    surface_roughness: true
+
+  processing:
+    chain:      standard
+    proc_cache: true
+    companion:  true
+
+  out_name: std_benchmark
