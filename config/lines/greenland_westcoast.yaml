@@ -3,104 +3,125 @@ name: greenland_westcoast
 
 # A REPEAT-PASS INSTRUMENT LINE, not an altitude line.
 #
-# Two flights cross the same west-coast transit at essentially the same
-# height (419-492 m median AGL) over a near-constant ~1.25 km ice column.
-# What differs is the radar: 195/30 MHz (2019 P-3) vs 200/100 MHz (2016
-# P-3) on identical geometry -- the instrument-swap axis with REAL
-# instruments on both sides of the swap.
+# Three P-3 flights cross the same west-coast transit at essentially the
+# same height (476-500 m median AGL) over ~1.0 km of ice. Two of them --
+# 2017 and 2019 -- fly the SAME 195/30 MHz system two years apart, and the
+# third flies the 200/100 MHz system: so the line carries both an
+# instrument swap AND a same-instrument repeat. The 2017 vs 2019 spread is
+# the product-to-product noise floor with NO instrument change, which is
+# the bar any 200/100-vs-195/30 difference must clear before it means
+# anything.
 #
-# REMOVED 2026-08-19: the 2015 C-130 pass (20150425_02_039, 205/50 MHz).
-# Its CSARP_standard product has the transmitted-waveform IMAGES (separate
+# REPLACED 2026-08-19. The previous line on this coast (2019 reference,
+# frames 20190514_01_045-046, ~15 km west) is retired: this corridor
+# strictly dominates it -- longer (96.9 vs 49.8 km after the C-130
+# removal... vs 97.4 two-way), better aligned (2016 flies 47 m median here
+# vs 109 m there), and it adds the same-instrument repeat pair. History
+# holds the old definition.
+#
+# EXCLUDED: both 2015 C-130 passes over this corridor (20150417_02_042-043
+# here; 20150425_02_039 on the old corridor). The 2015 C-130 season's
+# CSARP_standard products have the transmitted-waveform IMAGES (separate
 # waveforms combined to extend dynamic range) incorrectly combined, so the
-# surface and the bed sit on DIFFERENT radiometric scales within one trace.
-# The symptoms were all visible in the first run: a brightness step at the
-# ~10 us img_comb boundary, a measured bed-to-surface ratio of -115 dB
-# (31 dB below the P-3 products over the same bed), and an 87 m rms
-# thickness disagreement. A pass whose surface and bed are not on one scale
-# cannot participate in a surface-referenced instrument comparison.
-#
-# Discovered 2026-08-18 by projecting every frame in a corridor around the
-# 2019 track onto it and keeping the overlaps. Six flights cross this line in
-# total, but only these three reach a common 49.8 km window: the 2011 pass
-# ends at s 56.5 km, the 2017 pass does not start until s 41.3, and the 2015
-# wideband pass runs s 30.7-80.4. Including all six would cap the window at
-# 15.2 km, so the other three are deliberately not carried. Re-searching with
-# a ~10 km corridor and 3 km lateral tolerance -- four times the original --
-# found no further flights and no frames extending these: each crosses the
-# corridor exactly once, so the limit is along-track coverage, not alignment.
+# surface and bed sit on DIFFERENT radiometric scales within one trace --
+# observed directly on the old corridor as a brightness step at the ~10 us
+# img_comb boundary, a -115 dB measured bed (31 dB below the P-3 products
+# over the same bed) and an 87 m rms thickness disagreement. Also not
+# carried: 20110423_01_020-021 (2011 P-3, 195/30), which only enters the
+# corridor at s 22.1 km and flies 124 m off -- dropping it buys 25 km of
+# window; it remains the natural extension if a third epoch of the 195/30
+# repeat is ever worth more than the length.
 
 identity:
   case_prefix: greenland_westcoast
-  season: 2019_Greenland_P3
+  season: 2017_Greenland_P3
   crs: EPSG:3413
   fc_hz: 195000000.0
   grounding_line_s_km: null
 
 reference:
-  pass: p3_2019
+  pass: p3_2017
   frames:
-  - '20190514_01_045'
-  - '20190514_01_046'
+  - '20170510_03_013'
+  - '20170510_03_014'
 
-# No altitude ordering is possible -- every pass is within ~75 m of 460 m
-# AGL -- so the order is chronological.
+# Chronological -- no altitude ordering is possible at one flying height.
 order:
 - p3_2016
+- p3_2017
 - p3_2019
 
 passes:
   p3_2016:
-    agl_med_m: 419.0
+    agl_med_m: 484.0
     season: 2016_Greenland_P3
-    param_frame: '20160511_03_038'
+    param_frame: '20160511_03_034'
     instrument: mcords_p3_2016_200mhz
     reversed: false
     segments:
       full:
-      - frame: '20160511_03_038'
+      - frame: '20160511_03_033'
         slice:
-        - 148
+        - 3207
         - 3332
-      - frame: '20160511_03_039'
+      - frame: '20160511_03_034'
         slice:
         - 0
         - 3332
+      - frame: '20160511_03_035'
+        slice:
+        - 0
+        - 3023
+  p3_2017:
+    agl_med_m: 500.0
+    season: 2017_Greenland_P3
+    param_frame: '20170510_03_013'
+    instrument: mcords3_p3_greenland
+    reversed: false
+    segments:
+      full:
+      - frame: '20170510_03_013'
+        slice:
+        - 186
+        - 3334
+      - frame: '20170510_03_014'
+        slice:
+        - 0
+        - 3333
   p3_2019:
-    agl_med_m: 492.0
+    agl_med_m: 476.0
     season: 2019_Greenland_P3
-    param_frame: '20190514_01_045'
+    param_frame: '20190514_01_039'
     instrument: mcords_p3_2019
     reversed: false
     segments:
       full:
-      - frame: '20190514_01_045'
+      - frame: '20190514_01_039'
         slice:
         - 0
-        - 3333
-      - frame: '20190514_01_046'
+        - 3335
+      - frame: '20190514_01_040'
         slice:
         - 0
-        - 3181
+        - 3146
 
 segments:
-  # s 0 -> 97.35 km on the 2019 axis: the full two-pass overlap. Grew from
-  # 49.8 km when the 2015 C-130 pass was removed (see below) -- that pass's
-  # coverage was what pinned the window to s 17.1-66.9.
+  # s 2.77 -> 99.68 km on the 2017 axis: the three-way overlap, from nav.
   full:
-    s0_km: 0.0
+    s0_km: 2.8
     n_traces: 470
     decomp_s_km:
-    - 42.0
+    - 50.0
 
 figures:
-  # ~1.25 km of ice, so the bed sits ~14.8 us below the surface.
+  # ~1.0 km of ice, so the bed sits ~12 us below the surface.
   radargram:
-    y_us: [-1.0, 20.0]
+    y_us: [-1.0, 18.0]
     db: [-110.0, 5.0]
-    scale: per_panel      # three products with different dynamic ranges
+    scale: per_panel
   profile:
-    rel_us: [-1.5, 20.5]
-    x_us: [-1.0, 20.0]
+    rel_us: [-1.5, 18.5]
+    x_us: [-1.0, 18.0]
     db: [-130.0, 5.0]
 
 # No required-surface-SNR store is configured for these segments, and this
@@ -112,16 +133,15 @@ unsupported:
 
 provenance:
   measured_caveats: >
-    Measured references are CSARP_standard. TWO DIFFERENT PRODUCTS: the
-    fast-time bin is 9.99 ns (2016) vs 16.67 ns (2019), so no depth or delay
-    comparison may be made by bin index -- only in metres or microseconds on
-    each pass's own lattice. Bandwidth differs 100 vs 30 MHz (~3x the range
-    resolution), so a like-for-like clutter comparison has to account for
-    that before it accounts for anything else.
-    TRACK CAVEAT: p3_2016 flies ~109 m off the reference track (median over
-    this window, max 295 m). Over rough bed that is not quite the same
-    scene, and any disagreement it shows should be attributed to geometry
-    before it is attributed to the instrument.
+    Measured references are CSARP_standard. THREE PRODUCTS, TWO SYSTEMS: the
+    fast-time bin is 9.99 ns (2016), 16.67 ns (2019) and 33.33 ns (2017), so
+    no depth or delay comparison may be made by bin index -- only in metres
+    or microseconds on each pass's own lattice. Note the same-instrument
+    pair (2017/2019, identical 195/30 MHz) still differs 2x in product
+    fast-time bin: lattice is a PRODUCT property, not an instrument one.
+    Bandwidth differs 100 vs 30 MHz across the swap (~3x range resolution).
+    TRACK CAVEAT: p3_2016 flies ~47 m off the reference track (median, max
+    264 m); p3_2019 ~13 m (max 99 m).
   real_chain:
     product: CSARP_standard
     sar: >

@@ -94,16 +94,31 @@ def test_geikie_transit_is_one_path_through_all_three_frames():
 
 def test_westcoast_is_an_instrument_line_not_an_altitude_line():
     """Every pass flies within ~75 m of 460 m AGL; what varies is the radar.
-    If that stops being true the line's purpose has changed. Two passes now:
-    the 2015 C-130 was removed for an img_comb radiometric miscalibration
-    (surface and bed on different scales within one trace)."""
+    The line carries BOTH comparison axes: an instrument swap (200/100 vs
+    195/30 MHz) and a same-instrument repeat (the 195/30 flown in 2017 and
+    2019), whose spread is the product-to-product noise floor any
+    cross-instrument difference must clear. No C-130 pass may return: the
+    2015 C-130 season's products are radiometrically miscalibrated
+    (img_comb combines the waveform images incorrectly)."""
     ln = LINES["greenland_westcoast"]
     agl = [p.agl_med_m for p in ln.passes.values()]
     assert max(agl) - min(agl) < 150.0
-    insts = {p.instrument for p in ln.passes.values()}
-    assert len(insts) == len(ln.passes) == 2, insts
-    assert not any("c130" in k for k in ln.passes), \
-        "the 2015 C-130 pass is radiometrically miscalibrated (img_comb)"
+    assert len(ln.passes) == 3
+    assert not any("c130" in k for k in ln.passes)
+    # the same-instrument repeat: two passes read from OPR frames whose
+    # simulated params are identical 195/30 (the 2017 and 2019 P-3s)
+    from clutter_instruments import load_all as load_inst
+    insts = load_inst()
+    fc = {}
+    for k, ps in ln.passes.items():
+        import json
+        cache = ROOT / "outputs" / "cache" /             f"mcords_params_{ps.season}_{ps.param_frame}.json"
+        if not cache.exists():
+            pytest.skip("param cache not primed")
+        wf = json.loads(cache.read_text())["waveform"]
+        fc[k] = (wf["center_frequency_Hz"], wf["bandwidth_Hz"])
+    assert fc["p3_2017"] == fc["p3_2019"] == (195e6, 30e6)   # the repeat
+    assert fc["p3_2016"] == (200e6, 100e6)                   # the swap
 
 
 def test_a_window_needs_at_least_two_passes_and_the_reference():

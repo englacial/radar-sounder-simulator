@@ -7,11 +7,11 @@ meta:
   backs: >
     First simulation of the west-coast instrument line. Its purpose is
     fidelity benchmarking across radars rather than a physics result: two
-    systems (200/100 and 195/30 MHz) over one 97.4 km window of identical
-    geometry, so a simulator change that helps one and hurts another shows
-    up as a spread rather than a single number. The 2015 C-130 pass was
-    removed 2026-08-19 for an img_comb radiometric miscalibration (see the
-    line file); its first-run results are superseded.
+    systems (200/100 and 195/30 MHz) over one 96.9 km window of identical
+    geometry, with the 195/30 flown TWICE (2017, 2019) -- the
+    same-instrument repeat that sets the noise floor any cross-instrument
+    difference must clear. Line replaced 2026-08-19 (see the line file);
+    the first run on the old corridor is superseded.
   runtime: unknown -- first run on this line, cold cache
   note: >
     CONSTANT bed reflectivity. This line has no required-surface-SNR mapping
@@ -28,7 +28,7 @@ run:
   line:     greenland_westcoast
   segment:  full
   out_name: full_pbed
-  passes:   [p3_2016, p3_2019]
+  passes:   [p3_2016, p3_2017, p3_2019]
 
   bed:
     source: picked
