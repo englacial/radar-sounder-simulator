@@ -133,10 +133,14 @@ def test_a_window_needs_at_least_two_passes_and_the_reference():
         LineSpec.model_validate(d)
 
 
-def test_westcoast_declares_rssnr_unsupported_because_it_has_no_store():
+def test_westcoast_has_rssnr_coverage():
+    """Initially declared unsupported on an unchecked assertion; verified
+    2026-08-19 against the pinned snapshot -- both reference frames are
+    present (32/42 and 42/42 usable traces)."""
     ln = LINES["greenland_westcoast"]
-    assert ln.rssnr is None
-    assert "gamma_rssnr" in ln.unsupported
+    assert ln.rssnr is not None
+    assert ln.rssnr.snapshot == "GEAMAHQ7BRVPG9SQPK20"
+    assert "gamma_rssnr" not in ln.unsupported
 
 
 def test_a_line_without_an_rssnr_store_must_say_so():
@@ -144,6 +148,6 @@ def test_a_line_without_an_rssnr_store_must_say_so():
     for, and find out only after the scene prep."""
     from clutter_lines import LineSpec
     d = LINES["greenland_westcoast"].model_dump(by_alias=True)
-    d["unsupported"] = [u for u in d["unsupported"] if u != "gamma_rssnr"]
+    d["rssnr"] = None
     with pytest.raises(ValueError, match="gamma_rssnr"):
         LineSpec.model_validate(d)

@@ -124,10 +124,24 @@ figures:
     x_us: [-1.0, 18.0]
     db: [-130.0, 5.0]
 
-# No required-surface-SNR store is configured for these segments, and this
-# line has no grounding line or Antarctic bed ensemble.
+rssnr:
+  # Verified 2026-08-19 directly against the pinned snapshot: both reference
+  # frames are present -- _013 with 32/42 usable traces (76%), _014 with
+  # 42/42 -- at ~1.4 km sampling, the same store and snapshot the geikie
+  # line uses. (An earlier revision of this file claimed no store covered
+  # these segments; that was asserted, not checked.)
+  # NOTE: what is verified is that the DATA EXISTS. The mapping's K anchoring
+  # has never been derived on this line -- a first --gamma-from-rssnr run
+  # must go through the same level-anchor derivation the other lines did,
+  # not assume a deficit.
+  snapshot: GEAMAHQ7BRVPG9SQPK20
+  store:
+    bucket: opr-radar-metrics
+    prefix: icechunk/greenland
+    region: us-west-2
+
+# This line has no grounding line and no Antarctic bed ensemble.
 unsupported:
-- gamma_rssnr
 - demogorgn_bed
 - hybrid
 
