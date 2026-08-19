@@ -155,9 +155,11 @@ passes were even flown on the same fast-time lattice.
 Offsets come from each frame's **own nav**, never from the STAC geometry:
 STAC carries a coarse decimation of the track and can misplace it by hundreds
 of metres, which is fine for discovering candidates and useless as a metric.
-Radargrams are in dB rel each trace's own surface peak on a common
-depth-in-µs axis, because absolute product scaling and bin indexing are not
-comparable across seasons.
+Radargrams are normalised by **one scalar per pass** — that pass's median
+surface return over the segment — on a common depth-in-µs axis, because
+absolute product scaling and bin indexing are not comparable across seasons.
+Per-trace normalisation would flatten exactly the along-track variation the
+radargram exists to show.
 
 ## Index
 
@@ -167,7 +169,7 @@ comparable across seasons.
 |---|---|---|---|
 | `antarctica_getz` | altitude | 3 real (0.4/9.2/10.7 km) + 2 synthetic | grounding line at s 69.7 km |
 | `greenland_geikie01_transit` | altitude | 2 real (0.5/2.5 km) + 1 synthetic | `transit` is one 139 km path; it contains a turn the two aircraft flew on different radii (up to 1.3 km apart over s 40-80) |
-| `greenland_westcoast` | **instrument** | 6 real, all ~470 m AGL | four radars, 195/30 to 315/270 MHz; `full` = all six over 15.2 km, `long` = the three that reach 49.8 km |
+| `greenland_westcoast` | **instrument** | 3 real, all ~460 m AGL | three radars (195/30, 200/100, 205/50 MHz) over one 49.8 km window |
 
 ### Experiments
 

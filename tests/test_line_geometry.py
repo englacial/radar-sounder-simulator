@@ -92,41 +92,26 @@ def test_geikie_transit_is_one_path_through_all_three_frames():
         assert not (40.0 < v < 80.0), v
 
 
-def test_westcoast_long_window_trades_passes_for_extent():
-    """Six passes reach only 15 km together; three reach 50. A segment is a
-    window on the line, so the passes that do not reach it are absent from
-    it rather than capping the line at its shortest flight."""
-    ln = LINES["greenland_westcoast"]
-    cover = {s: [k for k, ps in ln.passes.items() if s in ps.segments]
-             for s in ln.segments}
-    assert len(cover["full"]) == 6
-    assert len(cover["long"]) == 3
-    assert set(cover["long"]) < set(cover["full"])
-    # three DISTINCT radars, which is the point of the trade
-    insts = {ln.passes[k].instrument for k in cover["long"]}
-    assert len(insts) == 3, insts
-    assert ln.reference.pass_key in cover["long"]        # axis must exist
-
-
-def test_a_window_needs_at_least_two_passes_and_the_reference():
-    from clutter_lines import LineSpec
-    d = LINES["greenland_westcoast"].model_dump(by_alias=True)
-    for ps in d["passes"].values():
-        ps["segments"].pop("long", None)
-    d["passes"]["p3_2019"]["segments"]["long"] = [
-        {"frame": "20190514_01_045", "slice": [0, 100]}]
-    with pytest.raises(ValueError, match="at least two passes"):
-        LineSpec.model_validate(d)
-
-
 def test_westcoast_is_an_instrument_line_not_an_altitude_line():
-    """Every pass flies within ~90 m of 470 m AGL; what varies is the radar.
+    """Every pass flies within ~75 m of 460 m AGL; what varies is the radar.
     If that stops being true the line's purpose has changed."""
     ln = LINES["greenland_westcoast"]
     agl = [p.agl_med_m for p in ln.passes.values()]
     assert max(agl) - min(agl) < 150.0
     insts = {p.instrument for p in ln.passes.values()}
-    assert len(insts) >= 4, insts
+    assert len(insts) == len(ln.passes) == 3, insts
+
+
+def test_a_window_needs_at_least_two_passes_and_the_reference():
+    """A window with one pass has nothing to compare; a window the reference
+    pass misses has no axis to project the others onto."""
+    from clutter_lines import LineSpec
+    d = LINES["greenland_westcoast"].model_dump(by_alias=True)
+    for k, ps in d["passes"].items():
+        if k != d["reference"]["pass"]:
+            ps["segments"] = {}
+    with pytest.raises(ValueError, match="at least two passes"):
+        LineSpec.model_validate(d)
 
 
 def test_westcoast_declares_rssnr_unsupported_because_it_has_no_store():

@@ -255,14 +255,17 @@ def _aligned(d, lo, hi, s_grid, rel_us):
             continue
         out[i] = np.interp(surf[i] + rel_us * 1e-6, tw, data[i],
                            left=np.nan, right=np.nan)
-    # Normalise each trace by its OWN surface peak. Absolute product scaling
-    # is not comparable across six seasons and four radars, and an unnormalised
-    # panel is dominated by the surface return -- which crushes the bed to
-    # black on the wideband products. dB rel own surface peak is the
-    # convention the rest of this repo measures in.
+    # Normalise the WHOLE panel by ONE number: the median surface return over
+    # this segment. Absolute product scaling is not comparable across seasons
+    # and radars, so some normalisation is needed to put the panels side by
+    # side -- but dividing each trace by its OWN surface peak would flatten
+    # exactly the along-track variation the radargram exists to show, and
+    # would hide a pass whose surface return fades. One scalar per pass keeps
+    # every relative brightness inside the panel intact.
     w = np.abs(rel_us) <= 0.5
     pk = np.nanmax(np.where(w, out, np.nan), axis=1)
-    out = out / np.where(np.isfinite(pk) & (pk > 0), pk, np.nan)[:, None]
+    ref = np.nanmedian(pk)
+    out = out / (ref if np.isfinite(ref) and ref > 0 else 1.0)
     s = d["s"][m]
     o = np.argsort(s)
     cols = np.empty((s_grid.size, rel_us.size))
@@ -272,7 +275,10 @@ def _aligned(d, lo, hi, s_grid, rel_us):
 
 
 def fig_radargrams(out, spec, data, ref_key, lo, hi):
-    rel_us = np.arange(REL_US[0], REL_US[1], REL_DT_NS * 1e-3)
+    # the line declares the depth window its bed actually sits in; using it
+    # rather than a fixed one stops a shallow line being plotted mostly empty
+    y0, y1 = spec.figures.radargram.y_us
+    rel_us = np.arange(y0, y1, REL_DT_NS * 1e-3)
     s_grid = np.linspace(lo, hi, N_ALONG)
     keys = list(data)
     fig, axs = plt.subplots(len(keys), 1, figsize=(11.0, 2.8 * len(keys)),
@@ -305,10 +311,10 @@ def fig_radargrams(out, spec, data, ref_key, lo, hi):
                      f"{np.nanmedian(d['agl'][m]):.0f} m AGL | dt {dt:.2f} ns "
                      f"| {off}", fontsize=8, loc="left")
     axs[-1, 0].set_xlabel(f"along-track s on the {ref_key} axis (km)")
-    fig.suptitle(f"{spec.name}: passes trimmed to the shared span and "
-                 "aligned on each pass's own surface pick\n"
-                 "dB rel each trace's own surface peak; common depth axis in "
-                 "us, NOT bin index, since the lattices differ", fontsize=10)
+    fig.suptitle(f"{spec.name}  |  trimmed to the shared span, aligned on "
+                 "each pass's own surface pick\n"
+                 "dB rel each pass's MEDIAN surface return (one scalar per "
+                 "panel); depth in us, not bin index", fontsize=9)
     fig.tight_layout()
     fp = out / "radargrams.png"
     fig.savefig(fp, dpi=130)
