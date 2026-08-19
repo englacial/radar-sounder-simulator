@@ -1,9 +1,17 @@
-"""Study-line registry of tools/run_basal_clutter.py (--line): the Antarctic
-line IS the module default (activation must be a no-op, so its behaviour and
-its caches cannot drift), the Greenland pair is a sibling config block, and
-the per-line guards reject features that line does not have wired.
+"""Study-line definitions (config/lines/*.yaml) and the activation mechanism.
 
-Config level only -- no network, no DEMs, no kernels, no simulation."""
+Lines are DATA now, so this file asserts structural invariants that must hold
+for whatever lines are shipped, parametrised over the registry, rather than
+hardcoding two line names. The previous version pinned 'antarctic_2016' and
+'greenland_2014_2017' throughout and broke wholesale the moment the lines
+were renamed -- which is the failure mode a data-driven registry is supposed
+to remove.
+
+Line-SPECIFIC facts (frame slices, altitudes, scout quirks) live in the YAML
+with their provenance; what is checked here is that the YAML is coherent and
+that activation is total and reversible.
+
+Config level only -- no network, no DEMs, no kernels."""
 
 import sys
 from pathlib import Path
@@ -15,45 +23,62 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import run_basal_clutter as rbc  # noqa: E402
+from clutter_lines import LINES_DIR, load_all  # noqa: E402
 
-# ONE source of truth: the module exports the list activate_line may rebind,
-# so a name added to a registry entry but forgotten there fails loudly rather
-# than leaking between lines.
-LINE_GLOBALS = rbc.LINE_GLOBALS
+LINE_NAMES = sorted(rbc.LINES)
+SPECS = load_all()
 
 
-@pytest.fixture
-def line_sandbox():
-    """Snapshot/restore every line-specific global: activate_line mutates
-    module state, and no test may leak it into another."""
-    saved = {k: getattr(rbc, k) for k in LINE_GLOBALS}
-    yield rbc.activate_line
+@pytest.fixture(autouse=True)
+def _restore_line():
+    """AUTOUSE: activate_line mutates module state and run() activates without
+    restoring, so any test here can leak a line into the next MODULE. It did:
+    the line tests left Greenland bound and test_basal_processing then read
+    Greenland's REAL_CHAIN."""
+    saved = {k: getattr(rbc, k) for k in rbc.LINE_GLOBALS}
+    yield
     for k, v in saved.items():
         setattr(rbc, k, v)
 
 
-# --------------------------------------------------- module defaults
-def test_module_defaults_are_the_antarctic_line():
-    """The Antarctic line is the module default, so its registry entry is
-    EMPTY and activating it changes nothing (bit-identical caches)."""
-    assert rbc.LINE == rbc.ANTARCTIC_LINE
-    # the entry mirrors the live module globals: activating it RESTORES the
-    # defaults rather than being a no-op that leaves another line in place
-    entry = rbc.LINES[rbc.ANTARCTIC_LINE]
-    assert set(entry) == set(LINE_GLOBALS)
-    assert all(entry[k] == getattr(rbc, k) for k in LINE_GLOBALS)
-    assert rbc.SEASON == "2016_Antarctica_DC8"
-    assert rbc.REF_SEASON == rbc.SEASON
-    assert rbc.CRS == "EPSG:3031"
-    assert rbc.ORDER == ["low", "mid", "high"]
-    assert rbc.GL_S_KM == 69.7
-    assert rbc.UNSUPPORTED == ()
+@pytest.fixture
+def line_sandbox():
+    return rbc.activate_line
 
 
-def test_activating_the_antarctic_line_is_a_no_op(line_sandbox):
-    before = {k: getattr(rbc, k) for k in LINE_GLOBALS}
-    line_sandbox(rbc.ANTARCTIC_LINE)
-    assert {k: getattr(rbc, k) for k in LINE_GLOBALS} == before
+# ------------------------------------------------------- the registry itself
+def test_at_least_one_line_is_defined():
+    assert LINE_NAMES, "no line definitions found in config/lines/"
+    assert set(LINE_NAMES) == {fp.stem for fp in LINES_DIR.glob("*.yaml")}
+
+
+def test_default_line_is_derived_from_the_registry():
+    """Two hardcoded line names went stale the moment the lines were
+    renamed. The default must come from what is actually defined."""
+    assert rbc.DEFAULT_LINE in rbc.LINES
+
+
+@pytest.mark.parametrize("name", LINE_NAMES)
+def test_every_line_supplies_every_global(name):
+    """Activation is TOTAL: a line that omitted a name would leave the
+    previous line's value bound."""
+    assert set(rbc.LINES[name]) == set(rbc.LINE_GLOBALS)
+
+
+@pytest.mark.parametrize("name", LINE_NAMES)
+def test_activation_round_trips(name, line_sandbox):
+    """Switching to a line and back restores every global, with no help from
+    the sandbox fixture -- otherwise any process driving two lines (a batch
+    runner, a notebook) is quietly wrong."""
+    before = {k: getattr(rbc, k) for k in rbc.LINE_GLOBALS}
+    for other in LINE_NAMES:
+        line_sandbox(other)
+    line_sandbox(name)
+    line_sandbox(name)                                    # idempotent
+    after = {k: getattr(rbc, k) for k in rbc.LINE_GLOBALS}
+    assert after == rbc.LINES[name]
+    if name == before["LINE"]:
+        assert after == before
 
 
 def test_unknown_line_rejected(line_sandbox):
@@ -61,303 +86,161 @@ def test_unknown_line_rejected(line_sandbox):
         line_sandbox("no_such_line")
 
 
-def test_registry_entries_only_touch_line_globals():
-    for name, entry in rbc.LINES.items():
-        stray = sorted(set(entry) - set(LINE_GLOBALS))
-        assert not stray, f"{name} rebinds non-line globals {stray}"
+# ------------------------------------------------------ internal coherence
+@pytest.mark.parametrize("name", LINE_NAMES)
+def test_pass_and_segment_tables_agree(name):
+    spec = SPECS[name]
+    segs = set(spec.segments)
+    assert set(spec.order) <= set(spec.passes)
+    assert spec.reference.pass_key in spec.passes
+    for key, ps in spec.passes.items():
+        assert set(ps.segments) == segs, f"{key} segment mismatch"
+    for key, syn in spec.synthetic_passes.items():
+        assert syn.carrier in spec.passes, f"{key} carrier undefined"
+    for sname, seg in spec.segments.items():
+        if seg.k_anchor:
+            assert seg.k_anchor in segs
 
 
-def test_activation_round_trips(line_sandbox):
-    """Greenland -> Antarctic restores EVERY line global, with no help from
-    the sandbox fixture. Before the Antarctic entry was populated this
-    silently left Greenland's values bound, so any process driving two lines
-    (a batch runner, a notebook) was quietly wrong."""
-    before = {k: getattr(rbc, k) for k in LINE_GLOBALS}
-    line_sandbox(rbc.GREENLAND_LINE)
-    assert rbc.CRS == "EPSG:3413"
-    line_sandbox(rbc.ANTARCTIC_LINE)
-    assert {k: getattr(rbc, k) for k in LINE_GLOBALS} == before
+@pytest.mark.parametrize("name", LINE_NAMES)
+def test_frame_ids_are_strings_not_yaml_integers(name):
+    """YAML 1.1 reads '_' as a digit separator, so an unquoted 20161105_05_006
+    silently becomes an integer."""
+    spec = SPECS[name]
+    for f in spec.reference.frames:
+        assert isinstance(f, str), f
+    for ps in spec.passes.values():
+        assert isinstance(ps.param_frame, str)
+        for parts in ps.segments.values():
+            for p in parts:
+                assert isinstance(p.frame, str), p
 
 
-# --------------------------------------------------- Greenland registry
-@pytest.fixture
-def greenland(line_sandbox):
-    line_sandbox(rbc.GREENLAND_LINE)
-    return rbc
+@pytest.mark.parametrize("name", LINE_NAMES)
+def test_synthetics_inherit_their_carrier(name, line_sandbox):
+    """A synthetic pass re-flies a real pass's line: same frames, same system
+    params, same season -- only the altitude changes."""
+    line_sandbox(name)
+    spec = SPECS[name]
+    for key, syn in spec.synthetic_passes.items():
+        p, carrier = rbc.PASSES[key], rbc.PASSES[syn.carrier]
+        assert p["synthetic_msl_m"] == syn.altitude_m
+        assert p["agl_med_m"] is None            # no measured AGL exists
+        assert p["param_frame"] == carrier["param_frame"]
+        assert p.get("season") == carrier.get("season")
+        assert p["instrument"] == carrier["instrument"]
+        for s in spec.segments:
+            assert p[s] == carrier[s]
 
 
-def test_greenland_radargram_window_reaches_its_bed(greenland):
-    """The Antarctic -1..13.5 us framing leaves the Greenland bed (26-31 us
-    below the surface) entirely off-panel -- which also hides the bed
-    overlay. The window must cover the deepest bed with margin."""
-    y_lo, y_hi = greenland.RADARGRAM_Y_US
-    assert y_lo <= 0.0
-    assert y_hi >= 34.0            # deepest bed 31.2 us + margin
-    lo_db, _ = greenland.RADARGRAM_DB
-    assert lo_db <= -115.0         # low pass bed sits ~108 dB down
+@pytest.mark.parametrize("name", LINE_NAMES)
+def test_profile_plot_window_stays_inside_the_data_window(name):
+    """PROFILE_REL_US is a DATA extent: plotting beyond it shows nothing,
+    because the values were never computed."""
+    lg = rbc.LINES[name]
+    assert lg["PROFILE_X_US"][1] <= lg["PROFILE_REL_US"][1]
+    assert lg["PROFILE_X_US"][0] >= lg["PROFILE_REL_US"][0]
 
 
-def test_greenland_profile_window_reaches_its_bed(greenland):
-    """PROFILE_REL_US is a DATA window: too short and the bed returns are
-    never computed, so the decomposition figures cannot show them however the
-    axes are set. All three profile figures share these globals."""
-    lo, hi = greenland.PROFILE_REL_US
-    assert lo <= -1.0
-    assert hi >= 32.0              # deepest bed 31.2 us
-    x_lo, x_hi = greenland.PROFILE_X_US
-    assert x_hi >= 34.0
-    assert x_hi <= hi              # never plot beyond what was computed
-    db_lo, _ = greenland.PROFILE_DB
-    assert db_lo <= -130.0         # bed returns sit ~108 dB down
-    # framing is consistent with the radargram panels
-    assert greenland.PROFILE_X_US[1] == greenland.RADARGRAM_Y_US[1]
+@pytest.mark.parametrize("name", LINE_NAMES)
+def test_derived_globals_are_consistent(name):
+    lg = rbc.LINES[name]
+    assert set(lg["SEGMENTS"]) == set(lg["S0_KM"])
+    assert set(lg["SEGMENTS"]) == set(lg["N_TRACES_BY_SEGMENT"])
+    assert set(lg["SEGMENTS"]) == set(lg["DECOMP_S_KM"])
+    assert lg["OUT_DEFAULT"].name == lg["CASE_PREFIX"]
+    assert lg["RSSNR_CACHE"].parent == lg["OUT_DEFAULT"]
+    ref = lg["REF_PASS"]
+    assert lg["REF_SEASON"] == rbc.LINES[name]["PASSES"][ref].get(
+        "season", lg["SEASON"])
+    lam = 299792458.0 / (lg["FC_HZ"] * float(np.sqrt(3.17)))
+    assert lg["LAM_ICE_M"] == pytest.approx(lam, rel=1e-12)
 
 
-def test_panel_scale_shared_vs_per_panel(line_sandbox):
-    """The Antarctic line keeps the shared ramp byte-identically; Greenland
-    scales each panel to its own robust percentiles so a 6 dB bed is not
-    rendered as 5% of a 125 dB gray ramp (the 2026-08-12 bisection)."""
+# ------------------------------------------------- call-time global lookups
+def test_rel_mean_profile_extent_follows_the_active_line(line_sandbox):
+    """Default arguments must resolve at CALL time, not bind at import, or
+    activating a line silently keeps the previous line's extent."""
+    dt, n = 33.3333e-9, 4000
+    twtt = np.arange(n) * dt
+    P, t_ref, norm = np.ones((3, n)), np.full(3, 400 * dt), np.ones(3)
+    seen = {}
+    for name in LINE_NAMES:
+        line_sandbox(name)
+        rel, _ = rbc.rel_mean_profile(P, twtt, dt, t_ref, norm)
+        seen[name] = rel[-1]
+        assert rel[-1] == pytest.approx(rbc.PROFILE_REL_US[1], abs=0.05)
+    assert len(seen) == len(LINE_NAMES)
+
+
+def test_panel_scale_follows_the_active_line(line_sandbox):
     rng = np.random.default_rng(0)
     img = rng.normal(-90.0, 6.0, size=(200, 300))
-    lo, hi, note = rbc._panel_scale(img, -120.0, 5.0)
-    assert (lo, hi) == (-120.0, 5.0) and note == ""      # shared: untouched
-    line_sandbox(rbc.GREENLAND_LINE)
-    assert rbc.RADARGRAM_SCALE == "per_panel"
-    lo, hi, note = rbc._panel_scale(img, -120.0, 5.0)
-    assert -120.0 < lo < hi < 5.0                        # tightened to data
-    assert (hi - lo) < 60.0                              # far narrower ramp
-    assert "dB" in note
+    for name in LINE_NAMES:
+        line_sandbox(name)
+        lo, hi, note = rbc._panel_scale(img, -120.0, 5.0)
+        if rbc.RADARGRAM_SCALE == "shared":
+            assert (lo, hi) == (-120.0, 5.0) and note == ""
+        else:
+            assert -120.0 < lo < hi < 5.0 and "dB" in note
 
 
-def test_antarctic_profile_window_is_the_module_default():
-    assert rbc.PROFILE_REL_US == (-1.5, 14.5)
-    assert rbc.PROFILE_X_US == (-1.0, 13.5)
-    assert rbc.PROFILE_DB == (-110.0, 5.0)
+def test_bed_roughness_guard_uses_the_active_carrier(line_sandbox):
+    """bed_rough_nadir_db defaulted f0 to a module constant bound at import,
+    so it computed the guard at the WRONG carrier after a line switch."""
+    vals = {}
+    for name in LINE_NAMES:
+        line_sandbox(name)
+        vals[rbc.FC_HZ] = rbc.bed_rough_nadir_db(0.1)
+    for fc, v in vals.items():
+        assert v == pytest.approx(
+            -(0.1 * 2 * (2 * np.pi * fc * np.sqrt(3.17) / 299792458.0)) ** 2
+            * 10.0 / np.log(10.0), rel=1e-9)
 
 
-def test_rel_mean_profile_extent_follows_the_active_line(line_sandbox):
-    """The default arguments must be resolved at CALL time, not bound at
-    import, or activating a line would silently keep the Antarctic extent."""
-    dt = 33.3333e-9
-    n = 2200
-    twtt = np.arange(n) * dt
-    P = np.ones((3, n))
-    t_ref = np.full(3, 400 * dt)
-    norm = np.ones(3)
-    rel_a, _ = rbc.rel_mean_profile(P, twtt, dt, t_ref, norm)
-    assert rel_a[-1] == pytest.approx(14.5, abs=0.05)
-    line_sandbox(rbc.GREENLAND_LINE)
-    rel_g, _ = rbc.rel_mean_profile(P, twtt, dt, t_ref, norm)
-    assert rel_g[-1] == pytest.approx(34.5, abs=0.05)
-    assert rel_g[-1] > rel_a[-1]
-
-
-def test_antarctic_radargram_window_is_the_module_default():
-    """The Antarctic line must not override the framing (its entry is empty),
-    so its figures are unchanged."""
-    assert rbc.RADARGRAM_Y_US == (-1.0, 13.5)
-    assert rbc.RADARGRAM_DB == (-90.0, 5.0)
-
-
-def test_greenland_line_identity(greenland):
-    assert greenland.LINE == "greenland_2014_2017"
-    assert greenland.CRS == "EPSG:3413"            # Greenland polar stereo
-    assert greenland.FC_HZ == 195e6                # scout: 180-210 MHz
-    assert greenland.CASE_PREFIX == "greenland_pair"
-    assert greenland.OUT_DEFAULT.name == "greenland_pair"
-    assert greenland.GL_S_KM is None               # all grounded interior ice
-
-
-def test_greenland_is_a_pair_plus_one_synthetic(greenland):
-    assert greenland.ORDER == ["low", "high"]
-    assert greenland.SYNTHETIC_KEYS == ("syn14km",)
-    assert set(greenland.PASSES) == {"low", "high", "syn14km"}
-
-
-def test_greenland_mixes_two_seasons(greenland):
-    """The pair flies two seasons -- the per-pass season key is what makes
-    the frame loads and the chunk cache keys correct."""
-    assert greenland.PASSES["low"]["season"] == "2014_Greenland_P3"
-    assert greenland.PASSES["high"]["season"] == "2017_Greenland_P3"
-    for key, spec in greenland.PASSES.items():
-        assert greenland.pass_season(spec) == spec["season"], key
-    # the synthetic pass rides the LOW pass, so it inherits its season
-    syn = greenland.PASSES["syn14km"]
-    assert syn["season"] == greenland.PASSES["low"]["season"]
-    assert syn["param_frame"] == greenland.PASSES["low"]["param_frame"]
-
-
-def test_pass_season_falls_back_to_the_line_season():
-    """Antarctic specs carry no per-pass season."""
-    for spec in rbc.PASSES.values():
-        assert "season" not in spec
-        assert rbc.pass_season(spec) == rbc.SEASON
-
-
-def test_greenland_segments_are_self_consistent(greenland):
-    assert greenland.SEGMENTS == ("pilot", "full")
-    for d in (greenland.S0_KM, greenland.DECOMP_S_KM,
-              greenland.N_TRACES_BY_SEGMENT):
-        assert set(d) == set(greenland.SEGMENTS)
-    # scout segments: pilot s 25-35 km, full s 11-40 km
-    assert greenland.S0_KM == {"pilot": 25.0, "full": 11.0}
-
-
-def test_greenland_decomposition_location_is_inside_every_segment(greenland):
-    """The single-trace decomposition s must land inside the segment it is
-    the default for, else analyze_pass silently clamps to an end trace."""
-    spans = {"pilot": (25.0, 35.0), "full": (11.0, 40.0)}
-    for seg, (lo, hi) in spans.items():
-        for v in np.atleast_1d(greenland.DECOMP_S_KM[seg]):
-            assert lo <= float(v) <= hi, (seg, v)
-
-
-def test_greenland_slices_are_one_frame_per_pass_and_match_in_length(greenland):
-    """Scout: neither segment crosses a frame boundary and the two passes'
-    trace counts match to one trace (the 0.05% figure in the note)."""
-    for seg in greenland.SEGMENTS:
-        lens = {}
-        for key in greenland.ORDER:
-            parts = greenland.PASSES[key][seg]
-            assert len(parts) == 1, (key, seg)
-            (fid, (a, b)), = parts
-            assert b > a
-            lens[key] = b - a
-        assert abs(lens["low"] - lens["high"]) <= 1, (seg, lens)
-
-
-def test_greenland_passes_are_not_reversed(greenland):
-    """Both passes fly increasing anchor s, so no slice reversal / roll
-    negation applies (unlike the Antarctic high passes)."""
-    for key, spec in greenland.PASSES.items():
-        assert spec["rev"] is False, key
-
-
-def test_greenland_pick_axis_is_the_low_pass(greenland):
-    assert greenland.REF_PASS == "low"
-    assert greenland.REF_SEASON == greenland.PASSES["low"]["season"]
-    assert greenland.REF_FRAMES == ("20140421_01_069", "20140421_01_070")
-    # the segment frame must be one of the pick-axis frames
-    (fid, _), = greenland.PASSES["low"]["full"]
-    assert fid in greenland.REF_FRAMES
-
-
-def test_greenland_altitude_ratio_is_the_scouted_one(greenland):
-    lo = greenland.PASSES["low"]["agl_med_m"]
-    hi = greenland.PASSES["high"]["agl_med_m"]
-    assert 5.0 < hi / lo < 5.6                      # scout: 5.3x
-    assert greenland.PASSES["syn14km"]["synthetic_msl_m"] == 14000.0
-    assert greenland.PASSES["syn14km"]["agl_med_m"] is None
-
-
-def test_greenland_synthetic_carries_the_lpa_facet_scale(greenland):
-    """The 2-trace gate found the syn500km/syn300km Fresnel-zone LPA failure
-    class at 14 km on this line; 0.7x is the recorded fix."""
-    assert greenland.PASSES["syn14km"]["facet_spacing_scale"] == 0.7
-    for key in greenland.ORDER:
-        assert "facet_spacing_scale" not in greenland.PASSES[key]
-
-
-def test_greenland_measured_caveats_record_the_scout_quirks(greenland):
-    txt = greenland.MEASURED_CAVEATS
-    for needle in ("33.3859", "img_comb", "hanning", "param_combine",
-                   "BedMachine Greenland v5", "post-bed"):
-        assert needle in txt, needle
-
-
-def test_greenland_rssnr_store_is_its_own_pinned_snapshot(greenland):
-    """The RSSNR mapping must read the GREENLAND store, pinned, and cache to
-    this line's own output tree -- never the Antarctic store or cache."""
-    assert greenland.RSSNR_STORE["prefix"] == "icechunk/greenland"
-    assert greenland.RSSNR_SNAPSHOT == "GEAMAHQ7BRVPG9SQPK20"
-    assert greenland.RSSNR_SNAPSHOT != rbc.LINES[rbc.ANTARCTIC_LINE].get(
-        "RSSNR_SNAPSHOT", "3YH47013745B2T5ZZR50")
-    assert greenland.RSSNR_CACHE.parent.name == "greenland_pair"
-    # the pick axis (and therefore the RSSNR fetch) is the LOW pass
-    assert greenland.REF_FRAMES == ("20140421_01_069", "20140421_01_070")
-
-
-def test_greenland_rssnr_is_now_wired(greenland):
-    assert "gamma_rssnr" not in greenland.UNSUPPORTED
-    assert "demogorgn_bed" in greenland.UNSUPPORTED
-
-
-def test_antarctic_rssnr_config_untouched():
-    assert rbc.LINES[rbc.ANTARCTIC_LINE]["RSSNR_SNAPSHOT"] == \
-        rbc.RSSNR_SNAPSHOT
-    assert rbc.RSSNR_STORE["prefix"] == "icechunk/antarctica"
-    assert rbc.RSSNR_SNAPSHOT == "3YH47013745B2T5ZZR50"
-    # the level-anchor deficit is NOT a line property any more
-    assert "LEVEL_ANCHOR_DEFICIT_DB" not in rbc.LINE_GLOBALS
-
-
-# --------------------------------------------------- per-line guards
-def _run_kwargs(**kw):
-    kw.setdefault("line", rbc.GREENLAND_LINE)
-    return kw
-
-
-def test_unsupported_features_rejected_on_greenland(line_sandbox):
-    assert set(rbc.LINES[rbc.GREENLAND_LINE]["UNSUPPORTED"]) == {
-        "demogorgn_bed", "hybrid"}
-    with pytest.raises(ValueError, match="demogorgn_bed is not wired"):
-        rbc.run(**_run_kwargs(demogorgn_bed=True))
-
-
-def test_relocated_rssnr_run_demands_an_explicit_companion(line_sandbox):
-    """--out-name moves the case dir, so the constant-gamma companion can no
-    longer be found at its derived sibling path: the run must say where it
-    is rather than silently re-simulating 66 minutes of chunks."""
-    with pytest.raises(ValueError, match="--companion-name"):
-        rbc.run(**_run_kwargs(segment="full", gamma_rssnr=True,
-                              out_name="somewhere_else"))
-
-
-def test_missing_companion_directory_is_caught(line_sandbox, tmp_path):
-    with pytest.raises(ValueError, match="companion runs not found"):
-        rbc.run(**_run_kwargs(segment="full", gamma_rssnr=True,
-                              out_root=str(tmp_path),
-                              out_name="a", companion_name="no_such_dir"))
-
-
-def test_segment_not_on_this_line_rejected(line_sandbox):
-    with pytest.raises(ValueError, match="has no 'full_line' segment"):
-        rbc.run(**_run_kwargs(segment="full_line"))
-    with pytest.raises(ValueError, match="has no 'extended' segment"):
-        rbc.run(**_run_kwargs(segment="extended"))
-
-
-def test_synthetic_not_defined_on_this_line_rejected(line_sandbox):
-    with pytest.raises(ValueError, match="defines no pass"):
-        rbc.run(**_run_kwargs(passes=["syn500km"]))
-    with pytest.raises(ValueError, match="defines no pass"):
-        rbc.run(**_run_kwargs(passes=["syn30km"]))
-
-
-def test_antarctic_guards_still_reject_their_own_combinations():
-    """The line guards must not have displaced the pre-existing ones."""
-    with pytest.raises(ValueError, match="full_line"):
-        rbc.run(segment="full_line")                # needs --demogorgn-bed
-    with pytest.raises(ValueError, match="hybrid"):
-        rbc.run(segment="full", demogorgn_bed=True, picked_bed=True)
-
-
-def test_real_chain_is_line_specific(line_sandbox):
-    """The measured product's processing chain describes the season that flew
-    the line. It used to be one module constant named for 2016, so every
-    GREENLAND run recorded 2016 DC-8 provenance (14.85 m posting, "2016
-    param_csarp ... scout-verified") for a 2014/2017 P-3 pair."""
-    ant = rbc.REAL_CHAIN
-    assert "2016" in ant["sar"]
-    line_sandbox(rbc.GREENLAND_LINE)
-    assert rbc.REAL_CHAIN is not ant
-    assert "2014/2017 P-3" in rbc.REAL_CHAIN["sar"]
-    assert "2016" not in rbc.REAL_CHAIN["sar"]
-    # the assumption that used to be inherited silently is now stated
-    assert "ASSUMED" in rbc.REAL_CHAIN["combine"]
-    assert "33.3859" in rbc.REAL_CHAIN["caveat"]
+# ----------------------------------------------------- cross-line isolation
+def test_real_chain_is_not_shared_between_lines():
+    """It used to be ONE constant named for 2016, so every line's runs
+    recorded 2016 DC-8 provenance."""
+    chains = [rbc.LINES[n]["REAL_CHAIN"] for n in LINE_NAMES]
+    for c in chains:
+        assert {"product", "sar", "combine", "window"} <= set(c)
+    if len(chains) > 1:
+        assert any(a != b for a, b in zip(chains, chains[1:]))
 
 
 def test_line_globals_covers_every_registry_key():
     for name, entry in rbc.LINES.items():
         assert set(entry) <= set(rbc.LINE_GLOBALS), name
+
+
+def test_level_anchor_deficit_is_not_a_line_property():
+    """D is solved against a particular run at a particular attenuation, so
+    it belongs to that run pair -- a line default is how the Antarctic 14.8
+    stayed wired in after the adopted config moved on."""
+    assert "LEVEL_ANCHOR_DEFICIT_DB" not in rbc.LINE_GLOBALS
+
+
+# ------------------------------------------------------------ run() guards
+def test_segment_not_on_this_line_rejected():
+    line = rbc.DEFAULT_LINE
+    with pytest.raises(ValueError, match="has no .* segment"):
+        rbc.run(line=line, segment="no_such_segment")
+
+
+def test_pass_not_on_this_line_rejected():
+    line = rbc.DEFAULT_LINE
+    with pytest.raises(ValueError, match="defines no pass"):
+        rbc.run(line=line, segment=rbc.LINES[line]["SEGMENTS"][0],
+                passes=["no_such_pass"])
+
+
+@pytest.mark.parametrize(
+    "name", [n for n in LINE_NAMES if rbc.LINES[n]["UNSUPPORTED"]])
+def test_unsupported_features_rejected(name):
+    for feat in rbc.LINES[name]["UNSUPPORTED"]:
+        if feat != "demogorgn_bed":
+            continue
+        with pytest.raises(ValueError, match="not wired"):
+            rbc.run(line=name, segment=rbc.LINES[name]["SEGMENTS"][0],
+                    demogorgn_bed=True)

@@ -111,6 +111,18 @@ config, so a line that measures differently says so out loud. Neither shipped
 line currently overrides anything, and a test asserts that — so the first one
 has to be deliberate.
 
+`level_anchor` is the one rule the whole study shares for solving the
+level-anchor deficit D — contamination-aware (`bed·10^(D/10) + surface =
+measured`), median over the passes whose bed returns stand ≥ 10 dB clear of
+their surface returns. The exclusion is **derived** from the decomposition
+rather than hand-listed, and one threshold reproduces both lines' previously
+hand-made pass selections. Regenerate D from a completed constant-gamma run
+with:
+
+```
+uv run python tools/derive_level_deficit.py <run_dir>
+```
+
 Note `compute.chunk_m` is tuning rather than science, but it sets the chunk
 count, which is part of the cache key: changing it re-simulates everything.
 

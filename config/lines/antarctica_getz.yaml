@@ -1,23 +1,23 @@
 schema_version: 1
-name: antarctic_2016
+name: antarctica_getz
 identity:
-  case_prefix: basal_clutter
+  case_prefix: antarctica_getz
   season: 2016_Antarctica_DC8
   crs: EPSG:3031
   fc_hz: 190000000.0
   grounding_line_s_km: 69.7
 reference:
-  pass: low
+  pass: real_low
   frames:
   - '20161105_05_005'
   - '20161105_05_006'
   - '20161105_05_007'
 order:
-- low
-- mid
-- high
+- real_low
+- real_9km
+- real_10km
 passes:
-  low:
+  real_low:
     agl_med_m: 442.0
     param_frame: '20161105_05_005'
     instrument: mcords3_dc8_2016
@@ -59,7 +59,7 @@ passes:
         slice:
         - 0
         - 3327
-  mid:
+  real_9km:
     agl_med_m: 9150.0
     param_frame: '20161028_05_006'
     instrument: mcords3_dc8_2016
@@ -109,7 +109,7 @@ passes:
         slice:
         - 223
         - 3337
-  high:
+  real_10km:
     agl_med_m: 10684.0
     param_frame: '20161031_07_005'
     instrument: mcords3_dc8_2016
@@ -156,24 +156,12 @@ passes:
         - 3044
         - 3341
 synthetic_passes:
-  syn30km:
-    altitude_m: 30000.0
-    carrier: low
-  syn500km:
-    altitude_m: 500000.0
-    carrier: low
-    facet_spacing_scale: 0.7
-    why: |-
-      build_facets strides the DEM by ONE integer for both axes and the +-45 km scene window is anisotropic (~37 x ~21 m pixels), so the beta = 0.5 spacing (333 m) builds 450 m facets along x and trips the Fresnel-zone LPA check (ratio 1.35). 0.7x snaps the stride down one notch and brings the built facets back under the limit; measured in the 2-trace pilot.
-  syn14km:
+  syn_14km:
     altitude_m: 14000.0
-    carrier: low
-  syn300km:
-    altitude_m: 300000.0
-    carrier: low
-    facet_spacing_scale: 0.7
-    why: |-
-      2-trace pilot (2026-08-10): the beta = 0.5 spacing (258 m) builds 351 m facets on the anisotropic +-38 km window (LPA ratio 1.36 -- the syn500km failure class), so the same 0.7x request clears the check.
+    carrier: real_low
+  syn_20km:
+    altitude_m: 20000.0
+    carrier: real_low
 segments:
   pilot:
     s0_km: 30.0

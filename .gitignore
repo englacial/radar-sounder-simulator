@@ -1,10 +1,5 @@
-# Ignore generated outputs except the committed verification report
+# Generated outputs are not version controlled (see e3a7f22)
 outputs/**
-!outputs/verification/
-!outputs/verification/report.html
-!outputs/firn_investigation/
-!outputs/firn_investigation/report.html
-!outputs/firn_investigation/figure_grid.png
 .venv/
 __pycache__/
 *.egg-info

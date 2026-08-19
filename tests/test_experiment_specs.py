@@ -25,11 +25,19 @@ from clutter_spec import (SCHEMA_VERSION, BedSource,  # noqa: E402
 EXPERIMENTS = ROOT / "config" / "experiments"
 
 
+# Read from the registry rather than hardcoded: the lines get renamed, and a
+# schema test should not break when they do.
+LINE = rbc.DEFAULT_LINE
+SEG = next(s for s in rbc.LINES[LINE]["SEGMENTS"] if s != "full_line")
+HYBRID_LINE = next((n for n in rbc.LINES
+                    if "full_line" in rbc.LINES[n]["SEGMENTS"]), None)
+
+
 def _doc(**over):
     """Minimal valid spec document, overridable by dotted-free kwargs."""
     d = {"schema_version": SCHEMA_VERSION,
          "meta": {"name": "demo"},
-         "run": {"line": "antarctic_2016", "segment": "full",
+         "run": {"line": LINE, "segment": SEG,
                  "out_name": "demo", "physics": {"att_db_per_km": 20.0}}}
     for k, v in over.items():
         d["run"][k] = v
@@ -72,15 +80,17 @@ def test_meta_name_must_equal_out_name():
         RunSpec.model_validate(d)
 
 
+@pytest.mark.skipif(HYBRID_LINE is None, reason="no line has a full_line segment")
 def test_hybrid_and_full_line_imply_each_other():
     """run() infers the hybrid bed from the segment; the spec states it, so a
     disagreement must fail rather than silently building a different bed."""
     with pytest.raises(ValueError, match="imply each other"):
-        RunSpec.model_validate(_doc(bed={"source": "hybrid"}))   # segment full
-    d = _doc(segment="full_line", bed={"source": "demogorgn"})
+        RunSpec.model_validate(_doc(bed={"source": "hybrid"}))   # not full_line
+    d = _doc(line=HYBRID_LINE, segment="full_line",
+             bed={"source": "demogorgn"})
     with pytest.raises(ValueError, match="imply each other"):
         RunSpec.model_validate(d)
-    ok = RunSpec.model_validate(_doc(segment="full_line",
+    ok = RunSpec.model_validate(_doc(line=HYBRID_LINE, segment="full_line",
                                      bed={"source": "hybrid"}))
     assert ok.to_run_kwargs()["demogorgn_bed"] is True
 
@@ -117,31 +127,44 @@ def test_bed_enum_expands_to_the_historical_booleans():
 def test_synthetics_are_requested_by_naming_them_in_passes():
     """The line definition declares which synthetics exist, so naming one in
     passes: is the whole request -- the old --add-<N>km flags are gone."""
-    kw = RunSpec.model_validate(
-        _doc(passes=["low", "mid", "high", "syn30km", "syn500km"])
-    ).to_run_kwargs()
-    assert kw["passes"] == ["low", "mid", "high", "syn30km", "syn500km"]
+    want = list(rbc.LINES[LINE]["ORDER"]) + list(
+        rbc.LINES[LINE]["SYNTHETIC_KEYS"])
+    kw = RunSpec.model_validate(_doc(passes=want)).to_run_kwargs()
+    assert kw["passes"] == want
     assert not any(k.startswith("add_") for k in kw)
     assert RunSpec.model_validate(_doc()).to_run_kwargs()["passes"] is None
 
 
-def test_companion_accepts_bool_or_directory_name():
+def test_companion_is_a_flag_not_another_experiments_name():
+    """The constant-gamma arm runs INSIDE this experiment now, in its own
+    cache directory, so there is no sibling run to name and no cross-
+    experiment dependency to resolve."""
     off = RunSpec.model_validate(
         _doc(processing={"companion": False})).to_run_kwargs()
-    assert off["companion"] is False and off["companion_name"] is None
-    named = RunSpec.model_validate(
-        _doc(processing={"companion": "sibling_dir"})).to_run_kwargs()
-    assert named["companion"] is True
-    assert named["companion_name"] == "sibling_dir"
+    assert off["companion"] is False
+    on = RunSpec.model_validate(
+        _doc(processing={"companion": True})).to_run_kwargs()
+    assert on["companion"] is True
+    assert "companion_name" not in on
+    with pytest.raises(ValueError):          # a directory name is no longer legal
+        RunSpec.model_validate(_doc(processing={"companion": "sibling_dir"}))
 
 
 def test_derived_number_carries_its_provenance():
+    """`how` is free prose. It was briefly {value, from, how}, but `from`
+    implied a resolvable link that nothing resolved -- a name that could go
+    stale while looking authoritative."""
     d = _doc(reflectivity={"gamma_from_rssnr": True, "anchor": "level",
-                           "level_deficit_db": {"value": 3.56, "from": "att20",
-                                                "how": "contamination-aware"}})
+                           "level_deficit_db": {
+                               "value": 3.56,
+                               "how": "contamination-aware, from att20"}})
     spec = RunSpec.model_validate(d)
     assert spec.to_run_kwargs()["level_deficit_db"] == 3.56
-    assert spec.run.reflectivity.level_deficit_db.from_run == "att20"
+    assert "att20" in spec.to_run_kwargs()["level_deficit_note"]
+    with pytest.raises(ValueError, match="[Ee]xtra"):
+        RunSpec.model_validate(_doc(reflectivity={
+            "gamma_from_rssnr": True, "anchor": "level",
+            "level_deficit_db": {"value": 1.0, "from": "somewhere"}}))
     # a bare float still works for the trivial cases
     d2 = _doc(reflectivity={"gamma_from_rssnr": True, "anchor": "level",
                             "level_deficit_db": -7.89})
@@ -152,12 +175,8 @@ def test_derived_number_carries_its_provenance():
 # ------------------------------------------------------------- round trip
 # spec name -> the output directory it claims to build
 RECORDED = {
-    "ant_att20_klevel": "outputs/basal_clutter/hypothesis_tests/att20_klevel",
-    "ant_extended": "outputs/basal_clutter/extended",
-    "ant_full_line": "outputs/basal_clutter/full_line",
-    "gl_full_pbed_proc_att14": "outputs/greenland_pair/full_pbed_proc_att14",
-    "gl_full_pbed_proc_att14_rssnr":
-        "outputs/greenland_pair/full_pbed_proc_att14_rssnr",
+    "ant_full_line": "outputs/antarctica_getz/full_line",
+    "gl_full_pbed_rssnr": "outputs/greenland_geikie/full_pbed_rssnr",
 }
 # ant_full_line was built STAGED (one --passes per invocation), so its
 # recorded config holds only the last pass -- see foundations review A3.

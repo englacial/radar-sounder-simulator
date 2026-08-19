@@ -81,3 +81,73 @@ def test_line_scoped_constants_resolve_at_call_time():
     import inspect
     for fn in (rbc.roughness_rms, rbc._smooth_db):
         assert inspect.signature(fn).parameters["win_m"].default is None
+
+
+# ------------------------------------------------- the level-anchor rule
+def test_level_anchor_rule_is_declared_once():
+    a = load_analysis().level_anchor
+    assert a.method == "contamination_aware"
+    assert a.min_bed_over_surface_db == 10.0
+    assert a.combine == "median"
+    assert rbc.LEVEL_ANCHOR_RULE == a.model_dump()
+
+
+# Recorded bed-window levels (dB rel own surface peak) of the constant-gamma
+# runs the two adopted deficits were solved from.
+_ANT = {"real_low":  dict(measured=-54.28, sim_bed=-53.00, sim_surface=-89.83),
+        "real_9km":  dict(measured=-45.95, sim_bed=-50.08, sim_surface=-68.86),
+        "real_10km": dict(measured=-46.11, sim_bed=-49.68, sim_surface=-71.95)}
+_GL = {"low":  dict(measured=-107.76, sim_bed=-99.87, sim_surface=-110.20),
+       "high": dict(measured=-83.95,  sim_bed=-94.33, sim_surface=-90.19)}
+
+
+def test_one_rule_reproduces_the_antarctic_deficit():
+    """The Antarctic line already solved the contamination-aware form, so
+    unifying must leave its number untouched."""
+    d, rec = rbc.solve_level_deficit(_ANT)
+    assert d == pytest.approx(3.56, abs=0.01)
+    assert rec["n_qualifying"] == 3           # all margins are +18 dB or more
+
+
+def test_the_same_rule_moves_the_greenland_deficit():
+    """Greenland used a PLAIN difference, which credits the bed with power
+    the surface supplied. Invisible on the Antarctic line, worth 3.67 dB
+    here, where the bed stands only 10.3 dB clear."""
+    d, rec = rbc.solve_level_deficit(_GL)
+    assert d == pytest.approx(-11.56, abs=0.01)
+    plain, _ = rbc.solve_level_deficit(
+        _GL, {**rbc.LEVEL_ANCHOR_RULE, "method": "plain_difference"})
+    assert plain == pytest.approx(-7.89, abs=0.01)      # the retired value
+    assert d - plain == pytest.approx(-3.67, abs=0.02)
+
+
+def test_surface_dominated_passes_are_excluded_automatically():
+    """The exclusion is DERIVED from the decomposition, not a hand-written
+    pass list -- one threshold reproduces both lines' hand-made choices."""
+    _, rec = rbc.solve_level_deficit(_GL)
+    assert rec["per_pass"]["low"]["qualifies"] is True
+    assert rec["per_pass"]["high"]["qualifies"] is False
+    assert rec["per_pass"]["high"]["bed_over_surface_db"] < 0
+    _, ant = rbc.solve_level_deficit(_ANT)
+    assert all(v["qualifies"] for v in ant["per_pass"].values())
+
+
+def test_no_qualifying_pass_fails_loudly():
+    """If attenuation dims the bed until nothing clears the threshold, D is
+    unsolvable -- it must say so, not fall back to a contaminated pass."""
+    only_high = {"high": _GL["high"]}
+    with pytest.raises(ValueError, match="unsolvable"):
+        rbc.solve_level_deficit(only_high)
+
+
+def test_committed_specs_state_the_rule_solved_value():
+    """A spec's D must equal what the rule yields; otherwise the declared
+    convention and the number in use disagree."""
+    from clutter_spec import load_spec
+    exp = ROOT / "config" / "experiments"
+    want = {"ant_full_line": 3.56, "gl_full_pbed_rssnr": -11.56}
+    for name, d in want.items():
+        fp = exp / f"{name}.yaml"
+        if not fp.exists():
+            pytest.skip(f"{name} not present")
+        assert load_spec(fp).run.reflectivity.deficit_db == pytest.approx(d)

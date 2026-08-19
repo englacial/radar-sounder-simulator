@@ -1,7 +1,7 @@
 schema_version: 1
-name: greenland_2014_2017
+name: greenland_geikie01_transit
 identity:
-  case_prefix: greenland_pair
+  case_prefix: greenland_geikie
   season: 2014_Greenland_P3
   crs: EPSG:3413
   fc_hz: 195000000.0
@@ -56,6 +56,10 @@ synthetic_passes:
     facet_spacing_scale: 0.7
     why: |-
       2-trace geometry/phase gate (2026-08-11), the syn500km/syn300km failure class: the beta = 0.5 spacing (54.97 m) builds 79.2 m facets on the anisotropic +-12.05 km window and trips the Fresnel-zone LPA check (limit 54.4 m, ratio 1.46). 0.7x snaps the DEM stride down one notch, clears the check with no warnings, and leaves the field finite with nadir surface/bed delays matching the picks to <= 15 ns.
+  syn20km:
+    altitude_m: 20000.0
+    carrier: low
+    facet_spacing_scale: 0.7
 segments:
   pilot:
     s0_km: 25.0

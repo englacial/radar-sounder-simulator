@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 SCHEMA_VERSION = 1
 
@@ -50,13 +50,16 @@ class _Base(BaseModel):
 
 
 class Derived(_Base):
-    """A number computed from another run, carrying its own provenance."""
+    """A number computed from another run, carrying its own provenance.
+
+    ``how`` is free prose: where it came from and how it was solved. It was
+    briefly a structured {value, from, how}, but the ``from`` field implied a
+    resolvable link that nothing ever resolved -- a name that could go stale
+    while looking authoritative. Provenance that is only ever read by humans
+    should look like prose."""
 
     value: float
-    from_run: str | None = Field(default=None, alias="from")
     how: str | None = None
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class ExtraPass(_Base):
@@ -137,13 +140,10 @@ class Reflectivity(_Base):
 
     @property
     def deficit_note(self):
-        """Where D came from, recorded beside it in the run config so the
+        """How D was solved, recorded beside it in the run config so the
         number and its derivation cannot drift apart."""
         d = self.level_deficit_db
-        if not isinstance(d, Derived):
-            return None
-        src = f"derived from {d.from_run}" if d.from_run else "supplied"
-        return f"{src}: {d.how}" if d.how else src
+        return d.how if isinstance(d, Derived) else None
 
 
 class Physics(_Base):
@@ -160,9 +160,11 @@ class Processing(_Base):
     chain: Literal["none", "standard"] = "none"
     proc_cache: bool = False
     posting_div: int = 1
-    # true -> derived sibling directory; a string names it explicitly;
-    # false -> skip the constant-gamma companion acceptance analysis.
-    companion: bool | str = True
+    # Whether to run the constant-gamma comparison arm the RSSNR acceptance
+    # analysis scores against. It runs INSIDE this experiment, in this
+    # experiment's own cache directory, so there is no companion run to name
+    # and no other experiment to depend on.
+    companion: bool = True
 
     @model_validator(mode="after")
     def _posting_div_needs_chain(self):
@@ -319,8 +321,6 @@ class RunSpec(_Base):
             "proc_cache": proc.proc_cache,
             "posting_div": proc.posting_div,
             "companion": bool(proc.companion),
-            "companion_name": (proc.companion
-                               if isinstance(proc.companion, str) else None),
             "trace_decomp_s_km": fig.trace_decomp_s_km,
             "per_pass_figs": fig.per_pass,
             "plot_s_max_km": fig.plot_s_max_km,

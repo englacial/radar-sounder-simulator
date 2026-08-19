@@ -104,8 +104,8 @@ def test_shipped_lines_pin_instruments_that_cover_their_segments():
 
 def test_a_pass_pinned_outside_its_instrument_segment_is_refused():
     lines = load_lines()
-    ln = lines["greenland_2014_2017"]
-    ln.passes["low"].param_frame = "19990101_99_001"
+    ln = lines[rbc.DEFAULT_LINE]
+    next(iter(ln.passes.values())).param_frame = "19990101_99_001"
     with pytest.raises(ValueError, match="does not cover"):
         validate_line_instruments(lines, load_all())
 
@@ -114,7 +114,9 @@ def test_a_synthetic_instrument_cannot_be_a_line_default():
     """Swapping one in is an experiment's job; pinning one as what FLEW the
     line would be a false provenance claim."""
     lines = load_lines()
-    lines["greenland_2014_2017"].passes["low"].instrument = "haps_60mhz"
+    synth = next(n for n, i in load_all().items()
+                 if i.source.kind == "stated")
+    next(iter(lines[rbc.DEFAULT_LINE].passes.values())).instrument = synth
     with pytest.raises(ValueError, match="SYNTHETIC"):
         validate_line_instruments(lines, load_all())
 
@@ -156,12 +158,26 @@ def test_swapping_the_instrument_forks_the_cache_key():
 
 # ------------------------------------------------------------ swap wiring
 def test_extra_pass_rides_its_carrier_and_carries_its_own_radar():
-    from clutter_spec import load_spec
-    kw = load_spec(
-        ROOT / "config" / "experiments" / "gl_haps60_at_14km.yaml"
-    ).to_run_kwargs()
-    ep = kw["extra_passes"]["haps14km"]
-    assert ep["carrier"] == "low"            # real geometry, real picks
+    """Both swap axes at once: a carrier pass's geometry re-flown at a new
+    altitude with a different radar. Built inline rather than read from a
+    shipped spec -- the capability must hold whether or not any committed
+    experiment currently exercises it."""
+    from clutter_spec import RunSpec
+    line = rbc.DEFAULT_LINE
+    seg = next(s for s in rbc.LINES[line]["SEGMENTS"] if s != "full_line")
+    carrier = rbc.LINES[line]["ORDER"][0]
+    synth = next(n for n, i in load_all().items()
+                 if i.source.kind == "stated")
+    kw = RunSpec.model_validate({
+        "schema_version": 1, "meta": {"name": "demo"},
+        "run": {"line": line, "segment": seg, "out_name": "demo",
+                "passes": [carrier, "swapped"],
+                "extra_passes": {"swapped": {
+                    "carrier": carrier, "altitude_m": 14000.0,
+                    "instrument": synth}},
+                "physics": {"att_db_per_km": 20.0}}}).to_run_kwargs()
+    ep = kw["extra_passes"]["swapped"]
+    assert ep["carrier"] == carrier          # real geometry, real picks
     assert ep["altitude_m"] == 14000.0       # new altitude
-    assert ep["instrument"] == "haps_60mhz"  # new radar
-    assert kw["passes"] == ["low", "high", "haps14km"]
+    assert ep["instrument"] == synth         # new radar
+    assert kw["passes"] == [carrier, "swapped"]

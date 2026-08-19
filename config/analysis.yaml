@@ -51,6 +51,22 @@ bed_tail:
   guard_db: 10.0
   floor_margin_db: 3.0          # measured tail counted floor-limited below
 
+level_anchor:
+  # How the level-anchor deficit D is solved. ONE rule for every line.
+  # The two adopted configurations used to differ: the Antarctic line solved
+  # the contamination-aware form, the Greenland line took a plain difference.
+  # That was invisible on the Antarctic line -- surface sits 19-37 dB below
+  # the bed there, so the two agree to 0.02 dB -- and worth 3.67 dB on the
+  # Greenland line, where the bed stands only 10.3 dB clear of the surface
+  # returns. Unified on the contamination-aware form, which is what the
+  # Greenland derivation note argued for and did not apply.
+  method: contamination_aware     # solve bed*10^(D/10) + surface = measured
+  # A pass whose bed window is surface-dominated cannot constrain the bed
+  # level: its total moves barely at all with attenuation and would drag D
+  # toward the clutter floor. Same threshold the bed-tail guard uses.
+  min_bed_over_surface_db: 10.0
+  combine: median                 # across the qualifying real passes
+
 smoothing:
   profile_m: 1000.0             # bed-brightness correlation scale (~ RSSNR)
   roughness_detrend_m: 5000.0   # along-track bed-roughness detrend window

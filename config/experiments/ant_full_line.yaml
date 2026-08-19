@@ -1,29 +1,37 @@
 schema_version: 1
 
 meta:
-  name:     full_line
-  status:   adopted
-  requires: [ant_att20_klevel]
-  backs:    basal_clutter_pilot_findings.md "FULL_LINE" (2026-08-10)
-  runtime:  ~65 min sim for all five passes (high ~13, low ~28)
+  name:    full_line
+  status:  adopted
+  role:    benchmark
+  backs: >
+    basal_clutter_pilot_findings.md "FULL_LINE" (2026-08-10) and the handoff's
+    Antarctic headline. THE experiment for this line: the whole 148.45 km
+    overlapping line at the configuration att20_klevel established on the
+    50 km segment (A = 20 dB/km, level-anchored K = +7.92 dB). The two
+    narrower runs it grew out of -- att20_klevel (18-68 km, where K was
+    calibrated) and extended (0-69.7 km) -- were retired when the
+    experiments were consolidated to one per line; they are in git history
+    if the intermediate extents are ever needed again.
+  runtime: ~65 min sim for all five passes on a cold cache
   note: >
-    The whole 148.45 km overlapping line, grounding line included. HYBRID
-    bed: grounded side is the DEMOGORGN realization exactly as in
-    ant_extended, floating side is the LOW pass's radar basal picks (the
-    ice-ocean shelf base), linearly blended over GL -> GL+4 km.
-    CAVEAT (foundations review A3): run() overwrites metrics.json per
-    invocation, so a staged per-pass build leaves a canonical file holding
-    only the LAST pass. Run this spec in ONE process until the metrics
-    merge lands; if you must stage, keep metrics_<pass>.json copies.
+    HYBRID bed: the grounded side (s < 69.7 km) is the DEMOGORGN realization,
+    the floating side is the LOW pass's radar basal picks -- the ice-ocean
+    shelf base -- linearly blended over a 4 km ramp past the grounding line.
+    BedMachine/DEMOGORGN report the SEAFLOOR beyond the GL, not the reflector
+    the radar sees, and are never used there.
+    K is pinned to the 'full' segment (segments.full_line.k_anchor) and never
+    re-derived on the longer line, so this stays directly comparable to the
+    50 km family it descends from.
 
 run:
-  line:     antarctic_2016
+  line:     antarctica_getz
   segment:  full_line
   out_name: full_line
-  passes:   [low, mid, high, syn14km, syn300km]
+  passes:   [real_low, real_9km, real_10km, syn_14km, syn_20km]
 
   bed:
-    source:         hybrid
+    source:         hybrid          # implies segment full_line, and vice versa
     demogorgn_seed: 0
 
   reflectivity:
@@ -31,10 +39,19 @@ run:
     anchor:           level
     level_deficit_db:
       value: 3.56
-      from:  att20
       how: >
-        Reused verbatim from the 50 km mapping; K = +7.92 dB is NEVER
-        re-derived on the longer line (K_ANCHOR_SEGMENT pins it to 'full').
+        Solved under the study-wide level_anchor rule (config/analysis.yaml):
+        contamination-aware, bed*10^(D/10) + surface = measured on the
+        bed-window decomposition, median over the passes whose bed returns
+        stand >= 10 dB clear of their surface returns. All three real passes
+        qualify here (margins +36.8 / +18.8 / +22.3 dB) giving
+        -1.28 / +4.11 / +3.56 -> median +3.56.
+        Source: the median-anchored A = 20 sweep run ('att20' in
+        claude_notes/att_sweep.sh), which has no spec of its own -- so this
+        number cannot yet be regenerated from a committed configuration.
+        `uv run python tools/derive_level_deficit.py <run_dir>` reproduces it
+        from that run's metrics; solving D in-run from this experiment's own
+        constant-gamma arm is the standing fix.
 
   physics:
     att_db_per_km:     20.0
@@ -43,7 +60,7 @@ run:
   processing:
     chain:      standard
     proc_cache: true
-    companion:  false
+    companion:  false     # no RSSNR acceptance analysis on this run
 
   figures:
     trace_decomp_s_km: [31.0, 120.0]   # grounded trough + mid-shelf floating

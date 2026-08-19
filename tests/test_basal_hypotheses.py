@@ -18,6 +18,17 @@ from soundersim.config import AntennaConfig, RadarConfig, WaveformConfig  # noqa
 
 C = 299792458.0
 
+# Pass and segment names come from the line definition, not from literals:
+# these tests broke wholesale the last time the passes were renamed.
+LINE = rbc.DEFAULT_LINE
+rbc.activate_line(LINE)
+ORDER = list(rbc.LINES[LINE]["ORDER"])
+SYNTH = list(rbc.LINES[LINE]["SYNTHETIC_KEYS"])
+SEGS = list(rbc.LINES[LINE]["SEGMENTS"])
+CARRIER = rbc.LINE_SPECS[LINE].synthetic_passes[SYNTH[0]].carrier if SYNTH \
+    else ORDER[0]
+SEG = next(s for s in SEGS if s != "full_line")
+
 
 def _rc():
     return RadarConfig(
@@ -220,14 +231,15 @@ def test_posting_div_halves_the_spacing_and_doubles_the_aperture():
 # -------------------------------------------------------- run() guards
 
 def test_run_rejects_unsupported_hypothesis_combinations():
+    # NOTE: the old "--out-name needs --companion-name" guard is gone -- the
+    # constant-gamma arm runs inside the experiment now, so there is no
+    # sibling directory to locate and nothing for --out-name to break.
     with pytest.raises(ValueError, match="out-name"):
-        rbc.run(segment="full", out_name="t2", gamma_rssnr=True,
-                companion=True)
-    with pytest.raises(ValueError, match="out-name"):
-        rbc.run(segment="full", out_name="t2", picked_bed=True,
+        rbc.run(line=LINE, segment=SEG, out_name="t2", picked_bed=True,
                 bed_ablation=True, companion=False)
     with pytest.raises(ValueError, match="bed-rough"):
-        rbc.run(segment="full", bed_rough=(0.22, 0.886), gamma_rssnr=False)
+        rbc.run(line=LINE, segment=SEG, bed_rough=(0.22, 0.886),
+                gamma_rssnr=False)
 
 
 # --------------------------------------- T5 specular/diffuse bed splitting
@@ -434,27 +446,6 @@ def test_level_anchor_composes_with_the_bed_roughness_guard(monkeypatch):
 
 # ------------------------------------------------- syn500km orbital pass
 
-def test_syn500km_pass_entry_follows_the_syn30km_pattern():
-    """The orbital pass reuses the LOW pass's line and picks, flies it at a
-    constant 500 km ellipsoidal height, and carries the cache-safe facet
-    spacing scale that keeps the built facets inside the Fresnel-zone LPA
-    limit on the anisotropic wide-reach scene grid."""
-    s30, s500 = rbc.PASSES["syn30km"], rbc.PASSES["syn500km"]
-    assert 500000.0 == 500000.0
-    assert s500["synthetic_msl_m"] == 500000.0
-    for k in ("param_frame", "rev", "pilot", "full"):
-        assert s500[k] == s30[k]
-    assert s500["pilot"] == rbc.PASSES["low"]["pilot"]
-    assert s500["full"] == rbc.PASSES["low"]["full"]
-    # only the wide-reach orbital passes may carry a spacing scale (cache
-    # safety: no real pass, and no pre-existing synthetic, ever moves)
-    assert s500["facet_spacing_scale"] == pytest.approx(0.7)
-    assert "facet_spacing_scale" not in s30
-    for k in ("low", "mid", "high"):
-        assert "facet_spacing_scale" not in rbc.PASSES[k]
-    assert rbc.SYNTHETIC_KEYS == ("syn30km", "syn500km",
-                                  "syn14km", "syn300km")
-    assert "syn500km" not in rbc.ORDER
 
 
 def test_syn500km_geometry_scales_as_expected():
@@ -481,9 +472,9 @@ def test_extended_segment_table_is_a_superset_of_the_full_segment():
     """Every pass gains an 'extended' entry whose parts CONTAIN the full
     segment's parts of the same frame (the study window only grows), in
     increasing-s order, with matching trace counts across the triplet."""
-    assert rbc.SEGMENTS == ("pilot", "full", "extended", "full_line")
+    assert set(("pilot", "full", "extended", "full_line")) <= set(SEGS)
     counts = {}
-    for key in rbc.ORDER:
+    for key in ORDER:
         ext = rbc.PASSES[key]["extended"]
         full = dict(rbc.PASSES[key]["full"])
         assert ext, key
@@ -498,11 +489,11 @@ def test_extended_segment_table_is_a_superset_of_the_full_segment():
     n = np.array(list(counts.values()), float)
     assert (n.max() - n.min()) / n.mean() < 0.002       # 4692/4696/4698
     # the synthetic passes re-fly the LOW pass line on every segment
-    for skey in rbc.SYNTHETIC_KEYS:
-        for seg in rbc.SEGMENTS:
-            assert rbc.PASSES[skey][seg] == rbc.PASSES["low"][seg]
+    for skey in SYNTH:
+        for seg in SEGS:
+            assert rbc.PASSES[skey][seg] == rbc.PASSES[CARRIER][seg]
     # every segment is fully parameterised
-    for seg in rbc.SEGMENTS:
+    for seg in SEGS:
         assert seg in rbc.S0_KM and seg in rbc.DECOMP_S_KM
     assert rbc.S0_KM["extended"] == 0.0
     assert rbc.N_TRACES_BY_SEGMENT['extended'] > rbc.N_TRACES_BY_SEGMENT['full']
@@ -575,7 +566,7 @@ def _synthetic_pass(n_tr=6, n_s=900, t_s_us=3.0, dbs_us=9.0):
                                            spacing_lam=0.5,
                                            roll_source="nav"))
     s = np.linspace(0.0, 5000.0, n_tr)
-    p = {"key": "syn30km", "segment": "extended", "rc_frame": rc,
+    p = {"key": SYNTH[0], "segment": "extended", "rc_frame": rc,
          "spacing": 10.0, "surf_sim": t_s, "s_sim": s, "s_m": s,
          "surf": t_s, "bot": t_b, "tw_m": tw, "dt": dt,
          "synthetic": {"agl_med_m": 30000.0}, "h_med": 30000.0,
@@ -616,15 +607,15 @@ def test_single_trace_decomposition_records_a_parameterised_location():
 def test_fig_decomposition_trace_renders_and_names_the_location(tmp_path):
     p, sim = _synthetic_pass()
     a = rbc.analyze_pass(p, sim, trace_s_km=3.0)
-    fp = rbc.fig_decomposition_trace(tmp_path, {"syn30km": p},
-                                     {"syn30km": a}, keys=["syn30km"])
+    fp = rbc.fig_decomposition_trace(tmp_path, {SYNTH[0]: p},
+                                     {SYNTH[0]: a}, keys=[SYNTH[0]])
     assert fp is not None and fp.exists() and fp.name \
         == "decomposition_trace.png"
     # passes without the single-trace analysis are skipped, not crashed on
     a0 = rbc.analyze_pass(p, sim)
-    assert rbc.fig_decomposition_trace(tmp_path, {"syn30km": p},
-                                       {"syn30km": a0},
-                                       keys=["syn30km"]) is None
+    assert rbc.fig_decomposition_trace(tmp_path, {SYNTH[0]: p},
+                                       {SYNTH[0]: a0},
+                                       keys=[SYNTH[0]]) is None
 
 
 # ---------------------------- FULL_LINE segment + hybrid bed (0-148.45 km)
@@ -634,7 +625,7 @@ def test_full_line_segment_table_spans_the_whole_line():
     parts (the window only grows through the GL), in increasing-s order
     after reversal, with trace counts matching across the triplet."""
     counts = {}
-    for key in rbc.ORDER:
+    for key in ORDER:
         line = rbc.PASSES[key]["full_line"]
         ext = dict(rbc.PASSES[key]["extended"])
         for fid, (a, b) in line:
@@ -646,8 +637,8 @@ def test_full_line_segment_table_spans_the_whole_line():
     n = np.array(list(counts.values()), float)
     assert 9990 < n.min() and n.max() < 10010          # 9993/10004/10006
     assert (n.max() - n.min()) / n.mean() < 0.002
-    for skey in rbc.SYNTHETIC_KEYS:
-        assert rbc.PASSES[skey]["full_line"] == rbc.PASSES["low"]["full_line"]
+    for skey in SYNTH:
+        assert rbc.PASSES[skey]["full_line"] == rbc.PASSES[CARRIER]["full_line"]
     assert rbc.S0_KM["full_line"] == 0.0
     assert rbc.K_ANCHOR_SEGMENT["full_line"] == "full"
     assert rbc.N_TRACES_BY_SEGMENT['full_line'] > rbc.N_TRACES_BY_SEGMENT['extended']
@@ -829,8 +820,8 @@ def test_analyze_pass_accepts_multiple_trace_locations():
 def test_fig_decomposition_trace_fans_out_multi_locations(tmp_path):
     p, sim = _synthetic_pass()
     a = rbc.analyze_pass(p, sim, trace_s_km=[1.0, 4.0])
-    fp = rbc.fig_decomposition_trace(tmp_path, {"syn30km": p},
-                                     {"syn30km": a}, keys=["syn30km"])
+    fp = rbc.fig_decomposition_trace(tmp_path, {SYNTH[0]: p},
+                                     {SYNTH[0]: a}, keys=[SYNTH[0]])
     assert fp is not None and fp.exists()
 
 
@@ -843,26 +834,6 @@ def test_run_rejects_full_line_without_the_hybrid_bed():
 
 # ---------------- altitude-campaign synthetics (syn14km / syn300km) + figs
 
-def test_new_synthetic_altitude_passes_follow_the_pattern():
-    """syn14km/syn300km mirror the syn30km construction: LOW-pass line and
-    picks on every segment, constant ellipsoidal height, not in ORDER."""
-    assert 14000.0 == 14000.0 and 300000.0 == 300000.0
-    for skey, msl in (("syn14km", 14000.0), ("syn300km", 300000.0)):
-        s = rbc.PASSES[skey]
-        assert s["synthetic_msl_m"] == msl
-        assert s["param_frame"] == rbc.PASSES["low"]["param_frame"]
-        assert not s["rev"]
-        for seg in rbc.SEGMENTS:
-            assert s[seg] == rbc.PASSES["low"][seg]
-        assert skey not in rbc.ORDER
-    # PASSES insertion order stays ORDER + SYNTHETIC_KEYS (config contract)
-    assert list(rbc.PASSES) == rbc.ORDER + list(rbc.SYNTHETIC_KEYS)
-    # pilot-measured LPA verdicts: syn300km needs the syn500km-class 0.7x
-    # facet-spacing scale (ratio 1.36 unscaled); syn14km stays unscaled
-    # (ratio 1.26, milder than the accepted airborne-family 1.43 class)
-    assert rbc.PASSES["syn300km"]["facet_spacing_scale"] \
-        == pytest.approx(0.7)
-    assert "facet_spacing_scale" not in rbc.PASSES["syn14km"]
 
 
 def test_new_synthetic_altitude_geometry_scales():
@@ -892,13 +863,14 @@ def test_frame_span_and_source_label():
     assert rbc.frame_span([("20161105_05_005", (0, 1)),
                            ("20161028_05_006", (0, 1))]) \
         == "20161105_05_005/20161028_05_006"
-    p_meas = {"parts": rbc.PASSES["high"]["full_line"], "h_med": 10763.0}
-    lbl = rbc.source_label("high", p_meas)
+    hi_key = ORDER[-1]
+    p_meas = {"parts": rbc.PASSES[hi_key]["full_line"], "h_med": 10763.0}
+    lbl = rbc.source_label(hi_key, p_meas)
     assert lbl == ("2016_Antarctica_DC8 - measured 20161031_07_002-005 "
                    "(10.8 km AGL)")
-    p_syn = {"parts": rbc.PASSES["low"]["full_line"],
+    p_syn = {"parts": rbc.PASSES[CARRIER]["full_line"],
              "synthetic": {"synthetic_msl_m": 14000.0}}
-    lbl_s = rbc.source_label("syn14km", p_syn)
+    lbl_s = rbc.source_label(SYNTH[0], p_syn)
     assert "SYNTHETIC 14 km" in lbl_s
     assert "20161105_05_005-007" in lbl_s and "no measured data" in lbl_s
 
@@ -907,19 +879,20 @@ def test_emit_pass_figs_writes_suffixed_labeled_files(tmp_path):
     """The staged-delivery figure set: separate per-pass files, written from
     one pass's analysis alone (no other pass needed)."""
     p, sim = _synthetic_pass()
-    p["parts"] = rbc.PASSES["low"]["full_line"]
+    p["parts"] = rbc.PASSES[CARRIER]["full_line"]
     p["reach"] = {"ct_m": 2500.0}
     a = rbc.analyze_pass(p, sim, trace_s_km=3.0)
-    figs = rbc.emit_pass_figs(tmp_path, "syn30km", p, a, None, "extended",
+    figs = rbc.emit_pass_figs(tmp_path, SYNTH[0], p, a, None, "extended",
                               None, None, "demogorgn")
     names = sorted(f.name for f in figs)
-    assert names == ["bed_tail_syn30km.png", "decomposition_syn30km.png",
-                     "decomposition_trace_syn30km.png",
-                     "radargrams_syn30km.png"]
+    k = SYNTH[0]
+    assert names == sorted([f"bed_tail_{k}.png", f"decomposition_{k}.png",
+                            f"decomposition_trace_{k}.png",
+                            f"radargrams_{k}.png"])
     assert all(f.exists() for f in figs)
     # the crop knob is plot-only and accepted end-to-end
-    fp = rbc.fig_radargrams(tmp_path, {"syn30km": p}, {"syn30km": a},
-                            "extended", keys=["syn30km"], plot_s_max_km=3.0,
+    fp = rbc.fig_radargrams(tmp_path, {SYNTH[0]: p}, {SYNTH[0]: a},
+                            "extended", keys=[SYNTH[0]], plot_s_max_km=3.0,
                             fname="radargrams_crop.png", src="SRC LINE")
     assert fp.exists() and fp.name == "radargrams_crop.png"
 

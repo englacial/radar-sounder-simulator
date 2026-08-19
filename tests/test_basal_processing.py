@@ -112,11 +112,18 @@ def test_synth_altitude_below_surface_raises():
         rbc.synth_altitude_fsub(fsub, bot, 100.0)
 
 
-def test_syn30_pass_spec_and_tags():
-    """The synthetic pass rides the LOW pass's frames; the proc tag composes
-    into the coordinator's output-dir name."""
-    spec = rbc.PASSES["syn30km"]
-    assert spec["full"] == rbc.PASSES["low"]["full"]
-    assert spec["synthetic_msl_m"] == 30000.0
+def test_synthetic_pass_spec_and_tags():
+    """A synthetic pass rides its carrier's frames; the proc tag composes
+    into the coordinator's output-dir name. Names come from the line
+    definition rather than literals -- the passes get renamed."""
+    line = rbc.DEFAULT_LINE
+    rbc.activate_line(line)
+    key = rbc.LINES[line]["SYNTHETIC_KEYS"][0]
+    carrier = rbc.LINE_SPECS[line].synthetic_passes[key].carrier
+    spec = rbc.PASSES[key]
+    seg = next(s for s in rbc.LINES[line]["SEGMENTS"])
+    assert spec[seg] == rbc.PASSES[carrier][seg]
+    assert spec["synthetic_msl_m"] == \
+        rbc.LINE_SPECS[line].synthetic_passes[key].altitude_m
     assert rbc.case_tag(True, True, True) == "_pbed_rssnr_proc"
     assert rbc.case_tag(True, True, False) == "_pbed_rssnr"  # existing runs

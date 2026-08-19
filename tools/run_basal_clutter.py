@@ -201,10 +201,6 @@ PICKED_BED_NOTE = (
     "runs are directly comparable.")
 
 
-ANTARCTIC_LINE = "antarctic_2016"
-GREENLAND_LINE = "greenland_2014_2017"
-
-
 # ========================================================================
 # STUDY-LINE REGISTRY (--line): definitions live in config/lines/*.yaml
 # ========================================================================
@@ -216,9 +212,6 @@ GREENLAND_LINE = "greenland_2014_2017"
 #
 # activate_line() still rebinds module globals, so none of the analysis code
 # below knows a line is data rather than a literal.
-ANTARCTIC_LINE = "antarctic_2016"
-GREENLAND_LINE = "greenland_2014_2017"
-
 INSTRUMENTS = clutter_instruments.load_all()
 LINE_SPECS = clutter_lines.load_all()
 clutter_instruments.validate_line_instruments(LINE_SPECS, INSTRUMENTS)
@@ -226,6 +219,12 @@ LINES = {name: spec.to_globals(ROOT) for name, spec in LINE_SPECS.items()}
 # The names a line definition binds. Exported so the tests assert against ONE
 # list; every entry sets all of them, so activation is total and reversible.
 LINE_GLOBALS = tuple(sorted(next(iter(LINES.values()))))
+# The flag front door needs SOME default; a spec always names its line
+# explicitly, so this only affects a bare CLI invocation. Derived from the
+# registry rather than hardcoded -- two hardcoded line names were exactly
+# the kind of literal this migration removed, and they went stale the moment
+# the lines were renamed.
+DEFAULT_LINE = sorted(LINES)[0]
 
 
 # ---- the contract config/analysis.yaml fills ---------------------------
@@ -253,6 +252,7 @@ TAIL_FIT_US: tuple = ()                # robust slope fit window
 TAIL_EXCESS_US: tuple = ()
 TAIL_GUARD_DB: float = 0.0             # sim bed vs surface returns guard
 TAIL_FLOOR_MARGIN_DB: float = 0.0
+LEVEL_ANCHOR_RULE: dict = {}           # how the level deficit D is solved
 CORR_WIN_M: float = 0.0                # bed-brightness smoothing scale
 ROUGH_WIN_M: float = 0.0               # bed-roughness detrend window
 GL_RAMP_KM: float = 0.0                # hybrid-bed blend ramp past the GL
@@ -330,7 +330,7 @@ def activate_line(name):
 
 
 # bind the default line at import; every module global below is a line value
-activate_line(ANTARCTIC_LINE)
+activate_line(DEFAULT_LINE)
 
 
 def pass_season(spec):
@@ -615,6 +615,65 @@ def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi,
 # How level anchoring works. This describes the ALGORITHM and so stays with
 # the code; the per-run number D and the derivation that produced it live in
 # the experiment spec (reflectivity.level_deficit_db: {value, from, how}).
+def solve_level_deficit(per_pass, rule=None):
+    """Solve the level-anchor deficit D (dB) from a constant-gamma run.
+
+    ``per_pass`` maps a pass key to its bed-window levels in dB rel that
+    pass's own surface peak: {"measured", "sim_bed", "sim_surface"} -- the
+    decomposition components already recorded in clutter_<pass>.
+
+    ONE rule for every line (config/analysis.yaml level_anchor). A pass only
+    qualifies if its simulated bed returns stand min_bed_over_surface_db
+    clear of its simulated surface returns: below that its bed window is
+    measuring clutter, its level barely moves with attenuation, and it would
+    drag D toward the clutter floor.
+
+    contamination_aware solves bed*10^(D/10) + surface = measured, i.e. the
+    shift applied to the BED component alone, holding the A-independent
+    surface clutter fixed. plain_difference is measured - sim_bed, which
+    over-credits the bed with power the surface actually supplied; it is kept
+    only so an older number can be reproduced.
+    """
+    rule = dict(rule or LEVEL_ANCHOR_RULE)
+    thr, method = rule["min_bed_over_surface_db"], rule["method"]
+    lin = lambda db: 10.0 ** (db / 10.0)          # noqa: E731
+    rows, used = {}, []
+    for key, v in per_pass.items():
+        meas, bed, surf = v["measured"], v["sim_bed"], v["sim_surface"]
+        if meas is None:                          # synthetic pass
+            continue
+        margin = bed - surf
+        row = {"bed_over_surface_db": round(margin, 2),
+               "qualifies": bool(margin >= thr)}
+        if method == "contamination_aware":
+            resid = lin(meas) - lin(surf)
+            row["d_db"] = (None if resid <= 0 else
+                           round(10.0 * np.log10(resid / lin(bed)), 2))
+            if resid <= 0:
+                row["note"] = ("measured bed window sits BELOW the simulated "
+                               "surface clutter alone: no bed shift solves it")
+        else:
+            row["d_db"] = round(meas - bed, 2)
+        rows[key] = row
+        if row["qualifies"] and row["d_db"] is not None:
+            used.append(row["d_db"])
+    if not used:
+        raise ValueError(
+            f"no pass has bed returns >= {thr} dB above surface returns in "
+            "the bed window, so none can constrain the bed level and D is "
+            f"unsolvable. Per-pass margins: "
+            f"{ {k: v['bed_over_surface_db'] for k, v in rows.items()} }")
+    d = float(np.median(used) if rule["combine"] == "median"
+              else np.mean(used))
+    return round(d, 2), {"deficit_db": round(d, 2), "rule": rule,
+                         "per_pass": rows,
+                         "n_qualifying": len(used),
+                         "note": "D solved under the study-wide level_anchor "
+                         "rule (config/analysis.yaml); passes whose bed "
+                         "window is surface-dominated are excluded and "
+                         "recorded with their margin"}
+
+
 LEVEL_ANCHOR_METHOD = (
     "K_level = K_median + D. The median-anchored K pins the median "
     "|Gamma|^2 to the Fresnel constant, which makes the RECEIVED bed level "
@@ -2979,7 +3038,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         trace_decomp_s_km=None,
         per_pass_figs=False,
         plot_s_max_km=None, proc_cache=False, line=None,
-        companion_name=None, spec_doc=None, spec_path=None,
+        spec_doc=None, spec_path=None,
         instruments=None, extra_passes=None):
     # Always re-activate: this resets PASSES to the line definition, so
     # extra_passes added below cannot leak into a later run in-process.
@@ -3031,26 +3090,6 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         raise ValueError("--out-name relocates the case directory; the "
                          "ablation runs resolve their own sibling "
                          "directories, so run it without --bed-ablation")
-    if out_name and companion and gamma_rssnr and not companion_name:
-        raise ValueError("--out-name relocates the case directory, so the "
-                         "constant-gamma companion can no longer be found "
-                         "at its derived sibling path: pass "
-                         "--companion-name <dir> (the constant-gamma run "
-                         "built with the SAME --att and bed source) or "
-                         "--no-companion")
-    # Resolved and CHECKED here, before any frame/DEM/simulation work: a
-    # missing companion must fail in milliseconds, not after the run.
-    runs_const = None
-    if gamma_rssnr and companion:
-        runs_const = (Path(out_root or OUT_DEFAULT)
-                      / (companion_name
-                         or (segment + case_tag(picked_bed, False, proc,
-                                                demogorgn_bed)))
-                      / "runs")
-        if not runs_const.is_dir():
-            raise ValueError(f"constant-gamma companion runs not found at "
-                             f"{runs_const}: build that run first (same "
-                             "--att and bed source) or pass --no-companion")
     if spec and not gamma_rssnr:
         raise ValueError("--specular-fraction splits the RSSNR-mapped bed "
                          "reflectivity: use it with --gamma-from-rssnr")
@@ -3086,6 +3125,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     out = Path(out_root or OUT_DEFAULT) / (out_name or (segment + tag))
     out.mkdir(parents=True, exist_ok=True)
     runs_dir = out / "runs"
+    # The RSSNR acceptance analysis compares against a CONSTANT-gamma arm of
+    # the same scene. That arm now lives in THIS run's own cache directory
+    # rather than in a separately-named experiment: its chunk rid differs by
+    # the gamma tag, so the two cannot collide, and an experiment no longer
+    # has to know another experiment's directory name to be runnable. On a
+    # warm cache the arm costs nothing; on a cold one it is the same total
+    # work that was previously paid by a separate run.
+    runs_const = runs_dir if (gamma_rssnr and companion) else None
     case = f"{CASE_PREFIX}_{out_name or (segment + tag)}"
     axis = (ref_bed_picks() if (picked_bed or gamma_rssnr or hybrid)
             else None)
@@ -4018,7 +4065,7 @@ def main():
                      "of the flags below (accepts only --out / --force "
                      "alongside it)")
     pre.add_argument("--line", choices=sorted(LINES),
-                     default=ANTARCTIC_LINE)
+                     default=DEFAULT_LINE)
     known = pre.parse_known_args()[0]
     if known.config:
         return main_config()
@@ -4195,12 +4242,6 @@ def main():
                     "location at 120 km). The nearest trace of every pass "
                     "is used and recorded per pass in the config; changing "
                     "it only re-does the analysis, never the simulations")
-    ap.add_argument("--companion-name", default=None,
-                    help="directory name (under --out) of the CONSTANT-gamma "
-                    "companion run the RSSNR acceptance analysis compares "
-                    "against; needed when --out-name relocates this run. It "
-                    "must have been built with the same --att and bed "
-                    "source, else its cached chunks miss and it re-simulates")
     ap.add_argument("--no-bed-overlay", action="store_true",
                     help="drop the bed overlays from the radargram panels "
                     "(default ON: the measured Bottom pick on measured "
@@ -4225,7 +4266,6 @@ def main():
         trace_decomp_s_km=args.trace_decomp_s,
         per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,
         proc_cache=args.proc_cache, line=args.line,
-        companion_name=args.companion_name,
         spec=(None if args.specular_fraction is None
               else (args.specular_fraction, args.spec_tilt_deg,
                     args.diffuse_exponent)))

@@ -19,6 +19,7 @@ the analysis code reads plain constants exactly as it always has.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict
@@ -79,6 +80,12 @@ class BedTail(_Base):
     floor_margin_db: float
 
 
+class LevelAnchor(_Base):
+    method: Literal["contamination_aware", "plain_difference"]
+    min_bed_over_surface_db: float
+    combine: Literal["median", "mean"]
+
+
 class Smoothing(_Base):
     profile_m: float
     roughness_detrend_m: float
@@ -111,6 +118,7 @@ class AnalysisSpec(_Base):
     windows: Windows
     noise_floor: NoiseFloor
     bed_tail: BedTail
+    level_anchor: LevelAnchor
     smoothing: Smoothing
     hybrid_bed: HybridBed
     processing: Processing
@@ -142,6 +150,7 @@ class AnalysisSpec(_Base):
             "TAIL_EXCESS_US": tuple(bt.excess_delays_us),
             "TAIL_GUARD_DB": bt.guard_db,
             "TAIL_FLOOR_MARGIN_DB": bt.floor_margin_db,
+            "LEVEL_ANCHOR_RULE": self.level_anchor.model_dump(),
             "CORR_WIN_M": sm.profile_m,
             "ROUGH_WIN_M": sm.roughness_detrend_m,
             "GL_RAMP_KM": hb.gl_ramp_km,
