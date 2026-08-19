@@ -179,6 +179,11 @@ class LineSpec(_Base):
             if stray:
                 raise ValueError(f"pass {key!r} defines segment(s) "
                                  f"{sorted(stray)} absent from segments:")
+        if self.rssnr is None and "gamma_rssnr" not in self.unsupported:
+            raise ValueError(
+                f"line {self.name!r} configures no rssnr store, so it must "
+                "list 'gamma_rssnr' in unsupported: -- otherwise a run could "
+                "ask for a reflectivity mapping there is no data for")
         for name, seg in self.segments.items():
             if seg.k_anchor and seg.k_anchor not in segs:
                 raise ValueError(f"segment {name!r} anchors K on unknown "
@@ -262,10 +267,14 @@ class LineSpec(_Base):
             "PROFILE_X_US": tuple(self.figures.profile.x_us),
             "PROFILE_DB": tuple(self.figures.profile.db),
         }
-        if self.rssnr is not None:
-            g["RSSNR_SNAPSHOT"] = self.rssnr.snapshot
-            g["RSSNR_STORE"] = self.rssnr.store.model_dump()
-            g["RSSNR_CACHE"] = out_default / "rssnr_anchor.npz"
+        # Every line binds every name -- activation is total -- so a line
+        # with no required-surface-SNR store still supplies the keys, empty.
+        # Such a line must declare gamma_rssnr unsupported (validated below),
+        # so the emptiness can never be reached by a run.
+        g["RSSNR_SNAPSHOT"] = self.rssnr.snapshot if self.rssnr else ""
+        g["RSSNR_STORE"] = (self.rssnr.store.model_dump() if self.rssnr
+                            else {})
+        g["RSSNR_CACHE"] = out_default / "rssnr_anchor.npz"
         return g
 
 

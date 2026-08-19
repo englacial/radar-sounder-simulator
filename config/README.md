@@ -133,7 +133,37 @@ count, which is part of the cache key: changing it re-simulates everything.
 acceptance numbers to score against. Real-instrument lines are the natural
 benchmarks: their measured data is the reference.
 
+## Surveying a line
+
+```
+uv run python tools/line_report.py config/lines/<name>.yaml [--segment S]
+```
+
+Writes to `outputs/line_reports/<line>/<segment>/`: a **map** of the flight
+data used (shared span bold, whole frames faint), **radargrams** trimmed to
+the span every pass shares and aligned on each pass's own surface pick, and
+**metrics.json** — lateral offset, along-track coverage, surface-elevation
+and ice-thickness agreement against the reference pass, and whether the
+passes were even flown on the same fast-time lattice.
+
+Offsets come from each frame's **own nav**, never from the STAC geometry:
+STAC carries a coarse decimation of the track and can misplace it by hundreds
+of metres, which is fine for discovering candidates and useless as a metric.
+Radargrams are in dB rel each trace's own surface peak on a common
+depth-in-µs axis, because absolute product scaling and bin indexing are not
+comparable across seasons.
+
 ## Index
+
+### Lines
+
+| line | kind | passes | notes |
+|---|---|---|---|
+| `antarctica_getz` | altitude | 3 real (0.4/9.2/10.7 km) + 2 synthetic | grounding line at s 69.7 km |
+| `greenland_geikie01_transit` | altitude | 2 real (0.5/2.5 km) + 1 synthetic | `full` and `far` are two windows; the flights diverge up to 1.3 km between them |
+| `greenland_westcoast` | **instrument** | 6 real, all ~470 m AGL | four radars, 195/30 to 315/270 MHz, on one 15.2 km span |
+
+### Experiments
 
 | experiment | line | instruments | status |
 |---|---|---|---|

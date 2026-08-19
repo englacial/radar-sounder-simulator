@@ -1,0 +1,25 @@
+schema_version: 1
+name: mcords_p3_2016_200mhz
+description: 200/100 MHz on the NASA P-3.
+
+# REAL system: every simulated parameter is read from the OPR frame the pass
+# was actually flown on.
+source: {kind: opr_frame}
+segments:            # YYYYMMDD_SS; one segment is one instrument
+  - '20160511_03'
+
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    kind: array
+    n_elements: 7
+    spacing_lam: 0.5
+    roll_source: nav
+
+provenance: >
+  Wider band than the 195/30 P-3 systems (100 vs 30 MHz), so its range resolution is ~3x finer. A distinct system, not a reconfiguration of mcords3_p3_greenland.
+  ANTENNA CAVEAT: n_elements = 7 is the 2017 P-3 centre-array readme value,
+  applied here unverified. It is the least-supported number in this file.

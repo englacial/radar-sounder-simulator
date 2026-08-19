@@ -1,0 +1,25 @@
+schema_version: 1
+name: mcords_c130_2015_315mhz
+description: 315/270 MHz on the NASA C-130 -- a WIDEBAND system.
+
+# REAL system: every simulated parameter is read from the OPR frame the pass
+# was actually flown on.
+source: {kind: opr_frame}
+segments:            # YYYYMMDD_SS; one segment is one instrument
+  - '20150417_02'
+
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    kind: array
+    n_elements: 7
+    spacing_lam: 0.5
+    roll_source: nav
+
+provenance: >
+  270 MHz of bandwidth against the P-3 systems' 30 MHz: ~9x the range resolution on identical geometry. The most useful contrast on this line, and the one most likely to expose resolution-dependent behaviour in the simulator.
+  ANTENNA CAVEAT: n_elements = 7 is the 2017 P-3 centre-array readme value,
+  applied here unverified. It is the least-supported number in this file.

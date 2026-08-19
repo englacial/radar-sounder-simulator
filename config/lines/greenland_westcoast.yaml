@@ -1,0 +1,181 @@
+schema_version: 1
+name: greenland_westcoast
+
+# A REPEAT-PASS INSTRUMENT LINE, not an altitude line.
+#
+# Six flights cross the same ~100 km west-coast transit between 2011 and
+# 2019, and they all fly it at essentially the SAME height -- 419 to 511 m
+# median AGL. What differs is the radar: four distinct systems spanning
+# 195/30 MHz to 315/270 MHz, a 9x range-resolution spread over identical
+# geometry and an ice column of near-constant ~1.25 km. That makes this the
+# natural line for the instrument-swap axis: hold the scene fixed, change the
+# box, and see what the simulator says versus what each radar measured.
+#
+# Discovered 2026-08-18 by projecting every frame in a ~3 km corridor onto
+# the 2019 track (33 candidate frames across 11 collections) and keeping
+# those overlapping >= 5 km within 1 km laterally; offsets below are then
+# re-measured from each frame's OWN nav, which is what
+# tools/line_report.py reports.
+
+identity:
+  case_prefix: greenland_westcoast
+  season: 2019_Greenland_P3
+  crs: EPSG:3413
+  fc_hz: 195000000.0
+  grounding_line_s_km: null
+
+reference:
+  pass: p3_2019
+  frames:
+  - '20190514_01_045'
+  - '20190514_01_046'
+
+# No altitude ordering is possible here -- every pass is within ~90 m of
+# 470 m AGL -- so the order is chronological.
+order:
+- p3_2011
+- c130_2015_205
+- c130_2015_315
+- p3_2016
+- p3_2017
+- p3_2019
+
+passes:
+  p3_2011:
+    agl_med_m: 463.0
+    season: 2011_Greenland_P3
+    param_frame: '20110423_01_039'
+    instrument: mcords_p3_2011
+    reversed: false
+    segments:
+      full:
+      - frame: '20110423_01_039'
+        slice:
+        - 0
+        - 1103
+  c130_2015_205:
+    agl_med_m: 483.0
+    season: 2015_Greenland_C130
+    param_frame: '20150425_02_039'
+    instrument: mcords_c130_2015_205mhz
+    reversed: false
+    segments:
+      full:
+      - frame: '20150425_02_039'
+        slice:
+        - 1618
+        - 2638
+  c130_2015_315:
+    agl_med_m: 501.0
+    season: 2015_Greenland_C130
+    param_frame: '20150417_02_048'
+    instrument: mcords_c130_2015_315mhz
+    reversed: false
+    segments:
+      full:
+      - frame: '20150417_02_048'
+        slice:
+        - 711
+        - 1731
+  p3_2016:
+    agl_med_m: 465.0
+    season: 2016_Greenland_P3
+    param_frame: '20160511_03_038'
+    instrument: mcords_p3_2016_200mhz
+    reversed: false
+    segments:
+      full:
+      - frame: '20160511_03_038'
+        slice:
+        - 2910
+        - 3332
+      - frame: '20160511_03_039'
+        slice:
+        - 0
+        - 597
+  p3_2017:
+    agl_med_m: 511.0
+    season: 2017_Greenland_P3
+    param_frame: '20170510_03_020'
+    instrument: mcords3_p3_greenland
+    reversed: false
+    segments:
+      full:
+      - frame: '20170510_03_020'
+        slice:
+        - 0
+        - 1021
+  p3_2019:
+    agl_med_m: 492.0
+    season: 2019_Greenland_P3
+    param_frame: '20190514_01_045'
+    instrument: mcords_p3_2019
+    reversed: false
+    segments:
+      full:
+      - frame: '20190514_01_045'
+        slice:
+        - 2761
+        - 3333
+      - frame: '20190514_01_046'
+        slice:
+        - 0
+        - 447
+
+segments:
+  # The six-way common span, s 41.30 -> 56.54 km on the 2019 axis. It is
+  # short because the 2011 pass stops at s 56.5 and the 2017 pass starts at
+  # s 41.3; dropping either buys ~10 km, at the cost of an instrument. No
+  # neighbouring frame extends any flight -- each crosses the corridor once.
+  full:
+    s0_km: 41.3
+    n_traces: 74          # ~207 m sim spacing, matching the geikie line
+    decomp_s_km:
+    - 49.0
+
+figures:
+  # ~1.25 km of ice, so the bed sits ~14.8 us below the surface.
+  radargram:
+    y_us: [-1.0, 20.0]
+    db: [-110.0, 5.0]
+    scale: per_panel      # six products with very different dynamic ranges
+  profile:
+    rel_us: [-1.5, 20.5]
+    x_us: [-1.0, 20.0]
+    db: [-130.0, 5.0]
+
+# No required-surface-SNR store is configured for these segments, and this
+# line has no grounding line or Antarctic bed ensemble.
+unsupported:
+- gamma_rssnr
+- demogorgn_bed
+- hybrid
+
+provenance:
+  measured_caveats: >
+    Measured references are CSARP_standard. SIX DIFFERENT PRODUCTS: the
+    fast-time bin ranges from 3.70 ns (2015 C-130 wideband) to 33.33 ns
+    (2011, 2017), so no depth or delay comparison may be made by bin index --
+    only in metres or microseconds on each pass's own lattice. Carrier and
+    bandwidth vary too (195/30, 200/100, 205/50, 315/270 MHz), so the passes
+    do not share a range resolution and a like-for-like clutter comparison
+    has to account for that before it accounts for anything else.
+    TRACK CAVEAT: p3_2016 flies 237 m off the reference track (median, max
+    268 m) where every other pass is within 10 m. Over rough bed that is not
+    the same scene, and any disagreement it shows should be attributed to
+    geometry before it is attributed to the instrument.
+  real_chain:
+    product: CSARP_standard
+    sar: >
+      Per-season CReSIS processing; NOT read from these seasons' param
+      structs. Recorded as an assumption, not a measurement.
+    combine: >
+      Look/decimation convention ASSUMED to be the CReSIS standard. Six
+      seasons across nine years are unlikely to share one convention exactly.
+    window: >
+      Assumed hanning, following the other Greenland lines. Not verified per
+      season on this line.
+    caveat: >
+      This line exists for INSTRUMENT comparison, so its processing
+      provenance is the weakest part of it and the part most worth verifying
+      before any quantitative cross-instrument claim.

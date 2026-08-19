@@ -10,6 +10,7 @@ source: {kind: opr_frame}
 segments:            # YYYYMMDD_SS; one segment is one instrument
   - '20140421_01'
   - '20170424_01'
+  - '20170510_03'    # west-coast transit, same 2017 campaign and params
 
 simulated:
   frequency_Hz:   null      # -> 195 MHz

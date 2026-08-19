@@ -11,6 +11,7 @@ reference:
   frames:
   - '20140421_01_069'
   - '20140421_01_070'
+  - '20140421_01_071'
 order:
 - low
 - high
@@ -32,6 +33,11 @@ passes:
         slice:
         - 736
         - 2675
+      far:
+      - frame: '20140421_01_071'
+        slice:
+        - 1351
+        - 3326
   high:
     agl_med_m: 2483.0
     season: 2017_Greenland_P3
@@ -49,6 +55,11 @@ passes:
         slice:
         - 36
         - 1976
+      far:
+      - frame: '20170424_01_069'
+        slice:
+        - 606
+        - 2580
 synthetic_passes:
   syn14km:
     altitude_m: 14000.0
@@ -71,6 +82,18 @@ segments:
     n_traces: 140
     decomp_s_km:
     - 30.0
+  # FAR segment (added 2026-08-18): the same transit line 110 km further
+  # along, reached by extending the anchor axis to 20140421_01_071 and the
+  # high pass to 20170424_01_069. The two flights DIVERGE in between -- up to
+  # 1.3 km apart over s 40-80 km, and ~250 m over s 105-120 -- so this is a
+  # second study window rather than one long segment. Over s 120-149.6 km
+  # they close back to 18.5 m median (max 63 m), one frame per pass, trace
+  # counts matching to one: structurally the same kind of window as 'full'.
+  far:
+    s0_km: 120.0
+    n_traces: 140
+    decomp_s_km:
+    - 135.0
 figures:
   radargram:
     y_us:

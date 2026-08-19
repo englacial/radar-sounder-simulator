@@ -1,0 +1,25 @@
+schema_version: 1
+name: mcords_p3_2011
+description: 195/30 MHz on the NASA P-3.
+
+# REAL system: every simulated parameter is read from the OPR frame the pass
+# was actually flown on.
+source: {kind: opr_frame}
+segments:            # YYYYMMDD_SS; one segment is one instrument
+  - '20110423_01'
+
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    kind: array
+    n_elements: 7
+    spacing_lam: 0.5
+    roll_source: nav
+
+provenance: >
+  MCoRDS-era P-3 system, 2011. fc/B match the 2014-2019 P-3 systems but eight years separate them, so it is recorded as its own instrument rather than folded into mcords3_p3_greenland: identical carrier and bandwidth are not evidence of identical hardware.
+  ANTENNA CAVEAT: n_elements = 7 is the 2017 P-3 centre-array readme value,
+  applied here unverified. It is the least-supported number in this file.
