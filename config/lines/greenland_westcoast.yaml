@@ -3,11 +3,21 @@ name: greenland_westcoast
 
 # A REPEAT-PASS INSTRUMENT LINE, not an altitude line.
 #
-# Three flights cross the same west-coast transit between 2015 and 2019, all
-# at essentially the same height (419-492 m median AGL) over a near-constant
-# ~1.25 km ice column. What differs is the radar: 195/30, 200/100 and
-# 205/50 MHz, on identical geometry. That makes this the line for the
-# instrument-swap axis, with REAL instruments on both sides of the swap.
+# Two flights cross the same west-coast transit at essentially the same
+# height (419-492 m median AGL) over a near-constant ~1.25 km ice column.
+# What differs is the radar: 195/30 MHz (2019 P-3) vs 200/100 MHz (2016
+# P-3) on identical geometry -- the instrument-swap axis with REAL
+# instruments on both sides of the swap.
+#
+# REMOVED 2026-08-19: the 2015 C-130 pass (20150425_02_039, 205/50 MHz).
+# Its CSARP_standard product has the transmitted-waveform IMAGES (separate
+# waveforms combined to extend dynamic range) incorrectly combined, so the
+# surface and the bed sit on DIFFERENT radiometric scales within one trace.
+# The symptoms were all visible in the first run: a brightness step at the
+# ~10 us img_comb boundary, a measured bed-to-surface ratio of -115 dB
+# (31 dB below the P-3 products over the same bed), and an 87 m rms
+# thickness disagreement. A pass whose surface and bed are not on one scale
+# cannot participate in a surface-referenced instrument comparison.
 #
 # Discovered 2026-08-18 by projecting every frame in a corridor around the
 # 2019 track onto it and keeping the overlaps. Six flights cross this line in
@@ -35,23 +45,10 @@ reference:
 # No altitude ordering is possible -- every pass is within ~75 m of 460 m
 # AGL -- so the order is chronological.
 order:
-- c130_2015_205
 - p3_2016
 - p3_2019
 
 passes:
-  c130_2015_205:
-    agl_med_m: 483.0
-    season: 2015_Greenland_C130
-    param_frame: '20150425_02_039'
-    instrument: mcords_c130_2015_205mhz
-    reversed: false
-    segments:
-      full:
-      - frame: '20150425_02_039'
-        slice:
-        - 0
-        - 3332
   p3_2016:
     agl_med_m: 419.0
     season: 2016_Greenland_P3
@@ -62,12 +59,12 @@ passes:
       full:
       - frame: '20160511_03_038'
         slice:
-        - 1292
+        - 148
         - 3332
       - frame: '20160511_03_039'
         slice:
         - 0
-        - 1290
+        - 3332
   p3_2019:
     agl_med_m: 492.0
     season: 2019_Greenland_P3
@@ -78,18 +75,20 @@ passes:
       full:
       - frame: '20190514_01_045'
         slice:
-        - 1144
+        - 0
         - 3333
       - frame: '20190514_01_046'
         slice:
         - 0
-        - 1140
+        - 3181
 
 segments:
-  # s 17.11 -> 66.89 km on the 2019 axis: the widest window all three reach.
+  # s 0 -> 97.35 km on the 2019 axis: the full two-pass overlap. Grew from
+  # 49.8 km when the 2015 C-130 pass was removed (see below) -- that pass's
+  # coverage was what pinned the window to s 17.1-66.9.
   full:
-    s0_km: 17.1
-    n_traces: 240
+    s0_km: 0.0
+    n_traces: 470
     decomp_s_km:
     - 42.0
 
@@ -113,18 +112,16 @@ unsupported:
 
 provenance:
   measured_caveats: >
-    Measured references are CSARP_standard. THREE DIFFERENT PRODUCTS: the
-    fast-time bin is 9.99 ns (2016), 16.67 ns (2019) and 20.02 ns (2015), so
-    no depth or delay comparison may be made by bin index -- only in metres
-    or microseconds on each pass's own lattice. Carrier and bandwidth vary
-    too (195/30, 200/100, 205/50 MHz), so the passes do not share a range
-    resolution and a like-for-like clutter comparison has to account for that
-    before it accounts for anything else.
-    TRACK CAVEAT: p3_2016 flies ~129 m off the reference track (median over
-    this window, p95 252 m) where c130_2015_205 is within 3.4 m. Over rough
-    bed that is not quite the same scene, and any disagreement it shows
-    should be attributed to geometry before it is attributed to the
-    instrument.
+    Measured references are CSARP_standard. TWO DIFFERENT PRODUCTS: the
+    fast-time bin is 9.99 ns (2016) vs 16.67 ns (2019), so no depth or delay
+    comparison may be made by bin index -- only in metres or microseconds on
+    each pass's own lattice. Bandwidth differs 100 vs 30 MHz (~3x the range
+    resolution), so a like-for-like clutter comparison has to account for
+    that before it accounts for anything else.
+    TRACK CAVEAT: p3_2016 flies ~109 m off the reference track (median over
+    this window, max 295 m). Over rough bed that is not quite the same
+    scene, and any disagreement it shows should be attributed to geometry
+    before it is attributed to the instrument.
   real_chain:
     product: CSARP_standard
     sar: >

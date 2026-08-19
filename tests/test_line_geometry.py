@@ -94,12 +94,16 @@ def test_geikie_transit_is_one_path_through_all_three_frames():
 
 def test_westcoast_is_an_instrument_line_not_an_altitude_line():
     """Every pass flies within ~75 m of 460 m AGL; what varies is the radar.
-    If that stops being true the line's purpose has changed."""
+    If that stops being true the line's purpose has changed. Two passes now:
+    the 2015 C-130 was removed for an img_comb radiometric miscalibration
+    (surface and bed on different scales within one trace)."""
     ln = LINES["greenland_westcoast"]
     agl = [p.agl_med_m for p in ln.passes.values()]
     assert max(agl) - min(agl) < 150.0
     insts = {p.instrument for p in ln.passes.values()}
-    assert len(insts) == len(ln.passes) == 3, insts
+    assert len(insts) == len(ln.passes) == 2, insts
+    assert not any("c130" in k for k in ln.passes), \
+        "the 2015 C-130 pass is radiometrically miscalibrated (img_comb)"
 
 
 def test_a_window_needs_at_least_two_passes_and_the_reference():
