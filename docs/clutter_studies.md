@@ -23,11 +23,14 @@ line registry (`--line`).
   (~−0.71 dB, computed, never configured). The mapping is anchoring-free:
   the former constant K and its median/level anchoring are gone. γ_surface
   in each line's `calibration:` block is either manual `{value, why}` or
-  `solve` (the study default): the config driver zeroes the median
-  bed-level residual over the qualifying measured passes (those whose
-  simulated bed window is bed-dominated) — exact in a seed run plus a
-  verify run, since the received bed level shifts dB-for-dB with the
-  constant. It cannot come from the attenuation regression's intercept
+  `solve` (the study default): the config driver matches the measured
+  bed-window level by power-sum inversion — the modeled surface-clutter
+  floor is subtracted from the measured level before reading the bed, so
+  the solve is exact at any contamination level and needs only a seed run
+  plus a verify run (the bed returns move dB-for-dB with the constant).
+  Passes whose measured window has no headroom above the modeled clutter
+  floor do not vote, and qualifying passes that disagree are flagged as
+  missing physics. It cannot come from the attenuation regression's intercept
   (degenerate with mean bed reflectivity), which is why it needs a
   simulation. Its offset from smooth Fresnel (−11.03 dB) is recorded as a
   per-line surface anomaly, and the solve history lands in

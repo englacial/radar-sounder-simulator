@@ -201,7 +201,8 @@ provenance:
       Verify per season before quantitative cross-frequency claims.
 
 calibration:
-  # solve = zero the qualifying-median RSSNR bed-level residual in-run
+  # solve = match the measured bed-window level in-run (power-sum
+  # inversion, modeled clutter floor subtracted)
   # (study default 2026-08-20); manual history in git (b351f80).
   gamma_surface_db: solve
   att_db_per_km: solve

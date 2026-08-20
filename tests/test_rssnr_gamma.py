@@ -206,23 +206,53 @@ def test_gamma_maps_constant_grid_bitwise_and_incoherent_raises():
 
 
 # ------------------------------------------------- gamma_surface: solve
-def test_qualifying_median_keeps_only_bed_dominated_passes():
-    """The solve's residual comes ONLY from passes whose sim bed window is
-    a bed measurement (bed returns >= margin above surface returns); a
-    clutter-dominated high pass must not drag the solved gamma."""
-    res = {"low": -2.0, "mid": -3.0, "high": +9.0}
-    marg = {"low": 18.0, "mid": 12.5, "high": -4.0}
-    qual, qmed = rbc.gamma_solve_qualifying_median(res, marg, 10.0)
-    assert qual == ["low", "mid"]
-    assert qmed == pytest.approx(-2.5)
+def test_gamma_required_inverts_the_power_sum_exactly():
+    """gamma_required makes S + B(gamma) equal the measured level EXACTLY,
+    whatever the contamination: build a window from known S and B, offset
+    the bed by a known gamma shift, and recover it."""
+    S, B0, shift = -66.0, -70.0, 7.5          # heavy contamination
+    M = 10.0 * np.log10(10 ** (S / 10.0) + 10 ** ((B0 + shift) / 10.0))
+    per, qual, med, spread = rbc.gamma_solve_required(
+        -10.0, {"p": M}, {"p": S}, {"p": B0}, 1.0)
+    assert qual == ["p"] and spread == 0.0
+    assert med == pytest.approx(-10.0 + shift, abs=0.01)
 
 
-def test_qualifying_median_is_nan_when_nothing_qualifies():
-    """No qualifying pass -> NaN, so the driver refuses instead of solving
-    gamma against surface clutter."""
-    qual, qmed = rbc.gamma_solve_qualifying_median(
-        {"a": 1.0}, {"a": 3.0}, 10.0)
-    assert qual == [] and np.isnan(qmed)
+def test_gamma_required_is_seed_invariant():
+    """B moves dB-for-dB with the seed, so gamma_required must not: the
+    verify run lands where the seed run pointed."""
+    S, M = -80.0, -72.0
+    _, _, m1, _ = rbc.gamma_solve_required(-10.0, {"p": M}, {"p": S},
+                                           {"p": -90.0}, 1.0)
+    _, _, m2, _ = rbc.gamma_solve_required(-4.0, {"p": M}, {"p": S},
+                                           {"p": -84.0}, 1.0)
+    assert m1 == pytest.approx(m2, abs=0.011)
+
+
+def test_gamma_solve_disqualifies_windows_without_headroom():
+    """A measured level at or below the modeled clutter floor holds no bed
+    information (no gamma can reproduce it) -> the pass must not vote, and
+    with no qualifying pass at all the median is NaN so the driver
+    refuses."""
+    per, qual, med, spread = rbc.gamma_solve_required(
+        -10.0,
+        {"deep": -75.0, "clear": -60.0},
+        {"deep": -70.0, "clear": -80.0},       # deep: M below clutter
+        {"deep": -80.0, "clear": -75.0}, 1.0)
+    assert per["deep"]["gamma_required_db"] is None
+    assert qual == ["clear"]
+    per2, qual2, med2, _ = rbc.gamma_solve_required(
+        -10.0, {"a": -75.0}, {"a": -74.5}, {"a": -80.0}, 1.0)
+    assert qual2 == [] and np.isnan(med2)
+
+
+def test_gamma_solve_spread_flags_disagreeing_passes():
+    """Two qualifying passes demanding gammas 20 dB apart is the
+    missing-physics signature; the spread must surface it."""
+    per, qual, med, spread = rbc.gamma_solve_required(
+        -10.0, {"a": -60.0, "b": -60.0}, {"a": -90.0, "b": -90.0},
+        {"a": -70.0, "b": -50.0}, 1.0)
+    assert len(qual) == 2 and spread == pytest.approx(20.0, abs=0.1)
 
 
 def test_calibration_gamma_accepts_solve_and_manual():

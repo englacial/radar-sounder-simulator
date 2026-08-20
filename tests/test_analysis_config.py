@@ -113,12 +113,14 @@ def test_gamma_solve_settings_are_declared_once():
     """The gamma-surface solver's knobs live in analysis.yaml, nowhere
     else: seed (the evaluation gamma; -10 matches the retired uniform
     manual default so historic chunk caches stay warm), the verify
-    tolerance, and the qualifying bed-over-surface margin."""
+    tolerance, the qualifying measured-headroom-above-clutter margin, and
+    the disagreement warning threshold."""
     a = load_analysis()
     s = a.gamma_surface_solve
     assert s.seed_db == -10.0
     assert s.tolerance_db == 0.5
-    assert s.min_bed_over_surface_db == 10.0
+    assert s.min_headroom_db == 1.0
+    assert s.spread_warn_db == 6.0
     assert rbc.GAMMA_SURFACE_SOLVE == s.model_dump()
     assert "GAMMA_SURFACE_SOLVE" in rbc.ANALYSIS_GLOBALS
 

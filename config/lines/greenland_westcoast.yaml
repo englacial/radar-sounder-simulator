@@ -220,7 +220,8 @@ provenance:
       before any quantitative cross-instrument claim.
 
 calibration:
-  # solve = zero the qualifying-median RSSNR bed-level residual in-run
+  # solve = match the measured bed-window level in-run (power-sum
+  # inversion, modeled clutter floor subtracted)
   # (study default 2026-08-20). Watch surface_anomaly_db here: a positive
   # anomaly may be genuine mid-May surface wetness (all three flights are
   # melt-onset) or product radiometry -- winter crossovers would separate

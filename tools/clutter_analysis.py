@@ -82,7 +82,8 @@ class BedTail(_Base):
 class GammaSurfaceSolve(_Base):
     seed_db: float
     tolerance_db: float
-    min_bed_over_surface_db: float
+    min_headroom_db: float
+    spread_warn_db: float
 
 
 class AttenuationRegression(_Base):

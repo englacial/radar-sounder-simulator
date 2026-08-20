@@ -567,16 +567,34 @@ def manual_gamma_surface_db():
     return float(CALIBRATION["gamma_surface_db"]["value"])
 
 
-def gamma_solve_qualifying_median(residuals, margins, min_margin_db):
-    """(qualifying pass keys, their median residual) for the gamma-surface
-    solve. A pass qualifies when its SIM bed window is a bed measurement:
-    sim bed returns at least min_margin_db above sim surface returns there
-    -- only then does the bed-level residual respond dB-for-dB to the
-    mapping constant. NaN median = nothing qualifies (the solve must
-    refuse, not extrapolate from clutter-dominated windows)."""
-    qual = [k for k in residuals if margins[k] >= min_margin_db]
-    return qual, (float(np.median([residuals[k] for k in qual])) if qual
-                  else float("nan"))
+def gamma_solve_required(gamma0_db, meas_db, clutter_db, bed_db,
+                         min_headroom_db):
+    """Per-pass gamma_surface reproducing the measured bed-window level.
+
+    The simulated bed window is S + B(gamma): surface returns S fixed, bed
+    returns B moving dB-for-dB with the mapping constant. Inverting
+    M = S + B gives gamma_required = gamma0 + (M (-) S) - B (power
+    subtraction) -- exact at ANY clutter contamination and gamma0-invariant,
+    so the solve is one evaluation plus a verification. A pass qualifies
+    when the measured level stands >= min_headroom_db above the modeled
+    clutter floor; below that (including M < S, where NO gamma can
+    reproduce the window) the bed information is inside the clutter-model
+    error and the pass must not vote. Returns (per_pass, qualifying keys,
+    median, spread); NaN median = nothing qualifies, the solve refuses."""
+    per = {}
+    for k in meas_db:
+        h = meas_db[k] - clutter_db[k]
+        g = None
+        if h > 0.0:
+            g = round(gamma0_db + 10.0 * np.log10(
+                10.0 ** (meas_db[k] / 10.0)
+                - 10.0 ** (clutter_db[k] / 10.0)) - bed_db[k], 2)
+        per[k] = {"headroom_db": round(h, 2), "gamma_required_db": g}
+    qual = [k for k in per if per[k]["headroom_db"] >= min_headroom_db]
+    vals = [per[k]["gamma_required_db"] for k in qual]
+    med = float(np.median(vals)) if qual else float("nan")
+    spread = (round(max(vals) - min(vals), 2) if qual else float("nan"))
+    return per, qual, med, spread
 
 
 def solve_attenuation_regression(s_m, rssnr, thick_m, qc, gl_km=None,
@@ -3536,44 +3554,51 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                         - analyses[k]["meas"]["bed_rel_surf_db"], 2)
                for k in order if analyses[k]["meas"]}
         med = float(np.median(list(res.values()))) if res else float("nan")
-        # QUALIFYING passes: the residual only measures the bed level where
-        # the sim's own bed window IS a bed measurement -- sim bed returns
-        # at least min_bed_over_surface_db above sim surface returns there.
-        # The gamma-solve consumes the qualifying median, never the raw one.
+        # GAMMA-SOLVE SUPPORT: per-pass gamma_required from the power-sum
+        # inversion (clutter-aware, exact); the solve driver consumes the
+        # qualifying median. The bed-over-surface margin stays recorded as
+        # the window-domination diagnostic.
         marg = {k: round(analyses[k]["decomposition"]["bed"]["bed_rel_surf_db"]
                          - analyses[k]["decomposition"]["surface"][
                              "bed_rel_surf_db"], 2)
                 for k in res}
-        qual, qmed = gamma_solve_qualifying_median(
-            res, marg, GAMMA_SURFACE_SOLVE["min_bed_over_surface_db"])
+        per, qual, greq_med, greq_spread = gamma_solve_required(
+            gmap["gamma_surface_db"],
+            {k: analyses[k]["meas"]["bed_rel_surf_db"] for k in res},
+            {k: analyses[k]["decomposition"]["surface"]["bed_rel_surf_db"]
+             for k in res},
+            {k: analyses[k]["decomposition"]["bed"]["bed_rel_surf_db"]
+             for k in res},
+            GAMMA_SURFACE_SOLVE["min_headroom_db"])
         metrics["rssnr_level_residuals"] = {
             "value": round(med, 2), "threshold": None, "op": "record",
             "pass": True,
             "median_residual_db": round(med, 2),
             "per_pass_residual_db": res,
             "per_pass_bed_over_surface_margin_db": marg,
-            "qualifying_passes": qual,
-            "qualifying_median_residual_db": round(qmed, 2),
-            "min_bed_over_surface_db":
-                GAMMA_SURFACE_SOLVE["min_bed_over_surface_db"],
             "gamma_surface_db": gmap["gamma_surface_db"],
             "surface_anomaly_db": gmap["surface_anomaly_db"],
-            # The gamma that would zero each median (received level shifts
-            # dB-for-dB with the mapping constant, so both are exact, not
-            # fitted). The QUALIFYING variant is what a
-            # 'gamma_surface_db: solve' calibration feeds back (main_config
-            # drives the loop); under a manual calibration both stay pure
-            # diagnostics. If the solved value is stable per line it is a
-            # candidate real surface property; if it moves with
-            # configuration it is a chain artifact.
+            # gamma_solve: the power-sum inversion a 'gamma_surface_db:
+            # solve' calibration feeds back (main_config drives the loop);
+            # under a manual calibration it stays a pure diagnostic. If the
+            # required gamma is stable per line it is a candidate real
+            # surface property; if it moves with configuration it is a
+            # chain artifact; if the qualifying passes DISAGREE (spread)
+            # the sim is missing physics in some regime -- e.g. englacial
+            # scattering brightening the measured window.
+            "gamma_solve": {
+                "per_pass": per,
+                "qualifying_passes": qual,
+                "min_headroom_db": GAMMA_SURFACE_SOLVE["min_headroom_db"],
+                "gamma_required_median_db": round(greq_med, 2),
+                "gamma_required_spread_db": greq_spread},
+            # the naive total-field zeroing gamma, kept as a diagnostic
             "gamma_surface_level_match_db": round(
                 gmap["gamma_surface_db"] - med, 2),
-            "gamma_surface_qualifying_match_db": round(
-                gmap["gamma_surface_db"] - qmed, 2),
             "caveat": "per-pass residuals use the TOTAL-field bed window, "
             "which is surface-clutter contaminated on high-altitude passes; "
-            "the qualifying median keeps only passes whose sim bed window "
-            "is bed-dominated by the stated margin",
+            "the gamma_solve block subtracts the modeled clutter floor "
+            "before reading the bed level",
             "implied_reflectivity": {
                 "g2_seg_db": gmap["g2_seg_db"],
                 "g2_pos_frac_seg": gmap["g2_pos_frac_seg"]},
@@ -4158,12 +4183,13 @@ def main_config():
         kw["gamma_surface_db"] = gamma
         out = run(**kw)
     else:
-        # GAMMA-SURFACE SOLVE: zero the qualifying-median bed-level residual.
-        # The received bed level shifts dB-for-dB with the mapping constant,
-        # so one seed evaluation gives the answer exactly and one more run
-        # verifies it (the tolerance absorbs residual surface-return
-        # contamination in the qualifying passes' bed windows). Requires a
-        # gamma_from_rssnr spec with at least one qualifying measured pass.
+        # GAMMA-SURFACE SOLVE: match the measured bed-window level via the
+        # power-sum inversion (metric rssnr_level_residuals.gamma_solve).
+        # gamma_required is seed-invariant by linearity, so the loop is one
+        # seed evaluation plus one verification at the solved median; the
+        # tolerance absorbs the small nonlinearities (surface registration,
+        # gating) a gamma change drags along. Requires a gamma_from_rssnr
+        # spec with at least one qualifying measured pass.
         st = dict(GAMMA_SURFACE_SOLVE)
         g, history, out = float(st["seed_db"]), [], None
         for it in range(3):
@@ -4178,42 +4204,50 @@ def main_config():
                     "gamma_surface: solve needs the rssnr_level_residuals "
                     "metric -- is this a gamma_from_rssnr spec with "
                     "measured passes?")
-            r = lv["qualifying_median_residual_db"]
-            history.append({
-                "gamma_surface_db": g,
-                "qualifying_median_residual_db": r,
-                "qualifying_passes": lv["qualifying_passes"],
-                "per_pass_residual_db": lv["per_pass_residual_db"],
-                "per_pass_bed_over_surface_margin_db":
-                    lv["per_pass_bed_over_surface_margin_db"]})
+            gs = lv["gamma_solve"]
+            r = gs["gamma_required_median_db"]
+            history.append({"gamma_surface_db": g, **gs,
+                            "per_pass_residual_db":
+                                lv["per_pass_residual_db"]})
             if r is None or not np.isfinite(r):
                 raise SystemExit(
-                    "gamma_surface: solve has no qualifying pass (sim bed "
-                    f"window bed-over-surface margins "
-                    f"{lv['per_pass_bed_over_surface_margin_db']}, need >= "
-                    f"{st['min_bed_over_surface_db']} dB). Set a manual "
+                    "gamma_surface: solve has no qualifying pass -- no "
+                    "measured bed window stands >= "
+                    f"{st['min_headroom_db']} dB above the modeled clutter "
+                    f"floor (per pass: {gs['per_pass']}). Set a manual "
                     "gamma_surface_db for this line.")
-            print(f"  qualifying residual {r:+.2f} dB over "
-                  f"{lv['qualifying_passes']}", flush=True)
-            if abs(r) <= st["tolerance_db"]:
+            print(f"  gamma_required {r:+.2f} dB (spread "
+                  f"{gs['gamma_required_spread_db']} dB over "
+                  f"{gs['qualifying_passes']})", flush=True)
+            if (np.isfinite(gs["gamma_required_spread_db"])
+                    and gs["gamma_required_spread_db"]
+                    > st["spread_warn_db"]):
+                print(f"  WARNING: qualifying passes disagree by "
+                      f"{gs['gamma_required_spread_db']} dB (> "
+                      f"{st['spread_warn_db']}): the sim is missing "
+                      "physics in some pass's regime; the median is "
+                      "recorded but treat this line's solved gamma as "
+                      "suspect", flush=True)
+            if abs(r - g) <= st["tolerance_db"]:
                 break
-            g = round(g - r, 2)
+            g = round(r, 2)
         else:
             raise SystemExit(
-                f"gamma_surface: solve did not converge to "
-                f"|residual| <= {st['tolerance_db']} dB in 3 evaluations "
-                f"(history {history}) -- the dB-for-dB linearity assumption "
-                "is broken; inspect the qualifying passes.")
+                f"gamma_surface: solve did not converge to |gamma_required "
+                f"- gamma| <= {st['tolerance_db']} dB in 3 evaluations "
+                f"(history {history}) -- the linearity assumption is "
+                "broken; inspect the qualifying passes.")
         cal_rec["gamma_surface_db"] = g
         cal_rec["gamma_surface_source"] = (
-            "solved (qualifying-median RSSNR bed-level residual zeroed; "
-            "seed run + verify run)")
+            "solved (measured bed-window level matched by power-sum "
+            "inversion, clutter floor subtracted; seed run + verify run)")
         cal_rec["surface_anomaly_db"] = round(
             g - gamma_surface_fresnel_db(), 2)
         cal_rec["gamma_surface_solve_history"] = history
         print(f"gamma-solve done: gamma_surface {g:+.2f} dB (anomaly "
-              f"{cal_rec['surface_anomaly_db']:+.2f}), residual "
-              f"{history[-1]['qualifying_median_residual_db']:+.2f} dB",
+              f"{cal_rec['surface_anomaly_db']:+.2f}), verify "
+              f"gamma_required "
+              f"{history[-1]['gamma_required_median_db']:+.2f} dB",
               flush=True)
     cfg_path = Path(out[2]) / "run_config.json"
     doc = json.loads(cfg_path.read_text())

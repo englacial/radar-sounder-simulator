@@ -52,16 +52,22 @@ bed_tail:
   floor_margin_db: 3.0          # measured tail counted floor-limited below
 
 gamma_surface_solve:
-  # Settings for gamma_surface = solve: zero the bed-level residual against
-  # the measured data. Exact by linearity (received level moves dB-for-dB
-  # with the constant): one evaluation at the seed, one verification at the
-  # solved value. The residual is the QUALIFYING-pass median -- passes whose
-  # simulated bed returns stand at least min_bed_over_surface_db clear of
-  # the simulated surface returns in the bed window; below that the window
-  # measures clutter, whose level does not move with the bed constant.
+  # Settings for gamma_surface = solve: match the measured bed-window level
+  # by inverting the power sum. The simulated window is S + B(gamma) --
+  # surface returns S fixed, bed returns B moving dB-for-dB with the
+  # constant -- so per pass gamma_required = gamma_seed + (M (-) S) - B
+  # (power subtraction of the modeled clutter floor from the measured
+  # level): exact at ANY contamination level and seed-invariant, hence one
+  # evaluation at the seed plus one verification at the solved median. A
+  # pass qualifies when the measured level stands min_headroom_db above the
+  # modeled clutter floor; below that the window holds no usable bed
+  # information (M - S is inside the clutter-model error). spread_warn_db
+  # flags qualifying passes that disagree -- the missing-physics signature
+  # (e.g. englacial scattering), reported loudly, never hidden.
   seed_db: -10.0
   tolerance_db: 0.5
-  min_bed_over_surface_db: 10.0
+  min_headroom_db: 1.0
+  spread_warn_db: 6.0
 
 attenuation_regression:
   # Settings for the A = solve path: Theil-Sen regression of RSSNR on 2H

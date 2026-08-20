@@ -128,17 +128,22 @@ configured.
 Each line file carries a `calibration:` block with exactly two parameters:
 
 - `gamma_surface_db` — manual `{value, why}` or the literal `solve`
-  (**the study default**). The solve zeroes the qualifying-median bed-level
-  residual against the measured passes: the `--config` driver runs the sim
-  at a seed γ (`analysis.yaml: gamma_surface_solve.seed_db`, −10), shifts by
-  the median residual over the **qualifying** passes (those whose sim bed
-  window is bed-dominated by ≥ `min_bed_over_surface_db`), and verifies with
-  one more run (|residual| ≤ `tolerance_db`) — exact in one step because the
-  received bed level shifts dB-for-dB with the mapping constant. It cannot
-  come from the RSSNR regression intercept (degenerate with the mean bed
-  reflectivity), which is why this solve needs simulations while the A solve
-  does not. The solve history is recorded in `run_config.json`
-  (`calibration_resolution.gamma_surface_solve_history`).
+  (**the study default**). The solve matches the measured bed-window level
+  by inverting the power sum: the simulated window is S + B(γ) — surface
+  returns S fixed, bed returns B moving dB-for-dB with the constant — so
+  per pass γ_required = γ_seed + (M ⊖ S) − B (power-subtracting the modeled
+  clutter floor from the measured level), exact at any contamination level
+  and seed-invariant. The `--config` driver runs the sim at the seed
+  (`analysis.yaml: gamma_surface_solve.seed_db`, −10), takes the median
+  γ_required over the **qualifying** passes (measured level ≥
+  `min_headroom_db` above the modeled clutter floor — below that the window
+  holds no usable bed information), and verifies with one more run
+  (|γ_required − γ| ≤ `tolerance_db`). Qualifying passes disagreeing by
+  more than `spread_warn_db` are flagged loudly — the missing-physics
+  signature. γ cannot come from the RSSNR regression intercept (degenerate
+  with the mean bed reflectivity), which is why this solve needs
+  simulations while the A solve does not. The solve history is recorded in
+  `run_config.json` (`calibration_resolution.gamma_surface_solve_history`).
 - `att_db_per_km` — either manual `{value, why}` or the literal `solve`.
 
 `solve` is a Theil–Sen linear regression of RSSNR on 2H over the line's own
