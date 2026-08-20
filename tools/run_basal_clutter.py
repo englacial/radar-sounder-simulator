@@ -3516,6 +3516,19 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             "per_pass_residual_db": res,
             "gamma_surface_db": gmap["gamma_surface_db"],
             "surface_anomaly_db": gmap["surface_anomaly_db"],
+            # The gamma that WOULD zero the median residual (received level
+            # shifts dB-for-dB with the mapping constant, so this is exact,
+            # not fitted). A DIAGNOSTIC, deliberately not fed back: choosing
+            # it would re-absorb the chain anomaly into the calibration --
+            # the retired K/D behaviour. Watch it across runs instead: if it
+            # is stable per line it is a candidate real surface property; if
+            # it moves with configuration it is a chain artifact.
+            "gamma_surface_level_match_db": round(
+                gmap["gamma_surface_db"] - med, 2),
+            "caveat": "per-pass residuals use the TOTAL-field bed window, "
+            "which is surface-clutter contaminated on high-altitude passes; "
+            "read the level-match gamma against the low passes' residuals "
+            "before trusting the median",
             "implied_reflectivity": {
                 "g2_seg_db": gmap["g2_seg_db"],
                 "g2_pos_frac_seg": gmap["g2_pos_frac_seg"]},
