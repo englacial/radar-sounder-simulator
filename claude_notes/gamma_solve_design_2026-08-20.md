@@ -62,3 +62,17 @@ recorded as a diagnostic; on getz it gives +2.7 vs the inversion's +4.3 —
 the difference is exactly the clutter contamination of the 9/10 km passes.
 
 Commits: b23fc0c (solve allowed + default), 830255e (power-sum inversion).
+
+## Outcome (solve runs, same day)
+
+All four lines ran seed + verify and converged with the verify reproducing
+gamma_required exactly (seed-invariance confirmed empirically on real
+processing, not just in the algebra). Solved values match the
+retro-predictions to the 0.01 dB: getz **+4.34** (residuals at the solved
+gamma: +0.01/+0.56/−1.89 across the three altitudes), david **+7.41**
+(Basler residual +0.34; MKB60 residuals stuck at +12/+19 — those windows
+are clutter-model-dominated and correctly did not vote), westcoast
+**−3.73** (2017/2019 residuals +0.76/+0.92; 2016 −10.0, the odd pass out),
+geikie **−2.04 with the 21.8 dB spread warning on both evals** (residuals
++7.1/−4.9 — no single gamma can serve both passes; englacial term needed).
+Total wall: 44 min for all four (seed evals were pilot cache hits).

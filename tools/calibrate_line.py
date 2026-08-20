@@ -53,8 +53,8 @@ def main():
             st = rec["gamma_surface_solve_settings"]
             print(f"  gamma_surface = solve   (resolved in-run: seed "
                   f"{st['seed_db']:+.1f} dB, tolerance "
-                  f"{st['tolerance_db']} dB, qualifying margin >= "
-                  f"{st['min_bed_over_surface_db']} dB)")
+                  f"{st['tolerance_db']} dB, qualifying headroom >= "
+                  f"{st['min_headroom_db']} dB)")
             solved = _latest_solved(line)
             if solved:
                 print(f"    latest resolved: {solved['gamma_surface_db']:+.2f}"

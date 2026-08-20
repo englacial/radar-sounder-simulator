@@ -34,7 +34,15 @@ line registry (`--line`).
   (degenerate with mean bed reflectivity), which is why it needs a
   simulation. Its offset from smooth Fresnel (−11.03 dB) is recorded as a
   per-line surface anomaly, and the solve history lands in
-  `run_config.json`. An optional specular/diffuse split with a
+  `run_config.json`. Solved values (pilot segments, 2026-08-20):
+  antarctica_getz **+4.3** (3 passes within 2.4 dB; carries the un-audited
+  surface-reference anomaly, +15.4 vs Fresnel); antarctica_david **+7.4**
+  (Basler pass only — both MKB60 measured windows sit below the modeled
+  clutter floor); greenland_westcoast **−3.7** (2017/2019 within 1.3 dB;
+  the +7.3 anomaly may be genuine mid-May surface wetness); 
+  greenland_geikie01_transit **−2.0 flagged suspect** (its two passes
+  disagree by 21.8 dB — the englacial-scattering missing-physics
+  signature). An optional specular/diffuse split with a
   tilt-gated specular component models angle-dependent bed scattering.
 - Englacial attenuation: constant one-way dB/km per line, set in the
   line's `calibration:` block as either a manual `{value, why}` pair or
