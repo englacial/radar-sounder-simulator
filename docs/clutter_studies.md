@@ -22,11 +22,16 @@ line registry (`--line`).
   surface-referenced) and T² is the two-way Fresnel transmission
   (~−0.71 dB, computed, never configured). The mapping is anchoring-free:
   the former constant K and its median/level anchoring are gone. γ_surface
-  is stated manually in each line's `calibration:` block (the regression
-  intercept cannot separate it from mean bed reflectivity), and its offset
-  from smooth Fresnel (−11.03 dB) is recorded as a per-line surface
-  anomaly; post-run bed-level residuals are recorded as chain diagnostics,
-  never absorbed. An optional specular/diffuse split with a
+  in each line's `calibration:` block is either manual `{value, why}` or
+  `solve` (the study default): the config driver zeroes the median
+  bed-level residual over the qualifying measured passes (those whose
+  simulated bed window is bed-dominated) — exact in a seed run plus a
+  verify run, since the received bed level shifts dB-for-dB with the
+  constant. It cannot come from the attenuation regression's intercept
+  (degenerate with mean bed reflectivity), which is why it needs a
+  simulation. Its offset from smooth Fresnel (−11.03 dB) is recorded as a
+  per-line surface anomaly, and the solve history lands in
+  `run_config.json`. An optional specular/diffuse split with a
   tilt-gated specular component models angle-dependent bed scattering.
 - Englacial attenuation: constant one-way dB/km per line, set in the
   line's `calibration:` block as either a manual `{value, why}` pair or

@@ -201,10 +201,7 @@ provenance:
       Verify per season before quantitative cross-frequency claims.
 
 calibration:
-  gamma_surface_db:
-    value: -10.0
-    why: >
-      uniform study default (2026-08-20), ~1 dB above the smooth air->ice
-      Fresnel value (-11.03). No level evidence on this line; any surface
-      anomaly appears in the recorded bed residuals.
+  # solve = zero the qualifying-median RSSNR bed-level residual in-run
+  # (study default 2026-08-20); manual history in git (b351f80).
+  gamma_surface_db: solve
   att_db_per_km: solve

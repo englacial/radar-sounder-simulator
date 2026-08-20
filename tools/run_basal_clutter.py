@@ -253,7 +253,8 @@ TAIL_EXCESS_US: tuple = ()
 TAIL_GUARD_DB: float = 0.0             # sim bed vs surface returns guard
 TAIL_FLOOR_MARGIN_DB: float = 0.0
 CALIBRATION: dict = {}                 # gamma_surface + A (manual or solve)
-ATTENUATION_REGRESSION: dict = {}      # solver settings (analysis.yaml)
+ATTENUATION_REGRESSION: dict = {}      # A-solver settings (analysis.yaml)
+GAMMA_SURFACE_SOLVE: dict = {}         # gamma-solver settings (analysis.yaml)
 CORR_WIN_M: float = 0.0                # bed-brightness smoothing scale
 ROUGH_WIN_M: float = 0.0               # bed-roughness detrend window
 GL_RAMP_KM: float = 0.0                # hybrid-bed blend ramp past the GL
@@ -554,6 +555,30 @@ def k_phys_db(eps_ice=None):
     return gamma_surface_fresnel_db(eps_ice) - t2_db(eps_ice)
 
 
+def manual_gamma_surface_db():
+    """The active line's manual gamma_surface for a bare run(). A solve
+    line has no number until the --config driver's seed/verify loop runs,
+    so a bare run() must be given gamma_surface_db explicitly."""
+    if CALIBRATION["gamma_surface_db"] == "solve":
+        raise ValueError(
+            f"line {LINE!r} calibrates gamma_surface by solve, which needs "
+            "the --config driver (main_config owns the seed/verify loop); "
+            "pass gamma_surface_db explicitly for a bare run()")
+    return float(CALIBRATION["gamma_surface_db"]["value"])
+
+
+def gamma_solve_qualifying_median(residuals, margins, min_margin_db):
+    """(qualifying pass keys, their median residual) for the gamma-surface
+    solve. A pass qualifies when its SIM bed window is a bed measurement:
+    sim bed returns at least min_margin_db above sim surface returns there
+    -- only then does the bed-level residual respond dB-for-dB to the
+    mapping constant. NaN median = nothing qualifies (the solve must
+    refuse, not extrapolate from clutter-dominated windows)."""
+    qual = [k for k in residuals if margins[k] >= min_margin_db]
+    return qual, (float(np.median([residuals[k] for k in qual])) if qual
+                  else float("nan"))
+
+
 def solve_attenuation_regression(s_m, rssnr, thick_m, qc, gl_km=None,
                                  gl_aware=True, settings=None):
     """Solve A by robust linear regression of RSSNR on two-way thickness.
@@ -743,7 +768,8 @@ def build_rssnr_gamma(axis, segment, att, gamma_surface_db,
                       bed_rough_sigma=None, extra_db=0.0, zone_gl_km=None):
     """Fetch + map: the shared G2(s) profile dict (rssnr_gamma_profile output
     + fetch provenance) on the anchor along-track axis (ref_bed_picks),
-    under the line's calibration (gamma_surface manual, A calibrated).
+    under the line's calibration (gamma_surface manual or solved, A
+    calibrated).
     Anchoring-free: the mapping constant is gamma_surface - T^2 directly, so
     the same calibration yields the same field on any segment -- the old
     per-segment K anchoring (K_ANCHOR_SEGMENT) is obsolete.
@@ -3108,7 +3134,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     gmap = None
     if gamma_rssnr:
         if gamma_surface_db is None:
-            gamma_surface_db = float(CALIBRATION["gamma_surface_db"]["value"])
+            gamma_surface_db = manual_gamma_surface_db()
             print(f"gamma_surface = {gamma_surface_db:+.2f} dB (line "
                   f"calibration; anomaly vs Fresnel "
                   f"{gamma_surface_db - gamma_surface_fresnel_db():+.2f} dB)",
@@ -3501,34 +3527,53 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 "RSSNR sample count per zone (the reflectivity mapping's "
                 "along-track support). recorded only"}
     if gamma_rssnr:
-        # POST-RUN LEVEL RESIDUALS: a DIAGNOSTIC now, not a solve target.
-        # The calibration (gamma_surface manual, A per the line) makes no
-        # promise to match the level, so the residual is the evidence of how
-        # well the physical chain closes -- recorded, never absorbed.
+        # POST-RUN LEVEL RESIDUALS: the physical-chain closure evidence.
+        # Under a manual gamma_surface these are pure diagnostics; under
+        # 'solve' the QUALIFYING median is the one number main_config's
+        # seed/verify loop feeds back -- everything else stays recorded,
+        # never absorbed.
         res = {k: round(analyses[k]["sim"]["bed_rel_surf_db"]
                         - analyses[k]["meas"]["bed_rel_surf_db"], 2)
                for k in order if analyses[k]["meas"]}
         med = float(np.median(list(res.values()))) if res else float("nan")
+        # QUALIFYING passes: the residual only measures the bed level where
+        # the sim's own bed window IS a bed measurement -- sim bed returns
+        # at least min_bed_over_surface_db above sim surface returns there.
+        # The gamma-solve consumes the qualifying median, never the raw one.
+        marg = {k: round(analyses[k]["decomposition"]["bed"]["bed_rel_surf_db"]
+                         - analyses[k]["decomposition"]["surface"][
+                             "bed_rel_surf_db"], 2)
+                for k in res}
+        qual, qmed = gamma_solve_qualifying_median(
+            res, marg, GAMMA_SURFACE_SOLVE["min_bed_over_surface_db"])
         metrics["rssnr_level_residuals"] = {
             "value": round(med, 2), "threshold": None, "op": "record",
             "pass": True,
             "median_residual_db": round(med, 2),
             "per_pass_residual_db": res,
+            "per_pass_bed_over_surface_margin_db": marg,
+            "qualifying_passes": qual,
+            "qualifying_median_residual_db": round(qmed, 2),
+            "min_bed_over_surface_db":
+                GAMMA_SURFACE_SOLVE["min_bed_over_surface_db"],
             "gamma_surface_db": gmap["gamma_surface_db"],
             "surface_anomaly_db": gmap["surface_anomaly_db"],
-            # The gamma that WOULD zero the median residual (received level
-            # shifts dB-for-dB with the mapping constant, so this is exact,
-            # not fitted). A DIAGNOSTIC, deliberately not fed back: choosing
-            # it would re-absorb the chain anomaly into the calibration --
-            # the retired K/D behaviour. Watch it across runs instead: if it
-            # is stable per line it is a candidate real surface property; if
-            # it moves with configuration it is a chain artifact.
+            # The gamma that would zero each median (received level shifts
+            # dB-for-dB with the mapping constant, so both are exact, not
+            # fitted). The QUALIFYING variant is what a
+            # 'gamma_surface_db: solve' calibration feeds back (main_config
+            # drives the loop); under a manual calibration both stay pure
+            # diagnostics. If the solved value is stable per line it is a
+            # candidate real surface property; if it moves with
+            # configuration it is a chain artifact.
             "gamma_surface_level_match_db": round(
                 gmap["gamma_surface_db"] - med, 2),
+            "gamma_surface_qualifying_match_db": round(
+                gmap["gamma_surface_db"] - qmed, 2),
             "caveat": "per-pass residuals use the TOTAL-field bed window, "
             "which is surface-clutter contaminated on high-altitude passes; "
-            "read the level-match gamma against the low passes' residuals "
-            "before trusting the median",
+            "the qualifying median keeps only passes whose sim bed window "
+            "is bed-dominated by the stated margin",
             "implied_reflectivity": {
                 "g2_seg_db": gmap["g2_seg_db"],
                 "g2_pos_frac_seg": gmap["g2_pos_frac_seg"]},
@@ -3549,7 +3594,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 "surface_anomaly_db")},
             "snapshot_id": RSSNR_SNAPSHOT,
             "note": "anchoring-free mapping |Gamma_bed|^2 = 2*A*H - RSSNR "
-            "+ (gamma_surface - T^2), gamma_surface manual per line, A per "
+            "+ (gamma_surface - T^2), gamma_surface per the line calibration "
+            "(manual or residual-solved), A per "
             "the line calibration. surface_anomaly_db = gamma_surface - "
             "smooth-Fresnel is the chain diagnostic (old K - K_phys). "
             + rec}
@@ -3987,21 +4033,32 @@ def _report(out, case, config, metrics, notes, figs):
 def resolve_calibration(line=None):
     """(gamma_surface_db, att_db_per_km, record) for the active line.
 
-    gamma_surface is manual only (the regression intercept cannot separate
-    it from the mean bed reflectivity -- decision 2026-08-20). A is manual,
-    or solved by the RSSNR-vs-2H Theil-Sen regression over the line's own
-    store samples: dataset-only, no simulation, one shot, seed-free. The
-    regression is ALSO computed as a diagnostic when A is manual, so every
-    line's fit is on record next to whatever value it actually uses.
+    gamma_surface is manual, or 'solve' (the default on the study lines):
+    returned as the literal string -- it needs simulations, so main_config
+    owns the loop (seed run -> shift by the qualifying-median residual ->
+    verify run; exact by dB-for-dB linearity of the received bed level in
+    the mapping constant). It cannot come from the RSSNR regression
+    intercept, which is degenerate with the mean bed reflectivity. A is
+    manual, or solved by the RSSNR-vs-2H Theil-Sen regression over the
+    line's own store samples: dataset-only, no simulation, one shot,
+    seed-free. The regression is ALSO computed as a diagnostic when A is
+    manual, so every line's fit is on record next to whatever value it
+    actually uses.
     """
     activate_line(line or LINE)
     cal = dict(CALIBRATION)
-    gamma = float(cal["gamma_surface_db"]["value"])
-    rec = {"line": LINE, "gamma_surface_db": gamma,
-           "gamma_surface_why": cal["gamma_surface_db"]["why"],
-           "surface_anomaly_db": round(
-               gamma - gamma_surface_fresnel_db(), 2),
-           "gl_aware": cal.get("gl_aware", True)}
+    if cal["gamma_surface_db"] == "solve":
+        gamma = "solve"
+        rec = {"line": LINE, "gamma_surface_db": "solve",
+               "gamma_surface_solve_settings": dict(GAMMA_SURFACE_SOLVE),
+               "gl_aware": cal.get("gl_aware", True)}
+    else:
+        gamma = float(cal["gamma_surface_db"]["value"])
+        rec = {"line": LINE, "gamma_surface_db": gamma,
+               "gamma_surface_why": cal["gamma_surface_db"]["why"],
+               "surface_anomaly_db": round(
+                   gamma - gamma_surface_fresnel_db(), 2),
+               "gl_aware": cal.get("gl_aware", True)}
     fit = None
     try:
         d, prov = fetch_rssnr_anchor()
@@ -4082,8 +4139,9 @@ def main_config():
     if spec.meta.requires:
         print(f"  requires: {', '.join(spec.meta.requires)}", flush=True)
     gamma, att, cal_rec = resolve_calibration(kw["line"])
-    print(f"calibration [{cal_rec['line']}]: gamma_surface "
-          f"{gamma:+.2f} dB (anomaly {cal_rec['surface_anomaly_db']:+.2f}), "
+    gtxt = ("solve" if gamma == "solve" else
+            f"{gamma:+.2f} dB (anomaly {cal_rec['surface_anomaly_db']:+.2f})")
+    print(f"calibration [{cal_rec['line']}]: gamma_surface {gtxt}, "
           f"A = {att:g} dB/km ({cal_rec['att_source'].split(':')[0]})",
           flush=True)
     if cal_rec.get("regression") and "error" not in cal_rec["regression"]:
@@ -4094,10 +4152,69 @@ def main_config():
               f"{f['r_rssnr_vs_2h']}, n {f['n_used']}"
               + (f" ({f['n_floating_excluded']} floating excluded)"
                  if f["n_floating_excluded"] else ""), flush=True)
-    kw["gamma_surface_db"] = gamma
     if kw["att"] == "solve":
         kw["att"] = att
-    out = run(**kw)
+    if gamma != "solve":
+        kw["gamma_surface_db"] = gamma
+        out = run(**kw)
+    else:
+        # GAMMA-SURFACE SOLVE: zero the qualifying-median bed-level residual.
+        # The received bed level shifts dB-for-dB with the mapping constant,
+        # so one seed evaluation gives the answer exactly and one more run
+        # verifies it (the tolerance absorbs residual surface-return
+        # contamination in the qualifying passes' bed windows). Requires a
+        # gamma_from_rssnr spec with at least one qualifying measured pass.
+        st = dict(GAMMA_SURFACE_SOLVE)
+        g, history, out = float(st["seed_db"]), [], None
+        for it in range(3):
+            print(f"gamma-solve eval {it}: gamma_surface {g:+.2f} dB",
+                  flush=True)
+            kw["gamma_surface_db"] = g
+            out = run(**kw)
+            m = json.loads((Path(out[2]) / "metrics.json").read_text())
+            lv = m["metrics"].get("rssnr_level_residuals")
+            if lv is None:
+                raise SystemExit(
+                    "gamma_surface: solve needs the rssnr_level_residuals "
+                    "metric -- is this a gamma_from_rssnr spec with "
+                    "measured passes?")
+            r = lv["qualifying_median_residual_db"]
+            history.append({
+                "gamma_surface_db": g,
+                "qualifying_median_residual_db": r,
+                "qualifying_passes": lv["qualifying_passes"],
+                "per_pass_residual_db": lv["per_pass_residual_db"],
+                "per_pass_bed_over_surface_margin_db":
+                    lv["per_pass_bed_over_surface_margin_db"]})
+            if r is None or not np.isfinite(r):
+                raise SystemExit(
+                    "gamma_surface: solve has no qualifying pass (sim bed "
+                    f"window bed-over-surface margins "
+                    f"{lv['per_pass_bed_over_surface_margin_db']}, need >= "
+                    f"{st['min_bed_over_surface_db']} dB). Set a manual "
+                    "gamma_surface_db for this line.")
+            print(f"  qualifying residual {r:+.2f} dB over "
+                  f"{lv['qualifying_passes']}", flush=True)
+            if abs(r) <= st["tolerance_db"]:
+                break
+            g = round(g - r, 2)
+        else:
+            raise SystemExit(
+                f"gamma_surface: solve did not converge to "
+                f"|residual| <= {st['tolerance_db']} dB in 3 evaluations "
+                f"(history {history}) -- the dB-for-dB linearity assumption "
+                "is broken; inspect the qualifying passes.")
+        cal_rec["gamma_surface_db"] = g
+        cal_rec["gamma_surface_source"] = (
+            "solved (qualifying-median RSSNR bed-level residual zeroed; "
+            "seed run + verify run)")
+        cal_rec["surface_anomaly_db"] = round(
+            g - gamma_surface_fresnel_db(), 2)
+        cal_rec["gamma_surface_solve_history"] = history
+        print(f"gamma-solve done: gamma_surface {g:+.2f} dB (anomaly "
+              f"{cal_rec['surface_anomaly_db']:+.2f}), residual "
+              f"{history[-1]['qualifying_median_residual_db']:+.2f} dB",
+              flush=True)
     cfg_path = Path(out[2]) / "run_config.json"
     doc = json.loads(cfg_path.read_text())
     doc["calibration_resolution"] = cal_rec

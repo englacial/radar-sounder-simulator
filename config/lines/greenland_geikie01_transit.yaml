@@ -158,12 +158,10 @@ provenance:
       product fast-time bin differs 0.16% between the passes (33.3859 vs 33.3333 ns) and t0 by 167 ns, so every depth/delay comparison is made in metres or microseconds on each pass's OWN lattice
 
 calibration:
-  gamma_surface_db:
-    value: -10.0
-    why: >
-      uniform study default (2026-08-20). The level-derived value (-10.21,
-      solve-era) happened to sit right here anyway -- this line's chain is
-      honest -- so the change is cosmetic (~0.2 dB).
+  # solve = zero the qualifying-median RSSNR bed-level residual in-run
+  # (study default 2026-08-20); this line's chain is honest -- past level
+  # evidence sat at ~-10 dB anyway (git b351f80).
+  gamma_surface_db: solve
   att_db_per_km:
     value: 14.0
     why: >

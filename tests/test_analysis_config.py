@@ -109,16 +109,36 @@ def test_regression_settings_are_declared_once():
         a.attenuation_regression.model_dump()
 
 
+def test_gamma_solve_settings_are_declared_once():
+    """The gamma-surface solver's knobs live in analysis.yaml, nowhere
+    else: seed (the evaluation gamma; -10 matches the retired uniform
+    manual default so historic chunk caches stay warm), the verify
+    tolerance, and the qualifying bed-over-surface margin."""
+    a = load_analysis()
+    s = a.gamma_surface_solve
+    assert s.seed_db == -10.0
+    assert s.tolerance_db == 0.5
+    assert s.min_bed_over_surface_db == 10.0
+    assert rbc.GAMMA_SURFACE_SOLVE == s.model_dump()
+    assert "GAMMA_SURFACE_SOLVE" in rbc.ANALYSIS_GLOBALS
+
+
 def test_every_line_declares_its_calibration():
-    """gamma_surface is MANUAL on every line (the regression intercept
-    cannot separate it from the mean bed reflectivity), with a mandatory
-    why; A is manual-with-why or 'solve'."""
+    """gamma_surface is manual-with-why or 'solve' (the study default:
+    resolved in-run by zeroing the qualifying-median bed-level residual --
+    it cannot come from the regression intercept, which is degenerate with
+    the mean bed reflectivity); A is manual-with-why or 'solve'."""
     from clutter_lines import load_all as _load
     for name, sp in _load().items():
         c = sp.calibration
-        assert c.gamma_surface_db.why.strip(), name
+        if c.gamma_surface_db != "solve":
+            assert c.gamma_surface_db.why.strip(), name
         if c.att_db_per_km != "solve":
             assert c.att_db_per_km.why.strip(), name
+    # the study default IS solve (user decision 2026-08-20): every current
+    # line uses it
+    for name, sp in _load().items():
+        assert sp.calibration.gamma_surface_db == "solve", name
     # the two documented manual-A lines and their reasons
     lines = _load()
     getz = lines["antarctica_getz"].calibration

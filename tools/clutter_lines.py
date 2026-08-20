@@ -98,14 +98,20 @@ class Calibration(_Base):
 
     The reflectivity mapping is |Gamma_bed|^2 = 2 A H - RSSNR + (gamma_surface
     - T^2), with T^2 the two-way Fresnel transmission. gamma_surface is the
-    EFFECTIVE surface power reflectivity of the RSSNR reference -- manual
-    only, per decision 2026-08-20, because the regression intercept cannot
-    separate it from the mean bed reflectivity. A is manual or 'solve'
-    (Theil-Sen regression of RSSNR on 2H over the line's own store samples;
-    grounded-only when the line has a grounding line and gl_aware is true,
-    which is the default)."""
+    EFFECTIVE surface power reflectivity of the RSSNR reference. Either
+    manual {value, why}, or 'solve' (THE DEFAULT choice on the study lines):
+    set to zero the qualifying-median bed-level residual against the
+    measured data -- exact in one evaluation plus a verification, since the
+    received level shifts dB-for-dB with the constant. This is legitimate
+    residual-fitting of a NAMED physical parameter, recorded per run; what
+    was retired (2026-08-20) was the opaque K/D bookkeeping, not the fit.
+    It cannot come from the RSSNR regression intercept (degenerate with the
+    mean bed reflectivity), which is why the solve needs a simulation. A is
+    manual or 'solve' (Theil-Sen regression of RSSNR on 2H; dataset-only;
+    grounded samples when the line has a grounding line and gl_aware, the
+    default)."""
 
-    gamma_surface_db: ManualValue
+    gamma_surface_db: ManualValue | Literal["solve"]
     att_db_per_km: ManualValue | Literal["solve"]
     gl_aware: bool = True
 

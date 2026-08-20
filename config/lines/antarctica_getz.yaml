@@ -222,22 +222,12 @@ provenance:
     window: ft_wind hanning (scout hand-verified)
 
 calibration:
-  gamma_surface_db:
-    # EFFECTIVE, not physical. Equals the adopted level-anchored calibration
-    # (K = +7.92 dB = gamma - T^2), i.e. +18.2 dB ABOVE the smooth air->ice
-    # Fresnel value (-11.03): a surface that "reflects" +7 dB is impossible
-    # as a true reflectivity, and this number simply carries the un-audited
-    # surface-reference anomaly (handoff open item #1). Pinned to preserve
-    # the adopted A=20 level match; dissolves when the audit lands.
-    value: -10.0
-    why: >
-      uniform study default (2026-08-20): the level-derived value (+7.21,
-      from the deleted K/D solve era) is NOT TRUSTED and is retired. With
-      gamma at -10 the un-audited +18 dB surface anomaly reappears where it
-      belongs: as a recorded ~-17 dB bed-level residual in every RSSNR run
-      on this line, instead of being silently absorbed into the calibration.
-      The adopted att20_klevel LEVEL match is therefore no longer
-      reproduced -- deliberately.
+  # solve = zero the qualifying-median RSSNR bed-level residual in-run
+  # (study default 2026-08-20). EFFECTIVE, not physical, on this line: it
+  # re-absorbs the un-audited +18 dB surface-reference anomaly (handoff open
+  # item #1) -- read surface_anomaly_db in the run record, and see the
+  # -10 manual era's rationale in git (b351f80).
+  gamma_surface_db: solve
   att_db_per_km:
     value: 20.0
     why: >

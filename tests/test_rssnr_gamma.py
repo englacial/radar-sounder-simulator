@@ -2,7 +2,8 @@
 snapshot pinning, and the simulate() gamma_maps plumbing.
 
 Mapping (anchoring-free, 2026-08-20): |Gamma_bed|^2(s) dB = 2*A*H(s) -
-RSSNR(s) + (gamma_surface - T^2), gamma_surface manual per line. Tool
+RSSNR(s) + (gamma_surface - T^2), gamma_surface per the line
+calibration (manual or residual-solved). Tool
 functions imported from tools/run_basal_clutter.py (pure math only -- no
 network, no frames).
 """
@@ -202,3 +203,72 @@ def test_gamma_maps_constant_grid_bitwise_and_incoherent_raises():
                                  scene.transform, scene.crs)}
     with pytest.raises(ValueError, match="unknown"):
         soundersim.simulate(scene, cfg("coherent"))
+
+
+# ------------------------------------------------- gamma_surface: solve
+def test_qualifying_median_keeps_only_bed_dominated_passes():
+    """The solve's residual comes ONLY from passes whose sim bed window is
+    a bed measurement (bed returns >= margin above surface returns); a
+    clutter-dominated high pass must not drag the solved gamma."""
+    res = {"low": -2.0, "mid": -3.0, "high": +9.0}
+    marg = {"low": 18.0, "mid": 12.5, "high": -4.0}
+    qual, qmed = rbc.gamma_solve_qualifying_median(res, marg, 10.0)
+    assert qual == ["low", "mid"]
+    assert qmed == pytest.approx(-2.5)
+
+
+def test_qualifying_median_is_nan_when_nothing_qualifies():
+    """No qualifying pass -> NaN, so the driver refuses instead of solving
+    gamma against surface clutter."""
+    qual, qmed = rbc.gamma_solve_qualifying_median(
+        {"a": 1.0}, {"a": 3.0}, 10.0)
+    assert qual == [] and np.isnan(qmed)
+
+
+def test_calibration_gamma_accepts_solve_and_manual():
+    from clutter_lines import Calibration
+    c = Calibration(gamma_surface_db="solve", att_db_per_km="solve")
+    assert c.gamma_surface_db == "solve"
+    c2 = Calibration(gamma_surface_db={"value": -10.0, "why": "test"},
+                     att_db_per_km="solve")
+    assert c2.gamma_surface_db.value == -10.0
+    with pytest.raises(ValueError):
+        Calibration(gamma_surface_db="sovle", att_db_per_km="solve")
+    with pytest.raises(ValueError):        # manual still requires a why
+        Calibration(gamma_surface_db={"value": -10.0},
+                    att_db_per_km="solve")
+
+
+def test_resolve_calibration_returns_the_solve_marker(monkeypatch):
+    """A solve line resolves gamma to the literal 'solve' plus the solver
+    settings -- main_config owns the loop; nothing here invents a number.
+    The regression fetch is stubbed out (network-free)."""
+    monkeypatch.setattr(rbc, "fetch_rssnr_anchor",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            RuntimeError("offline test")))
+    for k in rbc.LINE_GLOBALS:            # resolve_calibration activates
+        monkeypatch.setattr(rbc, k, getattr(rbc, k))
+    line = next(n for n in sorted(rbc.LINES)
+                if rbc.LINES[n]["CALIBRATION"]["gamma_surface_db"] == "solve"
+                and rbc.LINES[n]["CALIBRATION"]["att_db_per_km"] != "solve")
+    gamma, att, rec = rbc.resolve_calibration(line)
+    assert gamma == "solve"
+    assert rec["gamma_surface_db"] == "solve"
+    assert rec["gamma_surface_solve_settings"] == rbc.GAMMA_SURFACE_SOLVE
+    assert "error" in rec["regression"]      # diagnostic recorded, not fatal
+    assert att == rbc.LINES[line]["CALIBRATION"]["att_db_per_km"]["value"]
+
+
+def test_bare_run_refuses_an_unresolved_solve_gamma():
+    """run()'s calibration fallback (manual_gamma_surface_db) must fail
+    loudly on a solve line, never index 'solve' like a manual dict."""
+    line = next(n for n in sorted(rbc.LINES)
+                if rbc.LINES[n]["CALIBRATION"]["gamma_surface_db"] == "solve")
+    saved = {k: getattr(rbc, k) for k in rbc.LINE_GLOBALS}
+    try:
+        rbc.activate_line(line)
+        with pytest.raises(ValueError, match="config driver"):
+            rbc.manual_gamma_surface_db()
+    finally:
+        for k, v in saved.items():
+            setattr(rbc, k, v)
