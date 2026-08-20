@@ -76,3 +76,27 @@ are clutter-model-dominated and correctly did not vote), westcoast
 geikie **−2.04 with the 21.8 dB spread warning on both evals** (residuals
 +7.1/−4.9 — no single gamma can serve both passes; englacial term needed).
 Total wall: 44 min for all four (seed evals were pilot cache hits).
+
+## Postscript: user decision — pin −10, solve demoted to diagnostic
+
+The user rejected all four solved values: "None of those are physically
+plausible surface reflectivity values." Correct — +4.3 and +7.4 exceed
+total reflection outright, and even −2/−3.7 imply near-water surface
+dielectrics. The solve is mathematically sound but what it measures is the
+EFFECTIVE surface reference of each line's chain, which bundles genuine
+surface reflectivity with product radiometry and un-modeled physics; using
+it as the calibration re-absorbs exactly the anomalies the anchoring-free
+redesign was meant to expose.
+
+Every line now pins gamma_surface = −10 dB manually (commit fbc63fb); the
+solve machinery stays available and tested, and every gamma_from_rssnr run
+records what the solve WOULD give (metric
+rssnr_level_residuals.gamma_solve) as a chain diagnostic. All four pilots
+re-ran at the pin (44 min, chunk cache hits): residuals identical to the
+earlier −10 era, run_configs record the manual why.
+
+Standing per-line anomalies to explain physically, in solve-diagnostic
+terms: getz +15.4 dB (surface-reference audit, open item #1), david +18.5
+(Basler; MKB60 sim clutter ~10-17 dB above the whole measured level —
+separate puzzle), westcoast +7.3 (mid-May wetness vs product radiometry;
+winter crossovers discriminate), geikie +9.0/−3.0 split (englacial term).
