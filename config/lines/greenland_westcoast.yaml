@@ -221,10 +221,13 @@ provenance:
 
 calibration:
   gamma_surface_db:
-    value: -3.69
+    value: -10.0
     why: >
-      level-derived 2026-08-19 (benchmark evaluation 1: K - K_phys = +7.35 dB
-      at the matched level). +7.3 dB above the smooth air->ice Fresnel value
-      -- an unexplained surface-reference anomaly, suspected product
-      radiometry; recorded, not hidden.
+      uniform study default (2026-08-20): the level-derived value (-3.69,
+      solve-era) is NOT TRUSTED and is retired. Its +7.3 dB anomaly -- which
+      would require a near-water surface dielectric (eps ~23) or a product
+      radiometry error -- now appears as a recorded bed-level residual
+      instead of being absorbed. Candidate physical cause worth testing:
+      all three flights are mid-May (melt onset); winter crossovers would
+      separate seasonal wetness from product radiometry.
   att_db_per_km: solve

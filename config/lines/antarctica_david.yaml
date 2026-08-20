@@ -202,10 +202,9 @@ provenance:
 
 calibration:
   gamma_surface_db:
-    value: -11.03
+    value: -10.0
     why: >
-      the smooth air->ice Fresnel value: no level evidence exists on this
-      line yet, so the physical default is pinned and any surface-reference
-      anomaly will appear in the recorded per-pass bed residuals of the
-      first RSSNR run.
+      uniform study default (2026-08-20), ~1 dB above the smooth air->ice
+      Fresnel value (-11.03). No level evidence on this line; any surface
+      anomaly appears in the recorded bed residuals.
   att_db_per_km: solve

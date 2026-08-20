@@ -229,11 +229,15 @@ calibration:
     # as a true reflectivity, and this number simply carries the un-audited
     # surface-reference anomaly (handoff open item #1). Pinned to preserve
     # the adopted A=20 level match; dissolves when the audit lands.
-    value: 7.21
+    value: -10.0
     why: >
-      level-derived from the adopted att20_klevel configuration (K=+7.92);
-      contains the +18 dB un-audited surface-reference anomaly, so it is an
-      effective constant, not a physical reflectivity.
+      uniform study default (2026-08-20): the level-derived value (+7.21,
+      from the deleted K/D solve era) is NOT TRUSTED and is retired. With
+      gamma at -10 the un-audited +18 dB surface anomaly reappears where it
+      belongs: as a recorded ~-17 dB bed-level residual in every RSSNR run
+      on this line, instead of being silently absorbed into the calibration.
+      The adopted att20_klevel LEVEL match is therefore no longer
+      reproduced -- deliberately.
   att_db_per_km:
     value: 20.0
     why: >

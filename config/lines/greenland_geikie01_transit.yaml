@@ -159,11 +159,11 @@ provenance:
 
 calibration:
   gamma_surface_db:
-    value: -10.21
+    value: -10.0
     why: >
-      level-derived 2026-08-19 (the in-run solve gave K = -9.50 dB; gamma =
-      K + T^2). Only +0.8 dB above the smooth air->ice Fresnel value: this
-      line's reference chain is essentially honest.
+      uniform study default (2026-08-20). The level-derived value (-10.21,
+      solve-era) happened to sit right here anyway -- this line's chain is
+      honest -- so the change is cosmetic (~0.2 dB).
   att_db_per_km:
     value: 14.0
     why: >
