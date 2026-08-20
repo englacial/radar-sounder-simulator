@@ -145,12 +145,13 @@ def test_every_line_declares_its_calibration():
     for name, sp in _load().items():
         g = sp.calibration.gamma_surface_db
         assert g != "solve" and g.value == -10.0, name
-    # the two documented manual-A lines and their reasons
+    # the one manual-A line and its reason (user decisions 2026-08-20:
+    # getz moved to the regression solve; geikie adopted MacGregor 16 --
+    # the regression stays rejected there, and the why must keep saying so)
     lines = _load()
-    getz = lines["antarctica_getz"].calibration
-    assert getz.att_db_per_km.value == 20.0
+    assert lines["antarctica_getz"].calibration.att_db_per_km == "solve"
     geikie = lines["greenland_geikie01_transit"].calibration
-    assert geikie.att_db_per_km.value == 14.0
+    assert geikie.att_db_per_km.value == 16.0
     assert "REJECTED" in geikie.att_db_per_km.why
 
 

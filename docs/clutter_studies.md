@@ -49,10 +49,11 @@ line registry (`--line`).
   store samples (dataset-only; censored samples excluded; floating samples
   excluded when the line has a grounding line). Current values
   (2026-08-20): antarctica_david **12.8 solved** [CI 11.5–14.1, r = 0.89];
-  antarctica_getz **20 manual** (regression diagnostic 18.6 [5.2–30.4] —
-  consistent but weak leverage); greenland_geikie01_transit **14 manual**
-  (the regression's γ_bed–thickness independence assumption is rejected
-  there: a thawed-bed Γ–H confounder gives A ≈ 0.7, r = 0.11);
+  antarctica_getz **18.6 solved** [5.2–30.4, r = 0.41 — weak leverage,
+  consistent with the earlier manual 20]; greenland_geikie01_transit
+  **16 manual** (MacGregor arbitration, adopted 2026-08-20; the
+  regression's γ_bed–thickness independence assumption is rejected there:
+  a thawed-bed Γ–H confounder gives A ≈ 0.7, r = 0.11);
   greenland_westcoast **34.3 solved** [29.6–38.4, r = 0.85].
 - Processing: the simulated stacks can be passed through a chain matched to
   CSARP_standard (product-posting simulation, motion compensation,

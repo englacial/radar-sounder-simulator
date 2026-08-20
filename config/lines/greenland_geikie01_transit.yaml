@@ -169,9 +169,10 @@ calibration:
       diagnostic of every run. claude_notes/gamma_solve_design_2026-08-20.md
       has the per-pass numbers.
   att_db_per_km:
-    value: 14.0
+    value: 16.0
     why: >
-      the currently adopted configuration. MacGregor arbitration favours
-      16 +/- 2 full-column but its adoption is a pending USER decision, not
-      made here. Slope regression is REJECTED on this line (thawed-bed
-      Gamma-H confounder gave A~7).
+      MacGregor arbitration, adopted by user decision 2026-08-20: three
+      routes converge on 16 +/- 2 dB/km full-column (see
+      claude_notes/macgregor_attenuation_scout.md). Slope regression is
+      REJECTED on this line (thawed-bed Gamma-H confounder gives A~0.7,
+      r=0.11 -- the gamma_bed-thickness independence assumption fails).

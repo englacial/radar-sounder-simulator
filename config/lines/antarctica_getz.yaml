@@ -232,11 +232,9 @@ calibration:
       belongs: in the recorded bed-level residuals and the gamma_solve
       diagnostic of every run. claude_notes/gamma_solve_design_2026-08-20.md
       has the per-pass numbers.
-  att_db_per_km:
-    value: 20.0
-    why: >
-      2026-08 attenuation family analysis: the only member simultaneously
-      physical, level-matching and shape-matching. Chain closure (~31) and
-      slope regression were both rejected on this line.
+  # user decision 2026-08-20: adopt the regression (A=18.61 [5.17,30.44],
+  # r=0.41 -- weak leverage, consistent with the retired manual 20 from the
+  # attenuation family analysis; that era's rationale is in git history).
+  att_db_per_km: solve
 # Line-level overrides of the study-wide measurement conventions
 # (config/analysis.yaml). Recorded in every run config built on this line.
