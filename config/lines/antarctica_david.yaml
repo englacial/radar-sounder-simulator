@@ -1,0 +1,175 @@
+schema_version: 1
+name: antarctica_david
+
+# A FREQUENCY-DIVERSITY INSTRUMENT LINE that crosses a grounding line.
+#
+# Three flights repeat one ~121 km transit down the David Glacier outlet
+# onto the Drygalski Ice Tongue (Victoria Land, ~75.3 S 160 E), all at
+# 446-604 m AGL: the 60/15 MHz MKB Basler flown twice a year apart to the
+# day (2022-12-12 / 2023-12-12 -- a same-instrument repeat), and the
+# 195/30 MHz 2017 Basler (the frequency diversity: 3.25x in carrier over
+# identical geometry, through 0.6-2.1 km of ice).
+#
+# THE LINE CROSSES THE GROUNDING LINE at s = 95.4 km on the reference axis
+# (hydrostatic flotation on the reference pass's own picks + the BedMachine
+# EIGEN-6C4 geoid: freeboard/(0.1079 H) drops from ~12 to ~1.0 between
+# s 94 and 96 and stays ~1.0 to the end). BEYOND THE GL BedMachine's "bed"
+# is the SEAFLOOR under the cavity, not the ice-ocean interface the radar
+# sees: any simulation of the floating stretch needs a picks-based basal
+# reflector (the getz hybrid-bed construction), which is not yet wired for
+# this line -- see unsupported.
+#
+# Discovered 2026-08-19 by corridor search around 20231212_02_015-017; also
+# present but not carried: 20231209_01_016 (60/15 MHz, same season), which
+# covers only s 112-138 km -- a crossover-length overlap, the natural
+# fourth pass if the floating zone ever needs more repeats.
+
+identity:
+  case_prefix: antarctica_david
+  season: 2023_Antarctica_BaslerMKB
+  crs: EPSG:3031
+  fc_hz: 60000000.0
+  grounding_line_s_km: 95.4
+
+reference:
+  pass: mkb60_2023
+  frames:
+  - '20231212_02_015'
+  - '20231212_02_016'
+  - '20231212_02_017'
+
+# Chronological; no altitude ordering is possible at one flying height.
+order:
+- basler195_2017
+- mkb60_2022
+- mkb60_2023
+
+passes:
+  basler195_2017:
+    agl_med_m: 446.0
+    season: 2017_Antarctica_Basler
+    param_frame: '20171217_01_022'
+    instrument: basler195_2017
+    reversed: false
+    segments:
+      full:
+      - frame: '20171217_01_022'
+        slice:
+        - 1770
+        - 3334
+      - frame: '20171217_01_023'
+        slice:
+        - 0
+        - 3335
+      - frame: '20171217_01_024'
+        slice:
+        - 0
+        - 3335
+  mkb60_2022:
+    agl_med_m: 544.0
+    season: 2022_Antarctica_BaslerMKB
+    param_frame: '20221212_01_016'
+    instrument: mkb60_basler
+    reversed: false
+    segments:
+      full:
+      - frame: '20221212_01_016'
+        slice:
+        - 670
+        - 1819
+      - frame: '20221212_01_017'
+        slice:
+        - 0
+        - 1820
+      - frame: '20221212_01_018'
+        slice:
+        - 0
+        - 1489
+  mkb60_2023:
+    agl_med_m: 604.0
+    season: 2023_Antarctica_BaslerMKB
+    param_frame: '20231212_02_015'
+    instrument: mkb60_basler
+    reversed: false
+    segments:
+      full:
+      - frame: '20231212_02_015'
+        slice:
+        - 734
+        - 1818
+      - frame: '20231212_02_016'
+        slice:
+        - 0
+        - 1818
+      - frame: '20231212_02_017'
+        slice:
+        - 0
+        - 1551
+
+segments:
+  # s 19.95 -> 141.05 km on the 2023 axis: the three-way on-corridor window
+  # (lateral gate 1.5 km; every pass contiguous within it). Grounded ice to
+  # the GL at 95.4, floating Drygalski beyond.
+  full:
+    s0_km: 20.0
+    n_traces: 585
+    decomp_s_km:
+    - 55.0      # grounded: mid-window, ~1.5 km ice
+    - 120.0     # floating: mid-tongue, past the GL transition
+figures:
+  # up to ~2.1 km of ice: bed as deep as ~25 us below the surface.
+  radargram:
+    y_us: [-1.0, 30.0]
+    db: [-110.0, 5.0]
+    scale: per_panel      # 20 vs 33 ns lattices, 60 vs 195 MHz products
+  profile:
+    rel_us: [-1.5, 30.5]
+    x_us: [-1.0, 30.0]
+    db: [-130.0, 5.0]
+
+rssnr:
+  # Verified 2026-08-19 against the pinned antarctica snapshot: all three
+  # segments present (20231212_02: 856 traces, 20221212_01: 1087,
+  # 20171217_01: 1290). Reference-frame coverage feeds the mapping; no K
+  # anchoring has ever been derived on this line.
+  snapshot: 3YH47013745B2T5ZZR50
+  store:
+    bucket: opr-radar-metrics
+    prefix: icechunk/antarctica
+    region: us-west-2
+
+# The floating stretch (s > 95.4) must NOT be simulated against
+# BedMachine/DEMOGORGN (seafloor, not the shelf base); the picks-based
+# hybrid bed is wired only for the getz full_line segment today, so bed
+# sources beyond BedMachine+picks are off until that machinery is
+# generalised to this line.
+unsupported:
+- demogorgn_bed
+- hybrid
+
+provenance:
+  measured_caveats: >
+    Measured references are CSARP_standard. THREE PRODUCTS, TWO SYSTEMS: the
+    60/15 MHz passes share a 20 ns lattice, the 195/30 MHz pass is on
+    33.33 ns -- comparisons in metres or microseconds only, never bin index.
+    Carrier differs 3.25x, so penetration, layer response and clutter
+    texture all differ by physics before any instrument idiosyncrasy.
+    TRACK CAVEATS: mkb60_2022 flies 129 m median off the reference but with
+    a ~890 m p95 stretch; basler195_2017 106 m median (p95 215 m) and its
+    full frames wander up to 21 km off-corridor OUTSIDE the window (the
+    lateral gate trims them; slices are the gated, contiguous spans).
+    The floating stretch's picks are the ice-ocean interface: bed metrics
+    there are shelf-base metrics.
+  real_chain:
+    product: CSARP_standard
+    sar: >
+      Per-season CReSIS processing; NOT read from these seasons' param
+      structs. Recorded as an assumption, not a measurement.
+    combine: >
+      Look/decimation convention ASSUMED to be the CReSIS standard; the
+      Basler/MKB platforms may differ from the P-3 convention entirely.
+    window: >
+      Assumed hanning; not verified for these seasons.
+    caveat: >
+      Weakest part of the line, doubly so across a 3.25x carrier ratio.
+      Verify per season before quantitative cross-frequency claims.

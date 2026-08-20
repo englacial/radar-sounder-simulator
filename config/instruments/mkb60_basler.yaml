@@ -1,0 +1,28 @@
+schema_version: 1
+name: mkb60_basler
+description: >
+  60/15 MHz VHF sounder on the KU ski-Basler (MKB), 2022 and 2023 Antarctic
+  campaigns. The low-frequency side of the David Glacier frequency-diversity
+  pair.
+source: {kind: opr_frame}
+segments:            # YYYYMMDD_SS; one segment is one instrument
+  - '20221212_01'
+  - '20231212_02'
+simulated:
+  frequency_Hz:   null      # -> 60 MHz from the frame
+  bandwidth_Hz:   null      # -> 15 MHz
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # The true antenna configuration of this platform at 60 MHz is NOT
+    # verified here. Isotropic = no cross-track suppression, so simulated
+    # off-nadir clutter is an UPPER bound; the --antenna brackets exist for
+    # sensitivity. Replace with the real array once its config is read from
+    # the season documentation.
+    kind: isotropic
+    roll_source: none
+provenance: >
+  fc/B/pulse/window are read per pass from its own OPR frame. Both seasons
+  report identical 60/15 MHz on the same 20 ns product lattice, and the two
+  flights repeat the same line one year apart to the day -- a same-instrument
+  repeat pair. ANTENNA UNVERIFIED (see simulated.antenna).

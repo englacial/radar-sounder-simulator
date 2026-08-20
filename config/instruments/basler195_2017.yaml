@@ -1,0 +1,23 @@
+schema_version: 1
+name: basler195_2017
+description: >
+  195/30 MHz MCoRDS-class sounder on the KU Basler, 2017 Antarctic campaign.
+  The high-frequency side of the David Glacier frequency-diversity pair.
+source: {kind: opr_frame}
+segments:            # YYYYMMDD_SS; one segment is one instrument
+  - '20171217_01'
+simulated:
+  frequency_Hz:   null      # -> 195 MHz from the frame
+  bandwidth_Hz:   null      # -> 30 MHz
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # Same caveat as mkb60_basler: the Basler's array config is not the P-3
+    # readme's 7 elements and is not verified here. Isotropic = clutter
+    # upper bound; revisit from season documentation before quantitative
+    # cross-frequency clutter claims.
+    kind: isotropic
+    roll_source: none
+provenance: >
+  fc/B match the P-3-era MCoRDS systems but the platform and antenna do not;
+  recorded as its own instrument. ANTENNA UNVERIFIED (see simulated.antenna).
