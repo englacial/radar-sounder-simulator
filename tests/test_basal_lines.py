@@ -103,9 +103,7 @@ def test_pass_and_segment_tables_agree(name):
         assert name in ref.segments, f"{name} missing from the reference pass"
     for key, syn in spec.synthetic_passes.items():
         assert syn.carrier in spec.passes, f"{key} carrier undefined"
-    for sname, seg in spec.segments.items():
-        if seg.k_anchor:
-            assert seg.k_anchor in segs
+
 
 
 @pytest.mark.parametrize("name", LINE_NAMES)

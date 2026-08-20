@@ -145,43 +145,6 @@ def _mapping_inputs(n=60):
     return s, rssnr, thick, np.ones(n, bool)
 
 
-def test_gamma_offset_shifts_the_whole_mapping():
-    """The T1 guard rides on K: every recorded level moves by exactly the
-    offset, the SHAPE is untouched, and the anchored median moves off the
-    Fresnel constant by the offset (that is the point -- the kernel takes it
-    straight back out as roughness attenuation)."""
-    s, rssnr, thick, qc = _mapping_inputs()
-    a = rbc.rssnr_gamma_profile(s, rssnr, thick, qc, 15.0, 0.0, 60e3)
-    off = 12.5
-    b = rbc.rssnr_gamma_profile(s, rssnr, thick, qc, 15.0, 0.0, 60e3,
-                                g2_offset_db=off)
-    assert b["k_db"] == pytest.approx(a["k_db"] + off, abs=1e-9)
-    assert np.allclose(b["g2_db"], a["g2_db"] + off)
-    assert b["g2_seg_db"]["med"] == pytest.approx(a["g2_const_db"] + off,
-                                                  abs=0.05)
-    assert b["censored_floor_db"] == pytest.approx(
-        a["censored_floor_db"] + off, abs=0.02)
-    # zero offset is the pre-campaign mapping, exactly
-    z = rbc.rssnr_gamma_profile(s, rssnr, thick, qc, 15.0, 0.0, 60e3,
-                                g2_offset_db=0.0)
-    assert np.array_equal(z["g2_db"], a["g2_db"]) and z["k_db"] == a["k_db"]
-
-
-def test_attenuation_re_anchors_k_but_not_the_median():
-    """T2: raising A moves K (it absorbs 2*A*H) while the median-anchored
-    level stays pinned; the along-track SPREAD grows because 2*A*H(s) does."""
-    s, rssnr, thick, qc = _mapping_inputs()
-    lo = rbc.rssnr_gamma_profile(s, rssnr, thick, qc, 15.0, 0.0, 60e3)
-    hi = rbc.rssnr_gamma_profile(s, rssnr, thick, qc, 31.0, 0.0, 60e3)
-    assert hi["k_db"] < lo["k_db"]
-    assert hi["g2_seg_db"]["med"] == pytest.approx(lo["g2_seg_db"]["med"],
-                                                   abs=0.05)
-    spread = lambda d: d["g2_seg_db"]["p95"] - d["g2_seg_db"]["p5"]  # noqa: E731
-    assert spread(hi) > spread(lo)
-    # K - K_phys is the diagnostic of what the anchoring absorbed
-    assert hi["k_minus_kphys_db"] < lo["k_minus_kphys_db"]
-
-
 # ------------------------------------------------------ T3 posting_div
 
 def _frame(n=9):
@@ -399,53 +362,6 @@ def _fake_rssnr(monkeypatch, n=80):
     return {"x": x, "y": y, "s": s, "eps_ice": rac.EPS_ICE}
 
 
-def test_level_anchor_raises_k_by_the_recorded_deficit(monkeypatch):
-    """--anchor level must move K (and every level statistic) by exactly the
-    deficit, leaving the SHAPE of the mapped profile untouched; --anchor
-    median must be bit-identical to the pre-feature mapping."""
-    axis = _fake_rssnr(monkeypatch)
-    med = rbc.build_rssnr_gamma(axis, "full", 31.0)
-    # D is stated by the caller: it is solved against a particular run at a
-    # particular attenuation, so there is no line-level default to read.
-    d = 14.8
-    lvl = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level",
-                                level_deficit_db=d)
-    assert med["anchor"] == "median" and "level_anchor" not in med
-    assert lvl["k_db"] == pytest.approx(med["k_db"] + d, abs=0.01)
-    assert np.allclose(lvl["g2_db"], med["g2_db"] + d, atol=1e-9)
-    for k in ("min", "p5", "med", "p95", "max"):
-        assert lvl["g2_seg_db"][k] == pytest.approx(
-            med["g2_seg_db"][k] + d, abs=0.06)
-    la = lvl["level_anchor"]
-    assert la["deficit_db"] == pytest.approx(d, abs=0.01)
-    assert la["k_level_db"] == lvl["k_db"]
-    assert la["k_median_db"] == pytest.approx(med["k_db"], abs=0.01)
-    # raising K raises the implied reflectivity: the discriminator diagnostic
-    assert lvl["g2_pos_frac_seg"] >= med["g2_pos_frac_seg"]
-
-
-def test_level_anchor_deficit_override_and_bad_mode(monkeypatch):
-    axis = _fake_rssnr(monkeypatch)
-    med = rbc.build_rssnr_gamma(axis, "full", 31.0)
-    lvl = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level",
-                                level_deficit_db=6.0)
-    assert lvl["k_db"] == pytest.approx(med["k_db"] + 6.0, abs=0.01)
-    assert lvl["level_anchor"]["source"] == "supplied"
-    with pytest.raises(ValueError, match="anchor"):
-        rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="nonsense")
-
-
-def test_level_anchor_composes_with_the_bed_roughness_guard(monkeypatch):
-    """The two K offsets are independent and additive."""
-    axis = _fake_rssnr(monkeypatch)
-    base = rbc.build_rssnr_gamma(axis, "full", 31.0)
-    both = rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level",
-                                 level_deficit_db=14.8,
-                                 bed_rough_sigma=0.05, extra_db=-1.0)
-    want = (14.8 - rbc.bed_rough_nadir_db(0.05) - 1.0)
-    assert both["k_db"] == pytest.approx(base["k_db"] + want, abs=0.02)
-
-
 # ------------------------------------------------- syn500km orbital pass
 
 
@@ -514,34 +430,6 @@ def test_extended_cache_names_are_distinct_from_the_full_segment():
     assert rbc.chunk_meta(p_ext, 0, rows, 1, 10, 20.0, True)["segment"] \
         == "extended"
 
-
-def test_extended_k_anchor_reuses_the_full_segment_mapping(monkeypatch):
-    """The extended run must NOT re-derive K on the longer line: with
-    k_anchor_segment='full' the mapped profile is bit-identical to the 50 km
-    run's, and the run-segment statistics are recorded separately."""
-    axis = _fake_rssnr(monkeypatch)
-    monkeypatch.setattr(rbc, "segment_s_range",
-                        lambda ref, seg: {"full": (18e3, 68e3),
-                                          "extended": (0.0, 69.7e3)}[seg])
-    full = rbc.build_rssnr_gamma(axis, "full", 20.0, anchor="level",
-                                 level_deficit_db=3.56)
-    ext = rbc.build_rssnr_gamma(axis, "extended", 20.0, anchor="level",
-                                level_deficit_db=3.56,
-                                k_anchor_segment="full")
-    assert ext["k_db"] == full["k_db"]
-    assert np.array_equal(ext["g2_db"], full["g2_db"])
-    assert ext["k_anchor_segment"] == "full"
-    assert ext["seg_s_km"] == full["seg_s_km"]
-    # the run segment's own statistics are recorded, not used for K
-    assert ext["g2_run_seg_db"]["seg_s_km"] == [0.0, 69.7]
-    assert ext["g2_run_seg_db"]["n_seg"] > full["n_seg"]
-    assert "g2_run_seg_db" not in full
-    # ... and re-deriving on the extended segment WOULD move K (why we don't)
-    naive = rbc.build_rssnr_gamma(axis, "extended", 20.0, anchor="level",
-                                  level_deficit_db=3.56)
-    assert naive["k_anchor_segment"] == "extended"
-    assert naive["k_db"] != full["k_db"]
-    assert rbc.K_ANCHOR_SEGMENT["extended"] == "full"
 
 
 # ------------------------------------------- single-trace decomposition
@@ -642,7 +530,6 @@ def test_full_line_segment_table_spans_the_whole_line():
     for skey in SYNTH:
         assert rbc.PASSES[skey]["full_line"] == rbc.PASSES[CARRIER]["full_line"]
     assert rbc.S0_KM["full_line"] == 0.0
-    assert rbc.K_ANCHOR_SEGMENT["full_line"] == "full"
     assert rbc.N_TRACES_BY_SEGMENT['full_line'] > rbc.N_TRACES_BY_SEGMENT['extended']
     # the default single-trace decomposition pair: one grounded, one floating
     lo, hi = rbc.DECOMP_S_KM["full_line"]
@@ -670,40 +557,6 @@ def test_full_line_cache_names_and_keys_are_distinct():
     assert m_l["hybrid_bed"]["gl_s_km"] == rbc.GL_S_KM
     assert m_l["hybrid_bed"]["ramp_km"] == rbc.GL_RAMP_KM
     assert m_l["segment"] == "full_line"
-
-
-def test_full_line_k_anchor_reuses_the_full_mapping_with_zone_stats(
-        monkeypatch):
-    """K stays pinned to the 50 km 'full' segment (bit-identical profile);
-    the zone-aware physicality block judges grounded samples vs 0 dB and
-    floating samples vs the ice-seawater Fresnel ceiling."""
-    axis = _fake_rssnr(monkeypatch)
-    monkeypatch.setattr(rbc, "segment_s_range",
-                        lambda ref, seg: {"full": (18e3, 68e3),
-                                          "full_line": (0.0, 148.45e3)}[seg])
-    full = rbc.build_rssnr_gamma(axis, "full", 20.0, anchor="level",
-                                 level_deficit_db=3.56)
-    line = rbc.build_rssnr_gamma(axis, "full_line", 20.0, anchor="level",
-                                 level_deficit_db=3.56,
-                                 k_anchor_segment="full",
-                                 zone_gl_km=rbc.GL_S_KM)
-    assert line["k_db"] == full["k_db"]
-    assert np.array_equal(line["g2_db"], full["g2_db"])
-    assert line["k_anchor_segment"] == "full"
-    z = line["g2_zones_db"]
-    from soundersim.physics import fresnel_normal
-    want_ceil = 20.0 * np.log10(abs(
-        fresnel_normal(rac.EPS_ICE, rbc.EPS_SEAWATER)))
-    assert z["floating_ceiling_db"] == pytest.approx(want_ceil, abs=0.01)
-    assert z["grounded_fresnel_anchor_db"] == pytest.approx(-12.86, abs=0.05)
-    assert z["grounded"]["n"] >= 3
-    assert 0.0 <= z["grounded"]["frac_above_0db"] <= 1.0
-    assert (z["grounded"]["frac_above_seawater_ceiling"]
-            >= z["grounded"]["frac_above_0db"])
-    # the fake dataset stops at 60 km: the floating zone must degrade
-    # gracefully to a counted too-few-samples record, never crash
-    assert z["floating"]["n"] == 0 and "note" in z["floating"]
-    assert "g2_zones_db" not in full
 
 
 def test_picks_bed_nn_skips_gaps_and_clamps_edges():
@@ -949,14 +802,6 @@ def test_proc_from_stacks_matches_the_processing_tail():
         "real_chain": "x"}
 
 
-def test_level_anchor_without_a_deficit_is_refused(monkeypatch):
-    """There is no line-level D any more. Silently falling back to one is
-    how the Antarctic 14.8 (a rejected att-31 measurement) stayed wired in
-    after the adopted config moved to 3.56."""
-    axis = _fake_rssnr(monkeypatch)
-    with pytest.raises(ValueError, match="explicit level_deficit_db"):
-        rbc.build_rssnr_gamma(axis, "full", 31.0, anchor="level")
-
 
 def test_altitude_trend_derives_from_altitude_not_pass_names():
     """The metric used to loop over ("mid", "high") vs "low" literally --
@@ -970,3 +815,90 @@ def test_altitude_trend_derives_from_altitude_not_pass_names():
     assert not re.search(r'"(mid|high|low)"', blk), \
         "altitude_trend must not hardcode pass names"
     assert "h_med" in blk                       # altitude is the ordering
+
+
+# ----------------------------------------- calibration-era mapping behaviour
+
+def _fake_gamma_inputs(monkeypatch):
+    """Deterministic RSSNR fetch + axis for build_rssnr_gamma."""
+    rbc.activate_line("antarctica_getz")
+    n = 60
+    s = np.linspace(0.0, 60e3, n)
+    d = {"lat": np.full(n, -74.0), "lon": np.linspace(-102.0, -101.0, n),
+         "rssnr": np.full(n, 30.0), "qc": np.ones(n, bool),
+         "stw": np.full(n, 6e-6), "btw": np.full(n, 14e-6)}
+    monkeypatch.setattr(rbc, "fetch_rssnr_anchor",
+                        lambda cache_path=None: (d, {"snapshot_id": "T",
+                                                     "source": "test"}))
+    monkeypatch.setattr(rbc, "project_to_track",
+                        lambda px, py, tx, ty, sr: s)
+    monkeypatch.setattr(rbc, "segment_s_range",
+                        lambda axis, seg: (0.0, 60e3))
+    axis = {"x": s, "y": np.zeros(n), "s": s, "eps_ice": 3.17}
+    return axis
+
+
+def test_build_rssnr_gamma_is_anchoring_free(monkeypatch):
+    """The mapping constant is gamma_surface - T^2 DIRECTLY: no median
+    anchoring, no level deficit, and therefore identical on any segment."""
+    axis = _fake_gamma_inputs(monkeypatch)
+    a = rbc.build_rssnr_gamma(axis, "full", 15.0, -11.03)
+    b = rbc.build_rssnr_gamma(axis, "pilot", 15.0, -11.03)
+    assert a["k_db"] == b["k_db"] == pytest.approx(-11.03 - rbc.t2_db(),
+                                                   abs=0.01)
+    np.testing.assert_allclose(a["g2_db"], b["g2_db"])
+    assert a["surface_anomaly_db"] == pytest.approx(0.0, abs=0.02)
+
+
+def test_bed_roughness_guard_still_rides_the_mapping(monkeypatch):
+    """The T1 double-count guard raises G2 by the nadir coherent roughness
+    attenuation, on top of the calibration constant."""
+    axis = _fake_gamma_inputs(monkeypatch)
+    base = rbc.build_rssnr_gamma(axis, "full", 15.0, -11.03)
+    rough = rbc.build_rssnr_gamma(axis, "full", 15.0, -11.03,
+                                  bed_rough_sigma=0.05, extra_db=-1.0)
+    want = -rbc.bed_rough_nadir_db(0.05) - 1.0
+    assert rough["k_db"] - base["k_db"] == pytest.approx(want, abs=0.02)
+    assert rough["bed_rough_guard"]["g2_shift_db"] == pytest.approx(want,
+                                                                    abs=0.01)
+
+
+def test_attenuation_regression_recovers_truth():
+    """Synthetic truth: RSSNR = 2 A H + c exactly -> the solver returns A,
+    excludes floating samples when gl_aware, and refuses a span too short
+    to lever."""
+    rng = np.random.default_rng(0)
+    n = 120
+    s = np.linspace(0.0, 120e3, n)
+    H = np.linspace(800.0, 2000.0, n) + rng.normal(0, 20, n)
+    A_true = 17.5
+    rssnr = 2 * A_true * H / 1e3 + 40.0 + rng.normal(0, 1.0, n)
+    qc = np.ones(n, bool)
+    A, rec = rbc.solve_attenuation_regression(s, rssnr, H, qc, gl_km=None)
+    assert A == pytest.approx(A_true, abs=0.5)
+    assert rec["n_used"] == n
+    # floating contamination: bright shelf base past a GL biases the slope
+    rssnr2 = rssnr.copy()
+    rssnr2[s > 90e3] -= 25.0
+    A_gl, rec_gl = rbc.solve_attenuation_regression(
+        s, rssnr2, H, qc, gl_km=90.0, gl_aware=True)
+    assert A_gl == pytest.approx(A_true, abs=0.6)
+    assert rec_gl["n_floating_excluded"] > 0
+    A_no, _ = rbc.solve_attenuation_regression(
+        s, rssnr2, H, qc, gl_km=90.0, gl_aware=False)
+    assert abs(A_no - A_true) > abs(A_gl - A_true)   # the gate earns its keep
+    with pytest.raises(ValueError, match="span"):
+        rbc.solve_attenuation_regression(
+            s, rssnr, np.full(n, 1000.0), qc, gl_km=None)
+
+
+def test_censored_samples_are_excluded_from_the_fit_not_floored():
+    n = 80
+    s = np.linspace(0, 80e3, n)
+    H = np.linspace(900, 1800, n)
+    rssnr = 2 * 12.0 * H / 1e3 + 35.0
+    qc = np.ones(n, bool)
+    rssnr[H > 1600] = np.nan          # dim-bed censoring at the thick end
+    A, rec = rbc.solve_attenuation_regression(s, rssnr, H, qc, gl_km=None)
+    assert A == pytest.approx(12.0, abs=0.3)
+    assert rec["n_used"] == int(np.isfinite(rssnr).sum())

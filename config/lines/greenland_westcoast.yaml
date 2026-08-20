@@ -72,6 +72,11 @@ passes:
         slice:
         - 0
         - 3023
+      pilot:
+      - frame: '20160511_03_034'
+        slice:
+        - 2365
+        - 3034
   p3_2017:
     agl_med_m: 500.0
     season: 2017_Greenland_P3
@@ -88,6 +93,15 @@ passes:
         slice:
         - 0
         - 3333
+      pilot:
+      - frame: '20170510_03_013'
+        slice:
+        - 2678
+        - 3334
+      - frame: '20170510_03_014'
+        slice:
+        - 0
+        - 12
   p3_2019:
     agl_med_m: 476.0
     season: 2019_Greenland_P3
@@ -104,6 +118,11 @@ passes:
         slice:
         - 0
         - 3146
+      pilot:
+      - frame: '20190514_01_039'
+        slice:
+        - 2491
+        - 3160
 
 synthetic_passes:
   # Constant-ellipsoidal-height passes riding the reference pass's geometry,
@@ -130,6 +149,12 @@ synthetic_passes:
       Same class as syn14km, larger reach. Re-gate on first run.
 
 segments:
+  # 10 km smoke window, mid-line (s 40-50 on the 2017 axis).
+  pilot:
+    s0_km: 40.0
+    n_traces: 48
+    decomp_s_km:
+    - 45.0
   # s 2.77 -> 99.68 km on the 2017 axis: the three-way overlap, from nav.
   full:
     s0_km: 2.8
@@ -154,10 +179,8 @@ rssnr:
   # 42/42 -- at ~1.4 km sampling, the same store and snapshot the geikie
   # line uses. (An earlier revision of this file claimed no store covered
   # these segments; that was asserted, not checked.)
-  # NOTE: what is verified is that the DATA EXISTS. The mapping's K anchoring
-  # has never been derived on this line -- a first --gamma-from-rssnr run
-  # must go through the same level-anchor derivation the other lines did,
-  # not assume a deficit.
+  # NOTE: what is verified is that the DATA EXISTS; the line's calibration
+  # block supplies gamma_surface and A for the mapping.
   snapshot: GEAMAHQ7BRVPG9SQPK20
   store:
     bucket: opr-radar-metrics
@@ -195,3 +218,13 @@ provenance:
       This line exists for INSTRUMENT comparison, so its processing
       provenance is the weakest part of it and the part most worth verifying
       before any quantitative cross-instrument claim.
+
+calibration:
+  gamma_surface_db:
+    value: -3.69
+    why: >
+      level-derived 2026-08-19 (benchmark evaluation 1: K - K_phys = +7.35 dB
+      at the matched level). +7.3 dB above the smooth air->ice Fresnel value
+      -- an unexplained surface-reference anomaly, suspected product
+      radiometry; recorded, not hidden.
+  att_db_per_km: solve

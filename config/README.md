@@ -111,26 +111,62 @@ config, so a line that measures differently says so out loud. Neither shipped
 line currently overrides anything, and a test asserts that — so the first one
 has to be deliberate.
 
-`attenuation_rule` derives the englacial attenuation A the same way D is
-derived: as an **output**, never a carried number. The default,
-`chain_closure`, chooses A so the level-anchored K equals K_phys — the
-absolute chain made self-consistent — solved analytically around a run with
-one verification evaluation. A line where a derivation was **tried and
-rejected** may override with `{method: fixed, value_db_per_km, why}`; the
-number then lives in that line's file with its rejection history (getz:
-A = 20, closure rejected by the family analysis, surface-reference audit
-open). No attenuation rate appears in code or in any experiment spec.
+### Calibration
 
-`level_anchor` is the one rule the whole study shares for solving the
-level-anchor deficit D — contamination-aware (`bed·10^(D/10) + surface =
-measured`), median over the passes whose bed returns stand ≥ 10 dB clear of
-their surface returns. The exclusion is **derived** from the decomposition
-rather than hand-listed, and one threshold reproduces both lines' previously
-hand-made pass selections. Regenerate D from a completed constant-gamma run
-with:
+The RSSNR → bed-reflectivity mapping is **anchoring-free**:
 
 ```
-uv run python tools/derive_level_deficit.py <run_dir>
+|Γ_bed|²(x) = 2·A·H(x) − RSSNR(x) + (γ_surface − T²)
+```
+
+γ_surface is the line's **effective** surface power reflectivity — the
+RSSNR dataset is surface-referenced, so the mapping constant is direct and
+segment-independent (the old `K_ANCHOR_SEGMENT` machinery is obsolete). T²
+is the two-way Fresnel transmission (~−0.71 dB), computed, never
+configured.
+
+Each line file carries a `calibration:` block with exactly two parameters:
+
+- `gamma_surface_db` — **manual only**, a `{value, why}` pair. It cannot be
+  solved: the regression intercept cannot separate γ_surface from the mean
+  bed reflectivity, so stating it is an audited decision, not a fit.
+- `att_db_per_km` — either manual `{value, why}` or the literal `solve`.
+
+`solve` is a Theil–Sen linear regression of RSSNR on 2H over the line's own
+store samples — dataset-only, no simulation needed. Censored samples are
+excluded (never floored), and it is GL-aware by default
+(`calibration.gl_aware`, default true): floating samples are excluded when
+the line has a grounding line. Its declared assumption: γ_bed uncorrelated
+with thickness, γ_surface and A constant along the line. That assumption is
+**rejected on the geikie line** — a thawed-bed Γ–H confounder gives the fit
+A ≈ 0.7 with r = 0.11 — so geikie pins A = 14 manually. The regression is
+still computed as a **diagnostic** on every line, manual or not, and
+recorded.
+
+The old quantities survive only as diagnostics. K is recorded as
+`k_db = γ_surface − T²`; what used to be "K − K_phys" is now the **surface
+anomaly** (γ_surface minus the smooth-Fresnel −11.03 dB). The level deficit
+D and level anchoring are deleted — post-run bed-level residuals are
+recorded as chain diagnostics (metric `rssnr_level_residuals`), never
+absorbed into the mapping. The old `chain_closure` attenuation rule was
+proven vacuous on 2026-08-19 (K − K_phys is invariant in A when the level
+is absorbed) and is replaced by the regression; `analysis.yaml` now carries
+`attenuation_regression` settings instead of `attenuation_rule`.
+
+Current calibrations (2026-08-20, `outputs/line_reports/calibrations.json`):
+
+| line | γ_surface (dB) | surface anomaly | A (dB/km) |
+|---|---|---|---|
+| `antarctica_david` | −11.03 (Fresnel default) | — | **12.8 solved** [CI 11.5–14.1, r = 0.89] |
+| `antarctica_getz` | +7.21 effective | +18 dB, un-audited | **20 manual** (diagnostic 18.6 [5.2–30.4] — consistent but weak leverage) |
+| `greenland_geikie01_transit` | −10.21 | +0.8 dB, chain honest | **14 manual** (regression rejected, see above) |
+| `greenland_westcoast` | −3.69 | +7.3 dB, suspected product radiometry | **34.3 solved** [29.6–38.4, r = 0.85] |
+
+Report every line's calibration and regression diagnostics without
+simulating:
+
+```
+uv run python tools/calibrate_line.py
 ```
 
 Note `compute.chunk_m` is tuning rather than science, but it sets the chunk
@@ -178,8 +214,9 @@ radargram exists to show.
 | line | kind | passes | notes |
 |---|---|---|---|
 | `antarctica_getz` | altitude | 3 real (0.4/9.2/10.7 km) + 2 synthetic | grounding line at s 69.7 km |
-| `greenland_geikie01_transit` | altitude | 2 real (0.5/2.5 km) + 1 synthetic | `transit` is one 139 km path; it contains a turn the two aircraft flew on different radii (up to 1.3 km apart over s 40-80) |
-| `greenland_westcoast` | **instrument** | 3 real, all ~460 m AGL | three radars (195/30, 200/100, 205/50 MHz) over one 49.8 km window |
+| `antarctica_david` | **frequency diversity** | 60 vs 195 MHz, plus a same-instrument repeat pair (2022/2023) | David Glacier / Drygalski; grounding line at s 95.4 km |
+| `greenland_geikie01_transit` | altitude | 2 real (0.5/2.5 km) + 1 synthetic | altitude pair; `transit` is one 139 km path; it contains a turn the two aircraft flew on different radii (up to 1.3 km apart over s 40-80) |
+| `greenland_westcoast` | **instrument** | 3 real, all ~460 m AGL | one altitude, three radars (195/30 MHz twice + 200/100 MHz) over one 49.8 km window |
 
 ### Multi-line protocols
 
@@ -192,24 +229,23 @@ uv run python tools/run_basal_clutter.py \
 ```
 
 Outputs cannot collide: each line's `case_prefix` gives the same experiment
-name its own directory and cache. With `level_deficit_db: solve` and
-`att_db_per_km: solve` the spec carries no numbers at all — D comes from the
-run's own constant-gamma arm, A from the line's attenuation rule, both
-recorded in the run config.
+name its own directory and cache. The spec itself carries no calibration
+numbers: γ_surface comes from each line's `calibration:` block, and with
+`att_db_per_km: solve` A comes from the line's own Theil–Sen regression —
+both recorded in the run config.
 
 ### Experiments
 
-| experiment | line | instruments | status |
+| experiment | line(s) | instruments | status |
 |---|---|---|---|
-| `ant_att20_klevel` | antarctic_2016 | as flown | **adopted** |
-| `ant_extended` | antarctic_2016 | as flown | **adopted** |
-| `ant_full_line` | antarctic_2016 | as flown | **adopted** |
+| `ant_full_line` | antarctica_getz | as flown | **adopted** |
 | `gl_std_benchmark` | geikie OR westcoast (`--line`) | as flown | **adopted** |
-| `gl_haps60_at_14km` | greenland_2014_2017 | swap → `haps_60mhz` @ 14 km | exploratory |
+| `pilot_smoke` | all four lines (`--line`) | as flown | benchmark |
 
-`gl_full_pbed_proc_att14` must exist before `gl_full_pbed_proc_att14_rssnr`
-(it supplies both the cached constant-gamma companion and the run D is solved
-against). `requires:` is validated, never executed.
+`pilot_smoke` is the cheap end of the fidelity loop: a ~10 km `pilot`
+segment per line — real passes, picked bed, RSSNR reflectivity, matched
+processing — so a simulator change can be scored against every study line
+before committing to a full-line run.
 
 ## Guarantee
 

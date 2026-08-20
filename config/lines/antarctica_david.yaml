@@ -65,6 +65,11 @@ passes:
         slice:
         - 0
         - 3335
+      pilot:
+      - frame: '20171217_01_023'
+        slice:
+        - 526
+        - 1201
   mkb60_2022:
     agl_med_m: 544.0
     season: 2022_Antarctica_BaslerMKB
@@ -85,6 +90,15 @@ passes:
         slice:
         - 0
         - 1489
+      pilot:
+      - frame: '20221212_01_016'
+        slice:
+        - 1776
+        - 1819
+      - frame: '20221212_01_017'
+        slice:
+        - 0
+        - 325
   mkb60_2023:
     agl_med_m: 604.0
     season: 2023_Antarctica_BaslerMKB
@@ -105,8 +119,19 @@ passes:
         slice:
         - 0
         - 1551
+      pilot:
+      - frame: '20231212_02_016'
+        slice:
+        - 21
+        - 389
 
 segments:
+  # 10 km GROUNDED smoke window (s 50-60; the GL is at 95.4, so no hybrid).
+  pilot:
+    s0_km: 50.0
+    n_traces: 48
+    decomp_s_km:
+    - 55.0
   # s 19.95 -> 141.05 km on the 2023 axis: the three-way on-corridor window
   # (lateral gate 1.5 km; every pass contiguous within it). Grounded ice to
   # the GL at 95.4, floating Drygalski beyond.
@@ -174,3 +199,13 @@ provenance:
     caveat: >
       Weakest part of the line, doubly so across a 3.25x carrier ratio.
       Verify per season before quantitative cross-frequency claims.
+
+calibration:
+  gamma_surface_db:
+    value: -11.03
+    why: >
+      the smooth air->ice Fresnel value: no level evidence exists on this
+      line yet, so the physical default is pinned and any surface-reference
+      anomaly will appear in the recorded per-pass bed residuals of the
+      first RSSNR run.
+  att_db_per_km: solve

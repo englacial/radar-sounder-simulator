@@ -1,0 +1,38 @@
+schema_version: 1
+
+meta:
+  name:   pilot_smoke
+  status: adopted
+  role:   benchmark
+  backs: >
+    The cheap end of the fidelity loop: one ~10 km window per line, real
+    passes only, full physics (picked bed, RSSNR reflectivity under the
+    line calibration, matched processing). Run it after a simulator change
+    to see all four lines move -- or not -- in minutes per line rather than
+    hours.
+  runtime: minutes per line on a warm data cache
+
+run:
+  lines:
+  - antarctica_david
+  - antarctica_getz
+  - greenland_geikie01_transit
+  - greenland_westcoast
+  segment: pilot
+
+  bed:
+    source: picked
+
+  reflectivity:
+    gamma_from_rssnr: true
+
+  physics:
+    att_db_per_km:     solve   # -> each line's calibration
+    surface_roughness: true
+
+  processing:
+    chain:      standard
+    proc_cache: true
+    companion:  false
+
+  out_name: pilot_smoke

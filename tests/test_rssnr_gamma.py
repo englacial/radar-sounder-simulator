@@ -1,10 +1,10 @@
 """RSSNR-driven bed reflectivity: mapping math, NaN/censoring handling,
 snapshot pinning, and the simulate() gamma_maps plumbing.
 
-Mapping per claude_notes/required_snr_dataset.md: |Gamma_bed|^2(s) dB =
-2*A*H(s) - RSSNR(s) + K with K median-anchored so the segment-median equals
-the constant run's Fresnel ice->bed value. Tool functions imported from
-tools/run_basal_clutter.py (pure math only -- no network, no frames).
+Mapping (anchoring-free, 2026-08-20): |Gamma_bed|^2(s) dB = 2*A*H(s) -
+RSSNR(s) + (gamma_surface - T^2), gamma_surface manual per line. Tool
+functions imported from tools/run_basal_clutter.py (pure math only -- no
+network, no frames).
 """
 
 import json
@@ -26,13 +26,17 @@ G2_CONST = 20.0 * np.log10(abs(fresnel_normal(3.17, 8.0)))  # ~ -12.86 dB
 
 # ------------------------------------------------------------- mapping math
 
-def test_constant_inputs_map_to_constant_fresnel():
-    """Uniform RSSNR + thickness: median anchoring makes G2 EXACTLY the
-    constant run's Fresnel value everywhere, for any A and RSSNR level."""
+def test_constant_inputs_map_to_the_direct_constant():
+    """Uniform RSSNR + thickness: G2 is EXACTLY 2AH - RSSNR + (gamma - T2)
+    everywhere -- no anchoring of any kind."""
     s = np.linspace(0.0, 50e3, 40)
+    gamma = -11.03
     prof = rbc.rssnr_gamma_profile(s, np.full(40, 37.0), np.full(40, 700.0),
-                                   np.ones(40, bool), 15.0, 0.0, 50e3)
-    np.testing.assert_allclose(prof["g2_db"], G2_CONST, atol=1e-12)
+                                   np.ones(40, bool), 15.0, gamma,
+                                   0.0, 50e3)
+    want = 2 * 15.0 * 0.700 - 37.0 + (gamma - rbc.t2_db())
+    np.testing.assert_allclose(prof["g2_db"], want, atol=1e-9)
+    assert prof["k_db"] == pytest.approx(gamma - rbc.t2_db(), abs=0.01)
     assert prof["n_censored"] == 0
 
 
@@ -43,12 +47,10 @@ def test_two_zone_step_and_k_roundtrip():
     s = np.linspace(0.0, 60e3, n)
     rssnr = np.where(s < 30e3, 30.0, 40.0)
     prof = rbc.rssnr_gamma_profile(s, rssnr, np.full(n, h),
-                                   np.ones(n, bool), att, 0.0, 60e3)
+                                   np.ones(n, bool), att, -11.03, 0.0, 60e3)
     g2 = prof["g2_db"]
     step = np.median(g2[s < 30e3]) - np.median(g2[s >= 30e3])
     assert step == pytest.approx(10.0, abs=1e-9)
-    # median anchoring: the segment median IS the constant value
-    assert float(np.median(g2)) == pytest.approx(G2_CONST, abs=1e-9)
     back = 2.0 * att * h / 1e3 - (g2 - prof["k_db"])
     np.testing.assert_allclose(back, rssnr, atol=0.005)  # k_db rounded 2dp
 
@@ -59,21 +61,29 @@ def test_thickness_term_uses_att():
     s = np.linspace(0.0, 10e3, 20)
     thick = np.where(s < 5e3, 600.0, 850.0)
     prof = rbc.rssnr_gamma_profile(s, np.full(20, 35.0), thick,
-                                   np.ones(20, bool), 20.0, 0.0, 10e3)
+                                   np.ones(20, bool), 20.0, -11.03,
+                                   0.0, 10e3)
     g2 = prof["g2_db"]
     d = np.median(g2[s >= 5e3]) - np.median(g2[s < 5e3])
     assert d == pytest.approx(2.0 * 20.0 * 0.250, abs=1e-9)
 
 
-def test_k_phys_value_and_diagnostic():
-    """K_phys = |G_surf|^2_dB - T2_dB for eps 3.17 (-10.32 dB); the profile
-    records K - K_phys."""
+def test_k_phys_value_and_surface_anomaly():
+    """K_phys = gamma_Fresnel - T2 (-10.32 dB at eps 3.17); the profile
+    records the surface anomaly = gamma_surface - gamma_Fresnel, which
+    equals K - K_phys exactly (T2 cancels)."""
     assert rbc.k_phys_db(3.17) == pytest.approx(-10.32, abs=0.01)
     s = np.linspace(0.0, 10e3, 20)
+    gamma = -3.69
     prof = rbc.rssnr_gamma_profile(s, np.full(20, 30.0), np.full(20, 700.0),
-                                   np.ones(20, bool), 15.0, 0.0, 10e3)
+                                   np.ones(20, bool), 15.0, gamma,
+                                   0.0, 10e3)
     assert prof["k_minus_kphys_db"] == pytest.approx(
         prof["k_db"] - prof["k_phys_db"], abs=0.011)
+    assert prof["surface_anomaly_db"] == pytest.approx(
+        gamma - rbc.gamma_surface_fresnel_db(), abs=0.011)
+    assert prof["k_minus_kphys_db"] == pytest.approx(
+        prof["surface_anomaly_db"], abs=0.02)
 
 
 # ----------------------------------------------------- censoring / NaN floor
@@ -90,7 +100,7 @@ def test_censored_samples_get_floor_not_interpolation():
     rssnr[15:20] = np.nan          # censored gap next to the bright zone
     qc[20] = False                 # qc-fail is censored too
     prof = rbc.rssnr_gamma_profile(s, rssnr, np.full(n, 700.0), qc, 15.0,
-                                   0.0, 40e3)
+                                   -11.03, 0.0, 40e3)
     ok = prof["ok"]
     assert prof["n_censored"] == 6
     floor = float(prof["g2_db"][ok].min())
@@ -105,7 +115,7 @@ def test_all_censored_segment_raises():
     s = np.linspace(0.0, 10e3, 10)
     with pytest.raises(RuntimeError, match="usable RSSNR"):
         rbc.rssnr_gamma_profile(s, np.full(10, np.nan), np.full(10, 700.0),
-                                np.ones(10, bool), 15.0, 0.0, 10e3)
+                                np.ones(10, bool), 15.0, -11.03, 0.0, 10e3)
 
 
 # ------------------------------------------------------- snapshot pin / cache

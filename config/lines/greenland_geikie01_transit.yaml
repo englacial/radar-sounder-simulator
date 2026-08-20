@@ -156,3 +156,18 @@ provenance:
       ft_wind hanning (decode falls back on both passes; scout hand-verified the true value IS hanning)
     caveat: |-
       product fast-time bin differs 0.16% between the passes (33.3859 vs 33.3333 ns) and t0 by 167 ns, so every depth/delay comparison is made in metres or microseconds on each pass's OWN lattice
+
+calibration:
+  gamma_surface_db:
+    value: -10.21
+    why: >
+      level-derived 2026-08-19 (the in-run solve gave K = -9.50 dB; gamma =
+      K + T^2). Only +0.8 dB above the smooth air->ice Fresnel value: this
+      line's reference chain is essentially honest.
+  att_db_per_km:
+    value: 14.0
+    why: >
+      the currently adopted configuration. MacGregor arbitration favours
+      16 +/- 2 full-column but its adoption is a pending USER decision, not
+      made here. Slope regression is REJECTED on this line (thawed-bed
+      Gamma-H confounder gave A~7).

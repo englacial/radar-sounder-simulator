@@ -95,10 +95,6 @@ def test_hybrid_and_full_line_imply_each_other():
     assert ok.to_run_kwargs()["demogorgn_bed"] is True
 
 
-def test_level_anchor_requires_rssnr_gamma():
-    with pytest.raises(ValueError, match="requires gamma_from_rssnr"):
-        RunSpec.model_validate(_doc(reflectivity={"anchor": "level"}))
-
 
 def test_posting_div_requires_the_matched_chain():
     with pytest.raises(ValueError, match="posting_div"):
@@ -150,27 +146,6 @@ def test_companion_is_a_flag_not_another_experiments_name():
         RunSpec.model_validate(_doc(processing={"companion": "sibling_dir"}))
 
 
-def test_derived_number_carries_its_provenance():
-    """`how` is free prose. It was briefly {value, from, how}, but `from`
-    implied a resolvable link that nothing resolved -- a name that could go
-    stale while looking authoritative."""
-    d = _doc(reflectivity={"gamma_from_rssnr": True, "anchor": "level",
-                           "level_deficit_db": {
-                               "value": 3.56,
-                               "how": "contamination-aware, from att20"}})
-    spec = RunSpec.model_validate(d)
-    assert spec.to_run_kwargs()["level_deficit_db"] == 3.56
-    assert "att20" in spec.to_run_kwargs()["level_deficit_note"]
-    with pytest.raises(ValueError, match="[Ee]xtra"):
-        RunSpec.model_validate(_doc(reflectivity={
-            "gamma_from_rssnr": True, "anchor": "level",
-            "level_deficit_db": {"value": 1.0, "from": "somewhere"}}))
-    # a bare float still works for the trivial cases
-    d2 = _doc(reflectivity={"gamma_from_rssnr": True, "anchor": "level",
-                            "level_deficit_db": -7.89})
-    assert RunSpec.model_validate(d2).to_run_kwargs()[
-        "level_deficit_db"] == -7.89
-
 
 # ------------------------------------------------------------- round trip
 # spec name -> the output directory it claims to build
@@ -205,10 +180,18 @@ def test_spec_reproduces_its_recorded_run(name, rel):
     kw = load_spec(EXPERIMENTS / f"{name}.yaml").to_run_kwargs()
     spec = load_spec(EXPERIMENTS / f"{name}.yaml")
     cfg = json.loads(cfg_path.read_text())
-    rg = cfg.get("rssnr_gamma", {})
 
     assert kw["segment"] == cfg["segment"]
-    assert kw["att"] == cfg["att_db_per_km"]
+    # att: 'solve' resolves against the line's calibration at run time; the
+    # recorded config holds the RESOLVED number
+    if kw["att"] == "solve":
+        cal = rbc.LINES[kw["line"] or rbc.DEFAULT_LINE]["CALIBRATION"]
+        want = (cal["att_db_per_km"]["value"]
+                if cal["att_db_per_km"] != "solve" else None)
+        if want is not None:
+            assert want == cfg["att_db_per_km"]
+    else:
+        assert kw["att"] == cfg["att_db_per_km"]
     assert kw["surf_rough"] == cfg["surf_rough"]
     assert kw["picked_bed"] == cfg["picked_bed"]
     assert kw["gamma_rssnr"] == cfg["gamma_rssnr"]
@@ -220,10 +203,7 @@ def test_spec_reproduces_its_recorded_run(name, rel):
     assert spec.run.figures.width_scale == cfg.get("fig_width_scale", 1.0)
     if "line" in cfg:                      # older records predate the key
         assert kw["line"] == cfg["line"]
-    if kw["gamma_rssnr"]:
-        assert kw["anchor"] == rg.get("anchor")
-        assert kw["level_deficit_db"] == rg.get("level_anchor", {}).get(
-            "deficit_db")
+
     if cfg.get("trace_decomp_s_km") is not None:
         assert _norm_ts(kw["trace_decomp_s_km"]) == _norm_ts(
             cfg["trace_decomp_s_km"])
@@ -262,11 +242,12 @@ def test_multi_line_protocol_requires_exactly_one_of_line_or_lines():
         RunSpec.model_validate(d)
 
 
-def test_solve_sentinels_reach_run_kwargs_verbatim():
-    d = _doc(reflectivity={"gamma_from_rssnr": True, "anchor": "level",
-                           "level_deficit_db": "solve"})
+def test_solve_sentinel_reaches_run_kwargs_verbatim():
+    """att: solve resolves against the LINE's calibration at run time; the
+    old level-deficit machinery is gone entirely."""
+    d = _doc(reflectivity={"gamma_from_rssnr": True})
     d["run"]["physics"]["att_db_per_km"] = "solve"
     kw = RunSpec.model_validate(d).to_run_kwargs()
-    assert kw["level_deficit_db"] == "solve"
     assert kw["att"] == "solve"
-    assert kw["level_deficit_note"] is None      # the solve writes its own
+    assert "level_deficit_db" not in kw
+    assert "anchor" not in kw

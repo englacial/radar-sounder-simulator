@@ -20,9 +20,11 @@ meta:
     shelf base -- linearly blended over a 4 km ramp past the grounding line.
     BedMachine/DEMOGORGN report the SEAFLOOR beyond the GL, not the reflector
     the radar sees, and are never used there.
-    K is pinned to the 'full' segment (segments.full_line.k_anchor) and never
-    re-derived on the longer line, so this stays directly comparable to the
-    50 km family it descends from.
+    CALIBRATION (2026-08-20): the old K/D anchoring is replaced by the
+    line's calibration block -- gamma_surface = +7.21 dB (effective; carries
+    the un-audited +18 dB surface anomaly) and A = 20 manual. The mapping
+    constant equals the adopted K = +7.92 exactly, and being anchoring-free
+    it is segment-independent, which retires the K_ANCHOR_SEGMENT pin.
 
 run:
   line:     antarctica_getz
@@ -36,25 +38,8 @@ run:
 
   reflectivity:
     gamma_from_rssnr: true
-    anchor:           level
-    level_deficit_db:
-      value: 3.56
-      how: >
-        Solved under the study-wide level_anchor rule (config/analysis.yaml):
-        contamination-aware, bed*10^(D/10) + surface = measured on the
-        bed-window decomposition, median over the passes whose bed returns
-        stand >= 10 dB clear of their surface returns. All three real passes
-        qualify here (margins +36.8 / +18.8 / +22.3 dB) giving
-        -1.28 / +4.11 / +3.56 -> median +3.56.
-        Source: the median-anchored A = 20 sweep run ('att20' in
-        claude_notes/att_sweep.sh), which has no spec of its own -- so this
-        number cannot yet be regenerated from a committed configuration.
-        `uv run python tools/derive_level_deficit.py <run_dir>` reproduces it
-        from that run's metrics; solving D in-run from this experiment's own
-        constant-gamma arm is the standing fix.
-
   physics:
-    att_db_per_km:     20.0
+    att_db_per_km:     solve   # -> the line's calibration (manual A=20)
     surface_roughness: true
 
   processing:

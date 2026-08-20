@@ -17,17 +17,28 @@ line registry (`--line`).
   hybrid with a grounding-line blend.
 - Bed reflectivity: constant Fresnel, or per-facet values mapped from the
   required-surface-SNR (RSSNR) dataset (`--gamma-from-rssnr`):
-  `|Γ|²(x) = 2·A·H(x) − RSSNR(x) + K`, with the calibration constant K set
-  by median (Fresnel-prior) or level (match measured bed brightness)
-  anchoring (`--anchor`). An optional specular/diffuse split with a
+  `|Γ_bed|²(x) = 2·A·H(x) − RSSNR(x) + (γ_surface − T²)`, where γ_surface
+  is the line's effective surface power reflectivity (the RSSNR dataset is
+  surface-referenced) and T² is the two-way Fresnel transmission
+  (~−0.71 dB, computed, never configured). The mapping is anchoring-free:
+  the former constant K and its median/level anchoring are gone. γ_surface
+  is stated manually in each line's `calibration:` block (the regression
+  intercept cannot separate it from mean bed reflectivity), and its offset
+  from smooth Fresnel (−11.03 dB) is recorded as a per-line surface
+  anomaly; post-run bed-level residuals are recorded as chain diagnostics,
+  never absorbed. An optional specular/diffuse split with a
   tilt-gated specular component models angle-dependent bed scattering.
-- Englacial attenuation: constant one-way dB/km per line (`--att`).
-  Antarctic 20161105_05 line: **20 dB/km, adopted** (level-anchored family
-  analysis). Greenland 20140421_01 line: **14 dB/km is what the current runs
-  use**; the MacGregor 2015 method re-applied to archived reflection
-  intensities (with a Robin-profile full-column correction) arbitrates for
-  16 ± 2 dB/km, but adopting it means re-deriving the level-anchor deficit
-  against a new constant-gamma run, so it is pending rather than in force.
+- Englacial attenuation: constant one-way dB/km per line, set in the
+  line's `calibration:` block as either a manual `{value, why}` pair or
+  `solve` — a Theil–Sen regression of RSSNR on 2H over the line's own
+  store samples (dataset-only; censored samples excluded; floating samples
+  excluded when the line has a grounding line). Current values
+  (2026-08-20): antarctica_david **12.8 solved** [CI 11.5–14.1, r = 0.89];
+  antarctica_getz **20 manual** (regression diagnostic 18.6 [5.2–30.4] —
+  consistent but weak leverage); greenland_geikie01_transit **14 manual**
+  (the regression's γ_bed–thickness independence assumption is rejected
+  there: a thawed-bed Γ–H confounder gives A ≈ 0.7, r = 0.11);
+  greenland_westcoast **34.3 solved** [29.6–38.4, r = 0.85].
 - Processing: the simulated stacks can be passed through a chain matched to
   CSARP_standard (product-posting simulation, motion compensation,
   time-domain backprojection at the alias-limited aperture, multilook)
@@ -74,6 +85,12 @@ uv run python tools/run_basal_clutter.py --config experiments/<name>.yaml
 `config/README.md` indexes them with status, dependencies, and runtime;
 `tests/test_experiment_specs.py` asserts that every spec reproduces the
 `run_config.json` of the directory it claims to build.
+
+The line-level ground truth is reproducible without simulating anything:
+`tools/line_report.py` surveys a line's real passes (map, aligned
+radargrams, pass-agreement metrics), and `tools/calibrate_line.py` reports
+every line's calibration block and attenuation-regression diagnostics
+straight from the RSSNR store.
 
 Detailed chronology, per-study findings, and data-source scouting notes
 live in `claude_notes/` (see `agent_handoff_2026-08-17.md` for the index).

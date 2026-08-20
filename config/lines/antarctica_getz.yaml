@@ -178,7 +178,6 @@ segments:
     n_traces: 335
     decomp_s_km:
     - 31.0
-    k_anchor: full
   full_line:
     s0_km: 0.0
     crosses_gl: true
@@ -186,7 +185,6 @@ segments:
     decomp_s_km:
     - 31.0
     - 120.0
-    k_anchor: full
 figures:
   radargram:
     y_us:
@@ -223,21 +221,24 @@ provenance:
       delay-and-sum channels; rline_rng [-5..5] = 11 looks, dline 6 -> 14.85 m posting, ~25 m effective along-track resolution (M24 CReSIS-standard convention; 11/6 not directly read from the 2016 structs -- recorded assumption)
     window: ft_wind hanning (scout hand-verified)
 
+calibration:
+  gamma_surface_db:
+    # EFFECTIVE, not physical. Equals the adopted level-anchored calibration
+    # (K = +7.92 dB = gamma - T^2), i.e. +18.2 dB ABOVE the smooth air->ice
+    # Fresnel value (-11.03): a surface that "reflects" +7 dB is impossible
+    # as a true reflectivity, and this number simply carries the un-audited
+    # surface-reference anomaly (handoff open item #1). Pinned to preserve
+    # the adopted A=20 level match; dissolves when the audit lands.
+    value: 7.21
+    why: >
+      level-derived from the adopted att20_klevel configuration (K=+7.92);
+      contains the +18 dB un-audited surface-reference anomaly, so it is an
+      effective constant, not a physical reflectivity.
+  att_db_per_km:
+    value: 20.0
+    why: >
+      2026-08 attenuation family analysis: the only member simultaneously
+      physical, level-matching and shape-matching. Chain closure (~31) and
+      slope regression were both rejected on this line.
 # Line-level overrides of the study-wide measurement conventions
 # (config/analysis.yaml). Recorded in every run config built on this line.
-analysis:
-  attenuation_rule:
-    # chain_closure was TRIED here and REJECTED: it yields A ~ 31, but the
-    # 2026-08 attenuation family analysis found A = 20 the only member that
-    # is simultaneously physical, level-matching and shape-matching (bed-tail
-    # slope; implied-reflectivity fractions above 0 dB blow up at 31). The
-    # K - K_phys gap at A = 20 is +18.25 dB and is SUSPECTED to be a
-    # surface-reference error, not attenuation -- the surface-reference audit
-    # is the open item. This pin dissolves the day that audit closes the gap.
-    method: fixed
-    value_db_per_km: 20.0
-    why: >
-      family analysis 2026-08 rejected closure (A~31) on shape+physicality;
-      adopted A=20 level-anchored; K-K_phys=+18.25 dB attributed to the
-      un-audited surface reference (open item #1 in the handoff), so closure
-      is known-broken on this line until that audit lands.

@@ -252,8 +252,8 @@ TAIL_FIT_US: tuple = ()                # robust slope fit window
 TAIL_EXCESS_US: tuple = ()
 TAIL_GUARD_DB: float = 0.0             # sim bed vs surface returns guard
 TAIL_FLOOR_MARGIN_DB: float = 0.0
-LEVEL_ANCHOR_RULE: dict = {}           # how the level deficit D is solved
-ATTENUATION_RULE: dict = {}            # how the attenuation A is derived
+CALIBRATION: dict = {}                 # gamma_surface + A (manual or solve)
+ATTENUATION_REGRESSION: dict = {}      # solver settings (analysis.yaml)
 CORR_WIN_M: float = 0.0                # bed-brightness smoothing scale
 ROUGH_WIN_M: float = 0.0               # bed-roughness detrend window
 GL_RAMP_KM: float = 0.0                # hybrid-bed blend ramp past the GL
@@ -291,7 +291,6 @@ SEGMENTS_CROSSING_GL: tuple = ()       # segments spanning the grounding line
 S0_KM: dict = {}                       # per-segment display origin
 DECOMP_S_KM: dict = {}                 # per-segment single-trace location(s)
 N_TRACES_BY_SEGMENT: dict = {}         # per-segment simulated trace count
-K_ANCHOR_SEGMENT: dict = {}            # segment -> segment whose K it reuses
 REF_PASS: str = ""                     # pick-axis / RSSNR anchor pass
 REF_SEASON: str = ""                   # that pass's season
 REF_FRAMES: tuple = ()                 # frames supplying the pick axis
@@ -532,12 +531,85 @@ def fetch_rssnr_anchor(cache_path=None):
     return d, prov
 
 
-def k_phys_db(eps_ice=None):
-    """Physical anchoring constant |Gamma_surf|^2_dB - T2_dB (the dataset's
-    surface reference and two-way transmission): what K would be if the
-    absolute chain (Fresnel surface, --att attenuation) were trusted."""
+def gamma_surface_fresnel_db(eps_ice=None):
+    """|Gamma_surf|^2 (dB) of a smooth air->ice interface at normal
+    incidence: the PHYSICAL surface reflectivity a line's manual
+    gamma_surface is judged against (~-11.03 dB at eps 3.17)."""
     g = fresnel_normal(1.0, eps_ice or rac.EPS_ICE)
-    return float(20.0 * np.log10(abs(g)) - 20.0 * np.log10(1.0 - g * g))
+    return float(20.0 * np.log10(abs(g)))
+
+
+def t2_db(eps_ice=None):
+    """Two-way power transmission through that interface (dB, negative):
+    field (1 - g^2) each way (~-0.71 dB)."""
+    g = fresnel_normal(1.0, eps_ice or rac.EPS_ICE)
+    return float(20.0 * np.log10(1.0 - g * g))
+
+
+def k_phys_db(eps_ice=None):
+    """gamma_surface_fresnel - T^2: what the mapping constant is when the
+    surface reference is a smooth Fresnel interface. Kept as the named
+    diagnostic baseline; a line's (gamma_surface - T^2) minus this equals
+    its surface-reference anomaly."""
+    return gamma_surface_fresnel_db(eps_ice) - t2_db(eps_ice)
+
+
+def solve_attenuation_regression(s_m, rssnr, thick_m, qc, gl_km=None,
+                                 gl_aware=True, settings=None):
+    """Solve A by robust linear regression of RSSNR on two-way thickness.
+
+    RSSNR(x) = 2 A H(x) + const, ASSUMING (declared, testable, and rejected
+    on the geikie line) that gamma_bed is uncorrelated with H and that
+    gamma_surface and A are constant over the line. Theil-Sen (repo
+    convention: one bright reach cannot set the slope). Censored samples are
+    EXCLUDED, never floored -- flooring would manufacture slope. GL-aware by
+    default: floating samples see a different reflector and are excluded
+    when the line has a grounding line.
+
+    Returns (A_db_per_km, diagnostics)."""
+    settings = settings or ATTENUATION_REGRESSION
+    s_m = np.asarray(s_m, float)
+    rssnr = np.asarray(rssnr, float)
+    h_km = np.asarray(thick_m, float) / 1e3
+    ok = np.asarray(qc, bool) & np.isfinite(rssnr) & np.isfinite(h_km)         & (h_km > 0)
+    n_floating = 0
+    if gl_aware and gl_km is not None:
+        floating = s_m > gl_km * 1e3
+        n_floating = int((ok & floating).sum())
+        ok &= ~floating
+    if ok.sum() < settings["min_samples"]:
+        raise ValueError(
+            f"attenuation regression: only {int(ok.sum())} usable samples "
+            f"(< {settings['min_samples']})")
+    span = float(h_km[ok].max() - h_km[ok].min()) * 1e3
+    if span < settings["min_thickness_span_m"]:
+        raise ValueError(
+            f"attenuation regression: thickness span {span:.0f} m < "
+            f"{settings['min_thickness_span_m']} m -- no leverage on A")
+    x, y = 2.0 * h_km[ok], rssnr[ok]
+    slope, intercept, lo, hi = stats.theilslopes(y, x)
+    r = float(np.corrcoef(x, y)[0, 1])
+    resid = y - (slope * x + intercept)
+    # residual-vs-H structure: a trend here means the gamma_bed-H
+    # independence assumption is failing (the geikie confounder signature)
+    rr = float(np.corrcoef(x, np.abs(resid))[0, 1]) if len(x) > 3 else np.nan
+    return float(slope), {
+        "att_db_per_km": round(float(slope), 2),
+        "slope_ci95_db_per_km": [round(float(lo), 2), round(float(hi), 2)],
+        "intercept_db": round(float(intercept), 2),
+        "r_rssnr_vs_2h": round(r, 3),
+        "resid_rms_db": round(float(np.sqrt(np.mean(resid ** 2))), 2),
+        "r_absresid_vs_2h": round(rr, 3),
+        "n_used": int(ok.sum()), "n_floating_excluded": n_floating,
+        "thickness_span_m": round(span, 0),
+        "gl_aware": bool(gl_aware and gl_km is not None),
+        "assumption": "gamma_bed uncorrelated with H; gamma_surface and A "
+                      "constant over the line. REJECTED on the geikie line "
+                      "(thawed-bed Gamma-H confounder); the slope CI and "
+                      "residual structure are the tests.",
+        "note": "Theil-Sen regression of RSSNR on 2H over the line's own "
+                "store samples; censored samples excluded, floating samples "
+                "excluded when gl_aware."}
 
 
 def segment_s_range(ref, segment):
@@ -553,16 +625,22 @@ def segment_s_range(ref, segment):
     return float(min(ss)), float(max(ss))
 
 
-def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi,
-                        g2_offset_db=0.0):
-    """Median-anchored |Gamma_bed|^2(s) profile (module-section comment).
+def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km,
+                        gamma_surface_db, seg_lo, seg_hi, g2_offset_db=0.0):
+    """The physical reflectivity mapping (unit-tested, anchoring-free):
 
-    Pure mapping math (unit-tested): G2 = 2*A*H - RSSNR + K with K set so
-    median(G2) over QC-passing segment samples equals the constant run's
-    Fresnel ice->bed power reflectivity. Censored samples (qc fail / NaN
-    RSSNR) get the segment's minimum mapped G2 -- their RSSNR is a FLOOR
-    (bed too dim to pick), never interpolated across. Returns the s-sorted
-    profile + recorded stats."""
+        |Gamma_bed|^2(x) = 2*A*H(x) - RSSNR(x) + (gamma_surface - T^2)
+
+    gamma_surface is the line's MANUAL effective surface reference and A its
+    calibrated attenuation, so the constant is direct -- no median anchoring,
+    no level deficit, and therefore no segment dependence: the same
+    calibration produces the same field on any window of the line. The old
+    K survives as a recorded diagnostic, k_db = gamma_surface - T^2, with
+    k_minus_kphys_db == the surface-reference anomaly (gamma_surface -
+    Fresnel). Censored samples (qc fail / RSSNR NaN: bed too dim to pick)
+    take the segment's dimmest mapped value -- a brightness floor, not
+    missing-at-random. ``g2_offset_db`` carries the bed-roughness
+    double-count guard only."""
     s = np.asarray(s, np.float64)
     rssnr = np.asarray(rssnr, np.float64)
     thick_m = np.asarray(thick_m, np.float64)
@@ -572,13 +650,10 @@ def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi,
     if seg.sum() < 5:
         raise RuntimeError(f"only {seg.sum()} usable RSSNR samples in the "
                            "segment")
-    base = 2.0 * att_db_per_km * thick_m / 1e3 - rssnr        # G2 - K
+    k = float(gamma_surface_db) - t2_db() + g2_offset_db
+    g2 = 2.0 * att_db_per_km * thick_m / 1e3 - rssnr + k
     g2_const = float(20.0 * np.log10(abs(
         fresnel_normal(rac.EPS_ICE, rac.EPS_BED))))
-    # g2_offset_db (T1 double-count guard) rides on K: it shifts the whole
-    # mapped profile, so every recorded statistic below sees it.
-    k = g2_const - float(np.median(base[seg])) + g2_offset_db
-    g2 = base + k
     floor = float(np.nanmin(g2[seg]))
     g2 = np.where(ok, g2, floor)
     o = np.argsort(s)
@@ -587,105 +662,26 @@ def rssnr_gamma_profile(s, rssnr, thick_m, qc, att_db_per_km, seg_lo, seg_hi,
     return {"s": s[o], "g2_db": g2[o], "thick_m": thick_m[o],
             "ok": ok[o], "k_db": round(k, 2), "k_phys_db": round(kp, 2),
             "k_minus_kphys_db": round(k - kp, 2),
+            "gamma_surface_db": round(float(gamma_surface_db), 2),
+            "gamma_surface_fresnel_db": round(gamma_surface_fresnel_db(), 2),
+            "surface_anomaly_db": round(
+                float(gamma_surface_db) - gamma_surface_fresnel_db(), 2),
             "g2_const_db": round(g2_const, 2),
             "att_db_per_km": att_db_per_km,
             "n_samples": int(len(s)), "n_censored": int((~ok).sum()),
             "censored_floor_db": round(floor, 2),
             "seg_s_km": [round(seg_lo / 1e3, 2), round(seg_hi / 1e3, 2)],
             "n_seg": int(seg.sum()),
-            # G2 > 0 dB is unphysical reflectivity: the price of holding A
-            # fixed while median-anchoring on a dim-bed-dominated segment.
-            # K - K_phys / (2 * H_med) estimates the attenuation the
-            # anchoring absorbed (recorded, not tuned away).
             "g2_pos_frac_seg": round(float((gs > 0).mean()), 3),
-            # ... and the physically meaningful ceiling for a ROCK bed: the
-            # constant run's Fresnel ice->bed value. Samples above it need a
-            # brighter-than-rock interface (wet/smooth basal patches); a
-            # large fraction means the anchoring is inflating the field.
             "g2_over_fresnel_frac_seg": round(float((gs > g2_const).mean()),
                                               3),
             "g2_max_over_fresnel_db": round(float(gs.max() - g2_const), 2),
-            "implied_eff_att_db_per_km": round(
-                att_db_per_km + (k - kp)
-                / (2.0 * float(np.median(thick_m[seg])) / 1e3), 1),
             "g2_seg_db": {kk: round(float(vv), 1) for kk, vv in
                           [("min", gs.min()), ("p5", np.percentile(gs, 5)),
                            ("med", np.median(gs)),
                            ("p95", np.percentile(gs, 95)),
                            ("max", gs.max())]},
             "med_sample_spacing_m": round(float(np.median(np.diff(s[o]))), 0)}
-
-
-# How level anchoring works. This describes the ALGORITHM and so stays with
-# the code; the per-run number D and the derivation that produced it live in
-# the experiment spec (reflectivity.level_deficit_db: {value, from, how}).
-def solve_level_deficit(per_pass, rule=None):
-    """Solve the level-anchor deficit D (dB) from a constant-gamma run.
-
-    ``per_pass`` maps a pass key to its bed-window levels in dB rel that
-    pass's own surface peak: {"measured", "sim_bed", "sim_surface"} -- the
-    decomposition components already recorded in clutter_<pass>.
-
-    ONE rule for every line (config/analysis.yaml level_anchor). A pass only
-    qualifies if its simulated bed returns stand min_bed_over_surface_db
-    clear of its simulated surface returns: below that its bed window is
-    measuring clutter, its level barely moves with attenuation, and it would
-    drag D toward the clutter floor.
-
-    contamination_aware solves bed*10^(D/10) + surface = measured, i.e. the
-    shift applied to the BED component alone, holding the A-independent
-    surface clutter fixed. plain_difference is measured - sim_bed, which
-    over-credits the bed with power the surface actually supplied; it is kept
-    only so an older number can be reproduced.
-    """
-    rule = dict(rule or LEVEL_ANCHOR_RULE)
-    thr, method = rule["min_bed_over_surface_db"], rule["method"]
-    lin = lambda db: 10.0 ** (db / 10.0)          # noqa: E731
-    rows, used = {}, []
-    for key, v in per_pass.items():
-        meas, bed, surf = v["measured"], v["sim_bed"], v["sim_surface"]
-        if meas is None:                          # synthetic pass
-            continue
-        margin = bed - surf
-        row = {"bed_over_surface_db": round(margin, 2),
-               "qualifies": bool(margin >= thr)}
-        if method == "contamination_aware":
-            resid = lin(meas) - lin(surf)
-            row["d_db"] = (None if resid <= 0 else
-                           round(10.0 * np.log10(resid / lin(bed)), 2))
-            if resid <= 0:
-                row["note"] = ("measured bed window sits BELOW the simulated "
-                               "surface clutter alone: no bed shift solves it")
-        else:
-            row["d_db"] = round(meas - bed, 2)
-        rows[key] = row
-        if row["qualifies"] and row["d_db"] is not None:
-            used.append(row["d_db"])
-    if not used:
-        raise ValueError(
-            f"no pass has bed returns >= {thr} dB above surface returns in "
-            "the bed window, so none can constrain the bed level and D is "
-            f"unsolvable. Per-pass margins: "
-            f"{ {k: v['bed_over_surface_db'] for k, v in rows.items()} }")
-    d = float(np.median(used) if rule["combine"] == "median"
-              else np.mean(used))
-    return round(d, 2), {"deficit_db": round(d, 2), "rule": rule,
-                         "per_pass": rows,
-                         "n_qualifying": len(used),
-                         "note": "D solved under the study-wide level_anchor "
-                         "rule (config/analysis.yaml); passes whose bed "
-                         "window is surface-dominated are excluded and "
-                         "recorded with their margin"}
-
-
-LEVEL_ANCHOR_METHOD = (
-    "K_level = K_median + D. The median-anchored K pins the median "
-    "|Gamma|^2 to the Fresnel constant, which makes the RECEIVED bed level "
-    "depend on A; level anchoring instead pins the received level by raising "
-    "K with a measured bed-window deficit D. Received bed level shifts "
-    "dB-for-dB with K (received ~ K - RSSNR, independent of A), so one "
-    "analytic step replaces an iteration; the post-run per-pass residuals "
-    "land in rssnr_level_anchor and must be verified there.")
 
 
 def bed_rough_nadir_db(sigma_m, f0=None, eps_ice=None):
@@ -743,51 +739,31 @@ def zone_g2_stats(gmap, run_lo, run_hi, gl_km=None):
     return out
 
 
-def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
-                      extra_db=0.0, anchor="median", level_deficit_db=None,
-                      k_anchor_segment=None, zone_gl_km=None,
-                      level_deficit_note=None):
-    """Fetch + map: the shared anchor G2(s) profile dict (rssnr_gamma_profile
-    output + fetch provenance), on the anchor along-track axis ``axis``
-    (ref_bed_picks).
+def build_rssnr_gamma(axis, segment, att, gamma_surface_db,
+                      bed_rough_sigma=None, extra_db=0.0, zone_gl_km=None):
+    """Fetch + map: the shared G2(s) profile dict (rssnr_gamma_profile output
+    + fetch provenance) on the anchor along-track axis (ref_bed_picks),
+    under the line's calibration (gamma_surface manual, A calibrated).
+    Anchoring-free: the mapping constant is gamma_surface - T^2 directly, so
+    the same calibration yields the same field on any segment -- the old
+    per-segment K anchoring (K_ANCHOR_SEGMENT) is obsolete.
 
     DOUBLE-COUNT GUARD (``bed_rough_sigma``, T1): the RSSNR-derived G2 is
-    calibrated against the MEASURED bed echo, which already contains whatever
-    roughness loss the real bed has. Switching on sub-facet bed roughness
-    makes the kernel apply exp(-sigma^2 K^2) a second time, so the mapped G2
-    is raised by exactly that nadir attenuation and the nadir bed level is
-    conserved by construction (verified against baseline in the metrics).
-    Only the COHERENT term is compensated -- the added incoherent term is
-    surplus, so the conservation is exact only while the specular term
-    dominates at nadir; the measured nadir shift is reported."""
+    calibrated against the MEASURED bed echo, which already contains the
+    real bed's roughness loss; enabling sub-facet bed roughness would apply
+    it twice, so G2 is raised by the nadir coherent attenuation (+ the
+    recorded empirical residual)."""
     d, prov = fetch_rssnr_anchor()
     tr = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
     sx, sy = tr.transform(d["lon"], d["lat"])
     s_smp = project_to_track(sx, sy, axis["x"], axis["y"], axis["s"])
     thick = C / (2.0 * np.sqrt(axis["eps_ice"])) * (d["btw"] - d["stw"])
-    # K is anchored on ``k_anchor_segment`` (default: the run's own segment).
-    # The extended run pins it to the 50 km "full" segment so the mapping --
-    # and therefore K -- is bit-identical to the recorded att20_klevel family
-    # while the SCENE covers 0-69.7 km (K_ANCHOR_SEGMENT).
-    k_seg = k_anchor_segment or segment
-    seg_lo, seg_hi = segment_s_range(axis, k_seg)
+    seg_lo, seg_hi = segment_s_range(axis, segment)
     shift = ((-bed_rough_nadir_db(bed_rough_sigma) + extra_db)
              if bed_rough_sigma else 0.0)
-    lvl = 0.0
-    if anchor == "level":
-        if level_deficit_db is None:
-            raise ValueError(
-                "anchor 'level' needs an explicit level_deficit_db. D is "
-                "solved against a particular constant-gamma run at a "
-                "particular attenuation, so it is a property of that run "
-                "PAIR, not of the line -- state it in the experiment spec "
-                "(reflectivity.level_deficit_db) with its provenance.")
-        lvl = float(level_deficit_db)
-        shift = shift + lvl
-    elif anchor != "median":
-        raise ValueError(f"unknown anchor {anchor!r}")
     prof = rssnr_gamma_profile(s_smp, d["rssnr"], thick, d["qc"], att,
-                               seg_lo, seg_hi, g2_offset_db=shift)
+                               gamma_surface_db, seg_lo, seg_hi,
+                               g2_offset_db=shift)
     if bed_rough_sigma:
         prof["bed_rough_guard"] = {
             "sigma_m": bed_rough_sigma,
@@ -797,40 +773,11 @@ def build_rssnr_gamma(axis, segment, att, bed_rough_sigma=None,
             "g2_shift_db": round(shift, 2),
             "note": "G2 raised by the nadir coherent-term roughness "
             "attenuation so the nadir bed level is conserved (the RSSNR "
-            "calibration already contains the real bed's roughness loss). "
-            "The analytic term compensates the COHERENT part only; "
-            "empirical_extra_db is the pilot-measured residual that brings "
-            "the nadir bed window back onto the baseline once the added "
-            "INCOHERENT term is counted (recorded, not tuned per pass)"}
-    prof["anchor"] = anchor
-    prof["k_anchor_segment"] = k_seg
-    if k_seg != segment:
-        run_lo, run_hi = segment_s_range(axis, segment)
-        m = prof["ok"] & (prof["s"] >= run_lo) & (prof["s"] <= run_hi)
-        gr = prof["g2_db"][m]
-        prof["g2_run_seg_db"] = {
-            "seg_s_km": [round(run_lo / 1e3, 2), round(run_hi / 1e3, 2)],
-            "n_seg": int(m.sum()),
-            "g2_pos_frac_seg": round(float((gr > 0).mean()), 3),
-            **{kk: round(float(vv), 1) for kk, vv in
-               [("min", gr.min()), ("p5", np.percentile(gr, 5)),
-                ("med", np.median(gr)), ("p95", np.percentile(gr, 95)),
-                ("max", gr.max())]},
-            "note": f"|Gamma_bed|^2 over the RUN segment ({segment}); K "
-            f"itself stays anchored on '{k_seg}' so the mapping matches the "
-            "recorded family. The headline g2_seg_db block is the K-anchor "
-            "segment's."}
+            "calibration already contains the real bed's roughness loss)."}
     if zone_gl_km is not None:
         run_lo, run_hi = segment_s_range(axis, segment)
         prof["g2_zones_db"] = zone_g2_stats(prof, run_lo, run_hi,
                                             gl_km=zone_gl_km)
-    if anchor == "level":
-        prof["level_anchor"] = {
-            "deficit_db": round(lvl, 2),
-            "k_median_db": round(prof["k_db"] - shift, 2),
-            "k_level_db": prof["k_db"],
-            "source": level_deficit_note or "supplied",
-            "note": LEVEL_ANCHOR_METHOD}
     prof["provenance"] = prov
     prof["note"] = RSSNR_GAMMA_NOTE
     return prof
@@ -3038,8 +2985,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
         bed_rough_extra_db=0.0, passes=None, spec=None,
-        anchor="median", level_deficit_db=None, level_deficit_note=None,
-        trace_decomp_s_km=None,
+        gamma_surface_db=None, trace_decomp_s_km=None,
         per_pass_figs=False,
         plot_s_max_km=None, proc_cache=False, line=None,
         spec_doc=None, spec_path=None,
@@ -3159,74 +3105,19 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"({'/'.join(ref['frames'])}), {ref['n']} picks over "
               f"{ref['line_len_km']} km, line gap frac "
               f"{ref['gap_frac_line']:.4f}", flush=True)
-    solve_rec = None
-    if gamma_rssnr and anchor == "level" and level_deficit_db == "solve":
-        # D SOLVED IN-RUN: simulate the constant-gamma arm of this exact
-        # configuration first, read each real pass's bed-window decomposition
-        # off it, and solve D under the study-wide level_anchor rule. The
-        # constant arm lands in this run's own cache, so the acceptance
-        # analysis later replays it for free. No hand-carried deficit
-        # remains anywhere: D is an OUTPUT.
-        print("level anchor: solving D from this configuration's "
-              "constant-gamma arm (config/analysis.yaml level_anchor rule)",
-              flush=True)
-        per = {}
-        for key in [k for k in order
-                    if not PASSES[k].get("synthetic_msl_m")]:
-            print(f"== {key} constant-gamma arm (D solve) ==", flush=True)
-            p_c = prep_pass(key, segment, n_traces, ref=ref, gmap=None,
-                            axis=axis, fine_posting=proc,
-                            posting_div=posting_div,
-                            dgn_seed=demogorgn_seed if demogorgn_bed
-                            else None, hybrid=hybrid,
-                            instrument=instruments.get(key))
-            s_c = simulate_pass(p_c, runs_dir, att, surf_rough, force)
-            pr_c = (process_standard_cached(p_c, s_c, out, att, surf_rough,
-                                            force=force)
-                    if (proc and proc_cache)
-                    else process_standard(p_c, s_c) if proc else None)
-            a_c = analyze_pass(p_c, s_c, proc=pr_c)
-            if a_c["meas"] is None:
-                continue
-            per[key] = {
-                "measured": a_c["meas"]["bed_rel_surf_db"],
-                "sim_bed": a_c["decomposition"]["bed"]["bed_rel_surf_db"],
-                "sim_surface":
-                    a_c["decomposition"]["surface"]["bed_rel_surf_db"]}
-        level_deficit_db, solve_rec = solve_level_deficit(per)
-        level_deficit_note = ("SOLVED IN-RUN from this configuration's "
-                              "constant-gamma arm under the study-wide "
-                              "level_anchor rule (config/analysis.yaml)")
-        parts_txt = []
-        for k, v in solve_rec["per_pass"].items():
-            excl = "" if v["qualifies"] else " EXCL"
-            parts_txt.append(f"{k} {v['d_db']} "
-                             f"({v['bed_over_surface_db']:+.1f} margin{excl})")
-        print(f"  D = {level_deficit_db:+.2f} dB from "
-              f"{solve_rec['n_qualifying']} qualifying pass(es); per pass "
-              + ", ".join(parts_txt), flush=True)
     gmap = None
     if gamma_rssnr:
-        gmap = build_rssnr_gamma(axis, segment, att,
+        if gamma_surface_db is None:
+            gamma_surface_db = float(CALIBRATION["gamma_surface_db"]["value"])
+            print(f"gamma_surface = {gamma_surface_db:+.2f} dB (line "
+                  f"calibration; anomaly vs Fresnel "
+                  f"{gamma_surface_db - gamma_surface_fresnel_db():+.2f} dB)",
+                  flush=True)
+        gmap = build_rssnr_gamma(axis, segment, att, gamma_surface_db,
                                  bed_rough_sigma=bed_rough[0] if bed_rough
                                  else None,
                                  extra_db=bed_rough_extra_db,
-                                 anchor=anchor,
-                                 level_deficit_db=level_deficit_db,
-                                 level_deficit_note=level_deficit_note,
-                                 k_anchor_segment=K_ANCHOR_SEGMENT.get(
-                                     segment),
                                  zone_gl_km=GL_S_KM if hybrid else None)
-        if gmap["k_anchor_segment"] != segment:
-            print(f"K anchored on the '{gmap['k_anchor_segment']}' segment "
-                  f"(s {gmap['seg_s_km']} km), NOT re-derived on "
-                  f"'{segment}': the established mapping is reused",
-                  flush=True)
-        if anchor == "level":
-            la = gmap["level_anchor"]
-            print(f"level anchoring: K_median {la['k_median_db']} -> K_level "
-                  f"{la['k_level_db']} dB (deficit {la['deficit_db']} dB, "
-                  f"{la['source']})", flush=True)
         if bed_rough:
             g = gmap["bed_rough_guard"]
             print(f"bed roughness: sigma {g['sigma_m']} m, l "
@@ -3609,40 +3500,29 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 "the hybrid bed's floating source) and the QC-passing "
                 "RSSNR sample count per zone (the reflectivity mapping's "
                 "along-track support). recorded only"}
-    if gamma_rssnr and anchor == "level":
-        # POST-RUN VERIFICATION of the analytic level anchor: per-pass
-        # simulated minus measured bed-window level (dB rel own surface
-        # peak). The anchor targets the MEDIAN of the three real passes, so
-        # the median residual is the headline and the spread is the
-        # per-pass structure the single constant cannot absorb.
+    if gamma_rssnr:
+        # POST-RUN LEVEL RESIDUALS: a DIAGNOSTIC now, not a solve target.
+        # The calibration (gamma_surface manual, A per the line) makes no
+        # promise to match the level, so the residual is the evidence of how
+        # well the physical chain closes -- recorded, never absorbed.
         res = {k: round(analyses[k]["sim"]["bed_rel_surf_db"]
                         - analyses[k]["meas"]["bed_rel_surf_db"], 2)
                for k in order if analyses[k]["meas"]}
         med = float(np.median(list(res.values()))) if res else float("nan")
-        la = gmap["level_anchor"]
-        metrics["rssnr_level_anchor"] = {
-            **({"solved_in_run": solve_rec} if solve_rec else {}),
-            "value": round(med, 2), "threshold": 2.0, "op": "<=",
-            "pass": bool(abs(med) <= 2.0),
+        metrics["rssnr_level_residuals"] = {
+            "value": round(med, 2), "threshold": None, "op": "record",
+            "pass": True,
             "median_residual_db": round(med, 2),
             "per_pass_residual_db": res,
-            "max_abs_residual_db": round(max(abs(v) for v in res.values()), 2)
-            if res else None,
-            **la,
+            "gamma_surface_db": gmap["gamma_surface_db"],
+            "surface_anomaly_db": gmap["surface_anomaly_db"],
             "implied_reflectivity": {
                 "g2_seg_db": gmap["g2_seg_db"],
-                "g2_pos_frac_seg": gmap["g2_pos_frac_seg"],
-                "note": "|Gamma_bed|^2 over the segment under this "
-                "anchoring. A median above 0 dB means the level match "
-                "requires a bed that reflects MORE power than it receives "
-                "-- impossible as a pure reflectivity, so the level "
-                "anchoring at this attenuation is refuted under that "
-                "interpretation (focusing/volume gain would have to make "
-                "up the difference)."},
-            "note": "KEY DELIVERABLE (level anchoring): K set so the median "
-            "simulated bed-window level matches the median measured one at "
-            "the run's attenuation. value/threshold gate the post-run "
-            "median residual at 2 dB. " + rec}
+                "g2_pos_frac_seg": gmap["g2_pos_frac_seg"]},
+            "note": "per-pass simulated minus measured bed-window level (dB "
+            "rel own surface peak) under the line calibration. NOT a gated "
+            "solve: the mapping is anchoring-free, so this residual is the "
+            "physical-chain closure evidence. recorded only"}
     if gamma_rssnr:
         metrics["rssnr_gamma_mapping"] = {
             "value": gmap["k_db"], "threshold": None, "op": "record",
@@ -3652,13 +3532,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 "g2_seg_db", "n_samples", "n_seg", "n_censored",
                 "censored_floor_db", "seg_s_km", "med_sample_spacing_m",
                 "att_db_per_km", "g2_pos_frac_seg",
-                "implied_eff_att_db_per_km", "k_anchor_segment")},
-            **({"g2_run_seg_db": gmap["g2_run_seg_db"]}
-               if "g2_run_seg_db" in gmap else {}),
+                "gamma_surface_db", "gamma_surface_fresnel_db",
+                "surface_anomaly_db")},
             "snapshot_id": RSSNR_SNAPSHOT,
-            "note": "median-anchored K (dB): |Gamma_bed|^2 = 2*A*H - RSSNR "
-            "+ K; K - K_phys is the absolute-chain gap the anchoring "
-            "absorbs (attenuation + surface-model uncertainty). " + rec}
+            "note": "anchoring-free mapping |Gamma_bed|^2 = 2*A*H - RSSNR "
+            "+ (gamma_surface - T^2), gamma_surface manual per line, A per "
+            "the line calibration. surface_anomaly_db = gamma_surface - "
+            "smooth-Fresnel is the chain diagnostic (old K - K_phys). "
+            + rec}
         if corr_stats is not None:
             metrics["bed_brightness_correlation"] = {
                 "value": round(float(np.mean(
@@ -3718,7 +3599,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "segment_s_km": [round(v / 1e3, 2)
                          for v in segment_s_range(axis, segment)]
         if axis else None,
-        "k_anchor_segment": (gmap or {}).get("k_anchor_segment"),
+
         "hybrid_bed": ({**preps[order[0]]["aux"]["demogorgn"]["hybrid"],
                         "applies": "all passes of this run (one hybrid "
                         "construction per pass scene)"} if hybrid else None),
@@ -3742,22 +3623,18 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         config["rssnr_gamma"] = {
             k: gmap[k] for k in
             ("provenance", "k_db", "k_phys_db", "k_minus_kphys_db",
+             "gamma_surface_db", "gamma_surface_fresnel_db",
+             "surface_anomaly_db",
              "g2_const_db", "g2_seg_db", "n_samples", "n_seg", "n_censored",
              "censored_floor_db", "seg_s_km", "med_sample_spacing_m",
-             "att_db_per_km", "g2_pos_frac_seg",
-             "implied_eff_att_db_per_km", "note")}
+             "att_db_per_km", "g2_pos_frac_seg", "note")}
         config["rssnr_gamma"]["interpolation"] = (
             "linear in anchor along-track s (np.interp, edge-clamped), "
             "cross-track constant; H(x) from the DATASET's surface/bed "
             "twtts (self-consistent with its RSSNR), not the DEM")
-        config["rssnr_gamma"]["anchor"] = anchor
-        config["rssnr_gamma"]["k_anchor_segment"] = gmap["k_anchor_segment"]
-        if "g2_run_seg_db" in gmap:
-            config["rssnr_gamma"]["g2_run_seg_db"] = gmap["g2_run_seg_db"]
+        config["rssnr_gamma"]["calibration"] = dict(CALIBRATION)
         if "g2_zones_db" in gmap:
             config["rssnr_gamma"]["g2_zones_db"] = gmap["g2_zones_db"]
-        if anchor == "level":
-            config["rssnr_gamma"]["level_anchor"] = gmap["level_anchor"]
         config["rssnr_gamma"]["shared_field"] = (
             "ONE anchor-derived gamma field applied identically to all "
             "three passes (per-pass fields would confound the altitude "
@@ -4094,78 +3971,50 @@ def _report(out, case, config, metrics, notes, figs):
     print(f"wrote {out / 'report.html'}", flush=True)
 
 
-def run_with_solved_attenuation(kw):
-    """Derive A under the active line's attenuation_rule, then run.
+def resolve_calibration(line=None):
+    """(gamma_surface_db, att_db_per_km, record) for the active line.
 
-    No attenuation rate is encoded in code or in any experiment spec: the
-    rule (config/analysis.yaml, line-overridable) supplies either a
-    documented fixed value -- a line where a derivation was tried and
-    REJECTED -- or the chain_closure solve. Closure is analytic around a
-    run: the mapping already records implied_eff_att_db_per_km =
-    A + (K - K_phys)/(2 H_med), which IS the closure update, so each
-    evaluation is one full run and convergence is checked by the next.
-    The solved A and the full evaluation history are recorded in the run
-    config; every chunk cache is keyed on A, so a moved A re-simulates
-    (correct: different physics) while a converged one replays free.
+    gamma_surface is manual only (the regression intercept cannot separate
+    it from the mean bed reflectivity -- decision 2026-08-20). A is manual,
+    or solved by the RSSNR-vs-2H Theil-Sen regression over the line's own
+    store samples: dataset-only, no simulation, one shot, seed-free. The
+    regression is ALSO computed as a diagnostic when A is manual, so every
+    line's fit is on record next to whatever value it actually uses.
     """
-    activate_line(kw["line"] or DEFAULT_LINE)
-    rule = dict(ATTENUATION_RULE)
-    if rule["method"] == "fixed":
-        print(f"attenuation rule [{LINE}]: FIXED at "
-              f"{rule['value_db_per_km']} dB/km -- {rule['why'][:120]}",
-              flush=True)
-        kw = {**kw, "att": float(rule["value_db_per_km"])}
-        return run(**kw)
-    if not (kw.get("gamma_rssnr") and kw.get("anchor") == "level"):
-        raise ValueError(
-            "attenuation_rule chain_closure needs the RSSNR mapping with "
-            "level anchoring (K does not exist without it); this run has "
-            f"gamma_rssnr={kw.get('gamma_rssnr')}, anchor={kw.get('anchor')}")
-    a = float(rule["initial_db_per_km"])
-    tol = float(rule["tolerance_db_per_km"])
-    history = []
-    for ev in range(int(rule["max_evaluations"])):
-        a = round(a, 2)
-        print(f"attenuation solve [{LINE}]: evaluation {ev + 1} at "
-              f"A = {a} dB/km", flush=True)
-        metrics, config, out = run(**{**kw, "att": a})
-        implied = metrics["rssnr_gamma_mapping"]["implied_eff_att_db_per_km"]
-        resid = implied - a
-        history.append({"evaluation": ev + 1, "att_db_per_km": a,
-                        "k_minus_kphys_db":
-                            metrics["rssnr_gamma_mapping"]
-                            ["k_minus_kphys_db"],
-                        "implied_eff_att_db_per_km": implied,
-                        "residual_db_per_km": round(resid, 2)})
-        print(f"  closure: K - K_phys = "
-              f"{metrics['rssnr_gamma_mapping']['k_minus_kphys_db']} dB -> "
-              f"implied A = {implied} (residual {resid:+.2f} dB/km, "
-              f"tol {tol})", flush=True)
-        if abs(resid) <= tol:
-            converged = True
-            break
-        a = implied
+    activate_line(line or LINE)
+    cal = dict(CALIBRATION)
+    gamma = float(cal["gamma_surface_db"]["value"])
+    rec = {"line": LINE, "gamma_surface_db": gamma,
+           "gamma_surface_why": cal["gamma_surface_db"]["why"],
+           "surface_anomaly_db": round(
+               gamma - gamma_surface_fresnel_db(), 2),
+           "gl_aware": cal.get("gl_aware", True)}
+    fit = None
+    try:
+        d, prov = fetch_rssnr_anchor()
+        axis = ref_bed_picks()
+        tr = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
+        sx, sy = tr.transform(d["lon"], d["lat"])
+        s_smp = project_to_track(sx, sy, axis["x"], axis["y"], axis["s"])
+        thick = C / (2.0 * np.sqrt(axis["eps_ice"])) * (d["btw"] - d["stw"])
+        _, fit = solve_attenuation_regression(
+            s_smp, d["rssnr"], thick, d["qc"], gl_km=GL_S_KM,
+            gl_aware=rec["gl_aware"])
+    except Exception as e:
+        fit = {"error": f"{type(e).__name__}: {e}"}
+    rec["regression"] = fit
+    if cal["att_db_per_km"] == "solve":
+        if fit is None or "error" in fit:
+            raise ValueError(f"line {LINE!r} calibrates A by regression but "
+                             f"the fit failed: {fit}")
+        att = fit["att_db_per_km"]
+        rec["att_db_per_km"] = att
+        rec["att_source"] = "solved (RSSNR-vs-2H Theil-Sen regression)"
     else:
-        converged = False
-        print(f"attenuation solve DID NOT CONVERGE in "
-              f"{rule['max_evaluations']} evaluations (last residual "
-              f"{resid:+.2f} dB/km) -- results are at the LAST evaluation's "
-              "A and must be read with that caveat", flush=True)
-    solve_doc = {"rule": rule, "history": history,
-                 "converged": converged,
-                 "solved_att_db_per_km": history[-1]["att_db_per_km"],
-                 "note": "A derived under the study-wide attenuation_rule; "
-                 "the solved value is an OUTPUT of this run, not an input "
-                 "carried in any config"}
-    cfg_path = Path(out) / "run_config.json"
-    doc = json.loads(cfg_path.read_text())
-    doc["attenuation_solve"] = solve_doc
-    cfg_path.write_text(json.dumps(doc, indent=1) + "\n")
-    print(f"attenuation solve [{LINE}]: A = "
-          f"{solve_doc['solved_att_db_per_km']} dB/km "
-          f"({'converged' if converged else 'NOT CONVERGED'}, "
-          f"{len(history)} evaluation(s))", flush=True)
-    return metrics, doc, out
+        att = float(cal["att_db_per_km"]["value"])
+        rec["att_db_per_km"] = att
+        rec["att_source"] = f"manual: {cal['att_db_per_km']['why']}"
+    return gamma, float(att), rec
 
 
 def main_config():
@@ -4219,9 +4068,28 @@ def main_config():
           flush=True)
     if spec.meta.requires:
         print(f"  requires: {', '.join(spec.meta.requires)}", flush=True)
+    gamma, att, cal_rec = resolve_calibration(kw["line"])
+    print(f"calibration [{cal_rec['line']}]: gamma_surface "
+          f"{gamma:+.2f} dB (anomaly {cal_rec['surface_anomaly_db']:+.2f}), "
+          f"A = {att:g} dB/km ({cal_rec['att_source'].split(':')[0]})",
+          flush=True)
+    if cal_rec.get("regression") and "error" not in cal_rec["regression"]:
+        f = cal_rec["regression"]
+        print(f"  regression: A {f['att_db_per_km']} "
+              f"[{f['slope_ci95_db_per_km'][0]}, "
+              f"{f['slope_ci95_db_per_km'][1]}] dB/km, r "
+              f"{f['r_rssnr_vs_2h']}, n {f['n_used']}"
+              + (f" ({f['n_floating_excluded']} floating excluded)"
+                 if f["n_floating_excluded"] else ""), flush=True)
+    kw["gamma_surface_db"] = gamma
     if kw["att"] == "solve":
-        return run_with_solved_attenuation(kw)
-    return run(**kw)
+        kw["att"] = att
+    out = run(**kw)
+    cfg_path = Path(out[2]) / "run_config.json"
+    doc = json.loads(cfg_path.read_text())
+    doc["calibration_resolution"] = cal_rec
+    cfg_path.write_text(json.dumps(doc, indent=1) + "\n")
+    return out
 
 
 def main():
@@ -4366,19 +4234,6 @@ def main():
                     help="extra dB added to the --bed-rough gamma guard (the "
                     "pilot-measured residual that also compensates the added "
                     "INCOHERENT term; recorded in the config)")
-    ap.add_argument("--anchor", choices=["median", "level"],
-                    default="median",
-                    help="RSSNR K anchoring: 'median' (default, backward "
-                    "compatible) pins the median |Gamma|^2 to the Fresnel "
-                    "constant; 'level' pins the simulated bed-window LEVEL "
-                    "to the measured one by raising K with the deficit D "
-                    "supplied via --level-deficit-db (no default)")
-    ap.add_argument("--level-deficit-db", type=float, default=None,
-                    help="the --anchor level deficit D (dB). REQUIRED with "
-                    "--anchor level: D is solved against a particular "
-                    "constant-gamma run at a particular attenuation, so "
-                    "there is no line default. Experiment specs state it "
-                    "with its provenance; see config/README.md")
     ap.add_argument("--specular-fraction", type=float, default=None,
                     metavar="F_S",
                     help="split the RSSNR-mapped bed reflectivity into a "
@@ -4432,7 +4287,6 @@ def main():
         bed_rough=tuple(args.bed_rough) if args.bed_rough else None,
         posting_div=args.posting_div, passes=args.passes,
         bed_rough_extra_db=args.bed_rough_extra_db,
-        anchor=args.anchor, level_deficit_db=args.level_deficit_db,
         trace_decomp_s_km=args.trace_decomp_s,
         per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,
         proc_cache=args.proc_cache, line=args.line,

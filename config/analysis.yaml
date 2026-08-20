@@ -51,43 +51,18 @@ bed_tail:
   guard_db: 10.0
   floor_margin_db: 3.0          # measured tail counted floor-limited below
 
-level_anchor:
-  # How the level-anchor deficit D is solved. ONE rule for every line.
-  # The two adopted configurations used to differ: the Antarctic line solved
-  # the contamination-aware form, the Greenland line took a plain difference.
-  # That was invisible on the Antarctic line -- surface sits 19-37 dB below
-  # the bed there, so the two agree to 0.02 dB -- and worth 3.67 dB on the
-  # Greenland line, where the bed stands only 10.3 dB clear of the surface
-  # returns. Unified on the contamination-aware form, which is what the
-  # Greenland derivation note argued for and did not apply.
-  method: contamination_aware     # solve bed*10^(D/10) + surface = measured
-  # A pass whose bed window is surface-dominated cannot constrain the bed
-  # level: its total moves barely at all with attenuation and would drag D
-  # toward the clutter floor. Same threshold the bed-tail guard uses.
-  min_bed_over_surface_db: 10.0
-  combine: median                 # across the qualifying real passes
-
-attenuation_rule:
-  # How the one-way englacial attenuation A is DERIVED. Like level_anchor,
-  # this encodes the METHOD; no attenuation rate appears in any experiment
-  # spec or in code. The solved A is an OUTPUT, recorded per run.
-  #
-  # chain_closure: choose A so the level-anchored K equals K_phys -- i.e. so
-  # the absolute chain (Fresnel surface reference, two-way transmission, A)
-  # is self-consistent. The solve is analytic around a run:
-  # A1 = A0 + (K - K_phys) / (2 H_med); one verification run at A1 confirms
-  # the residual. Requires the RSSNR mapping with level anchoring (K does
-  # not exist without it).
-  #
-  # A line may OVERRIDE with {method: fixed, value_db_per_km: X, why: ...}
-  # where a derivation was tried and REJECTED -- the number then lives in
-  # that line's file with its rejection history, never in code.
-  method: chain_closure
-  # Solver seed only: the converged A is independent of it (to first order;
-  # the verification run measures the residual). NOT a physics default.
-  initial_db_per_km: 15.0
-  tolerance_db_per_km: 0.5
-  max_evaluations: 3
+attenuation_regression:
+  # Settings for the A = solve path: Theil-Sen regression of RSSNR on 2H
+  # over the line's own store samples (censored excluded; floating excluded
+  # when the line has a grounding line and calibration.gl_aware is true,
+  # the default). Replaces the chain-closure rule, which was shown VACUOUS
+  # on 2026-08-19: with the level absorbed by calibration, K - K_phys is
+  # invariant in A, so closure had no solution. The regression's declared
+  # assumption -- gamma_bed uncorrelated with thickness -- is rejected on
+  # the geikie line (its calibration pins A manually for that reason) and
+  # is tested per fit via the slope CI and residual structure.
+  min_samples: 20
+  min_thickness_span_m: 200.0
 
 smoothing:
   profile_m: 1000.0             # bed-brightness correlation scale (~ RSSNR)

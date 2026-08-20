@@ -49,19 +49,6 @@ class _Base(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Derived(_Base):
-    """A number computed from another run, carrying its own provenance.
-
-    ``how`` is free prose: where it came from and how it was solved. It was
-    briefly a structured {value, from, how}, but the ``from`` field implied a
-    resolvable link that nothing ever resolved -- a name that could go stale
-    while looking authoritative. Provenance that is only ever read by humans
-    should look like prose."""
-
-    value: float
-    how: str | None = None
-
-
 class ExtraPass(_Base):
     """An observation this experiment invents: a carrier pass's geometry
     re-flown at a new altitude, optionally with a different radar.
@@ -114,48 +101,28 @@ class SpecularDiffuse(_Base):
 
 
 class Reflectivity(_Base):
+    """Bed reflectivity model. With gamma_from_rssnr the mapping is
+    anchoring-free: |Gamma_bed|^2 = 2 A H - RSSNR + (gamma_surface - T^2),
+    with gamma_surface and A from the LINE's calibration block. The old
+    anchor/level-deficit machinery (K, D) is gone -- D was the residual of
+    solving K, and gamma_surface IS that constant, named physically."""
+
     gamma_from_rssnr: bool = False
-    anchor: Literal["median", "level"] = "median"
-    # a stated {value, how}, a bare float, or "solve" -- derive D in-run
-    # from this configuration's own constant-gamma arm under the study-wide
-    # level_anchor rule, so the deficit is an output rather than a carried
-    # number.
-    level_deficit_db: Derived | float | Literal["solve"] | None = None
     specular_diffuse: SpecularDiffuse | None = None
 
     @model_validator(mode="after")
-    def _level_needs_rssnr(self):
-        if self.anchor == "level" and not self.gamma_from_rssnr:
-            raise ValueError("anchor 'level' requires gamma_from_rssnr: true")
-        if self.anchor == "level" and self.level_deficit_db is None:
-            raise ValueError(
-                "anchor 'level' requires an explicit level_deficit_db: D is "
-                "solved against a particular run at a particular "
-                "attenuation, so there is no line-level default")
+    def _spec_needs_rssnr(self):
         if self.specular_diffuse and not self.gamma_from_rssnr:
             raise ValueError("specular_diffuse splits the RSSNR-mapped bed "
                              "reflectivity: needs gamma_from_rssnr: true")
         return self
 
-    @property
-    def deficit_db(self):
-        d = self.level_deficit_db
-        return d.value if isinstance(d, Derived) else d
-
-    @property
-    def deficit_note(self):
-        """How D was solved, recorded beside it in the run config so the
-        number and its derivation cannot drift apart."""
-        d = self.level_deficit_db
-        return d.how if isinstance(d, Derived) else None
-
 
 class Physics(_Base):
-    # REQUIRED, no default: a silent default is how a run reproduced a
-    # REJECTED attenuation (see claude_notes/foundations_review_2026-08-17.md
-    # section A2). Either a stated number (exploratory runs, sweeps) or the
-    # literal "solve" -- derive A under the active line's attenuation_rule
-    # (config/analysis.yaml), so no rate is carried in any spec or in code.
+    # REQUIRED, no default. Either a stated number (exploratory sweeps) or
+    # the literal "solve" -- resolve from the LINE's calibration block
+    # (manual value with provenance, or the RSSNR-vs-2H regression). No
+    # attenuation rate lives in any spec or in code.
     att_db_per_km: float | Literal["solve"]
     surface_roughness: bool = True
     antenna: Literal["array", "isotropic", "array8"] = "array"
@@ -317,9 +284,6 @@ class RunSpec(_Base):
             "demogorgn_seed": r.bed.demogorgn_seed,
             "bed_ablation": r.bed.ablation,
             "gamma_rssnr": ref.gamma_from_rssnr,
-            "anchor": ref.anchor,
-            "level_deficit_db": ref.deficit_db,
-            "level_deficit_note": ref.deficit_note,
             "spec": (None if ref.specular_diffuse is None else
                      (ref.specular_diffuse.specular_fraction,
                       ref.specular_diffuse.tilt_s0_deg,

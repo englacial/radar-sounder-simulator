@@ -14,13 +14,14 @@ meta:
     ~2.2 h + arm. A moved solved-A re-simulates (different physics); a
     converged one replays from cache.
   note: >
-    NO NUMBERS. Every quantity that used to be hand-carried is now derived
-    and recorded as an output: the bed comes from the reference pass's picks,
-    the reflectivity structure from the pinned RSSNR store, D from this
-    run's own constant-gamma arm under the level_anchor rule, and A from the
-    line's attenuation_rule (chain_closure on both Greenland lines; the
-    getz line pins A=20 with its rejection history, but getz is not part of
-    this protocol -- different bed machinery, own experiment).
+    NO NUMBERS in this spec. The bed comes from the reference pass's picks,
+    the reflectivity structure from the pinned RSSNR store, and the two
+    physical calibration parameters -- gamma_surface (manual, with
+    provenance) and A (manual or the RSSNR-vs-2H regression) -- from each
+    LINE's calibration block. The old K/D anchoring machinery is gone: the
+    mapping is |Gamma|^2 = 2AH - RSSNR + (gamma_surface - T^2), and the
+    post-run bed-level residuals are recorded as chain diagnostics rather
+    than absorbed.
     Run:  uv run python tools/run_basal_clutter.py \
             --config config/experiments/gl_std_benchmark.yaml --line <name>
     Passes default to the line's real ones (synthetics are design studies,
@@ -38,8 +39,6 @@ run:
 
   reflectivity:
     gamma_from_rssnr: true
-    anchor:           level
-    level_deficit_db: solve
 
   physics:
     att_db_per_km:     solve

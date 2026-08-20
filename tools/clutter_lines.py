@@ -77,13 +77,37 @@ class SegmentSpec(_Base):
     s0_km: float                       # display origin (anchor along-track)
     n_traces: int                      # simulated traces
     decomp_s_km: list[float]           # single-trace decomposition location(s)
-    k_anchor: str | None = None        # reuse another segment's RSSNR K
     # This window spans the line's grounding line. Declared, not inferred
     # from a segment NAME (the old trigger was `segment == "full_line"`, a
     # getz-ism): a crossing segment gets the hybrid bed machinery -- grounded
     # DEMOGORGN blended into the floating radar picks -- and the zone-split
     # metrics.
     crosses_gl: bool = False
+
+
+class ManualValue(_Base):
+    """A manually set calibration parameter. The why is mandatory: a pinned
+    number without its provenance is how stale values survive."""
+
+    value: float
+    why: str
+
+
+class Calibration(_Base):
+    """The line's physical calibration: gamma_surface and A.
+
+    The reflectivity mapping is |Gamma_bed|^2 = 2 A H - RSSNR + (gamma_surface
+    - T^2), with T^2 the two-way Fresnel transmission. gamma_surface is the
+    EFFECTIVE surface power reflectivity of the RSSNR reference -- manual
+    only, per decision 2026-08-20, because the regression intercept cannot
+    separate it from the mean bed reflectivity. A is manual or 'solve'
+    (Theil-Sen regression of RSSNR on 2H over the line's own store samples;
+    grounded-only when the line has a grounding line and gl_aware is true,
+    which is the default)."""
+
+    gamma_surface_db: ManualValue
+    att_db_per_km: ManualValue | Literal["solve"]
+    gl_aware: bool = True
 
 
 class Identity(_Base):
@@ -152,6 +176,7 @@ class LineSpec(_Base):
     synthetic_passes: dict[str, SyntheticPass] = {}
     segments: dict[str, SegmentSpec]
     figures: Framing
+    calibration: Calibration
     rssnr: Rssnr | None = None
     unsupported: list[str] = []
     provenance: Provenance
@@ -208,9 +233,6 @@ class LineSpec(_Base):
                 raise ValueError(
                     f"segment {name!r} declares crosses_gl but the line has "
                     "no grounding_line_s_km")
-            if seg.k_anchor and seg.k_anchor not in segs:
-                raise ValueError(f"segment {name!r} anchors K on unknown "
-                                 f"segment {seg.k_anchor!r}")
         return self
 
     # ------------------------------------------------------------- globals
@@ -274,11 +296,9 @@ class LineSpec(_Base):
                             for k, v in self.segments.items()},
             "N_TRACES_BY_SEGMENT": {k: v.n_traces
                                     for k, v in self.segments.items()},
+            "CALIBRATION": self.calibration.model_dump(),
             "SEGMENTS_CROSSING_GL": tuple(
                 k for k, v in self.segments.items() if v.crosses_gl),
-            "K_ANCHOR_SEGMENT": {k: v.k_anchor
-                                 for k, v in self.segments.items()
-                                 if v.k_anchor},
             "REF_PASS": self.reference.pass_key,
             "REF_SEASON": ref_season,
             "REF_FRAMES": tuple(self.reference.frames),

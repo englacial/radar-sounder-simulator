@@ -72,47 +72,11 @@ def test_line_override_merges_and_reports_what_changed():
         == (12.0, 8.0)
 
 
-def test_line_overrides_are_exactly_the_documented_ones():
-    """An override must be deliberate. The ONLY one shipped is getz's pinned
-    attenuation (family analysis rejected closure; surface-reference audit
-    open) -- and it must carry its rejection history."""
-    for name, (_resolved, changed) in rbc.LINE_ANALYSIS.items():
-        if name == "antarctica_getz":
-            assert set(k.split(".")[0] for k in changed) == \
-                {"attenuation_rule"}, changed
-        else:
-            assert changed == {}, f"{name} overrides {sorted(changed)}"
-    rbc.activate_line("antarctica_getz")
-    assert rbc.ATTENUATION_RULE["method"] == "fixed"
-    assert rbc.ATTENUATION_RULE["value_db_per_km"] == 20.0
-    assert "rejected closure" in rbc.ATTENUATION_RULE["why"]
-    for name in ("greenland_geikie01_transit", "greenland_westcoast"):
-        rbc.activate_line(name)
-        assert rbc.ATTENUATION_RULE["method"] == "chain_closure", name
-
-
-def test_fixed_attenuation_without_a_why_is_refused():
-    """A pinned number without its rejection history is exactly what the
-    rule exists to prevent."""
-    from clutter_analysis import AttenuationRule
-    with pytest.raises(ValueError, match="why"):
-        AttenuationRule(method="fixed", value_db_per_km=20.0).resolved
-    ok = AttenuationRule(method="fixed", value_db_per_km=20.0,
-                         why="rejected because ...").resolved
-    assert ok.value_db_per_km == 20.0
-
-
-def test_closure_rule_needs_its_solver_fields():
-    from clutter_analysis import AttenuationRule
-    with pytest.raises(ValueError, match="chain_closure needs"):
-        AttenuationRule(method="chain_closure").resolved
-
-
 def test_an_experiment_cannot_set_measurement_conventions():
     """The whole point of the split: per-run windows would let someone move
     the bed window until the residual looked right."""
     doc = {"schema_version": 1, "meta": {"name": "demo"},
-           "run": {"line": "antarctic_2016", "segment": "full",
+           "run": {"line": "antarctica_getz", "segment": "full",
                    "out_name": "demo", "analysis": {"bed_tail": {}},
                    "physics": {"att_db_per_km": 20.0}}}
     with pytest.raises(ValueError, match="[Ee]xtra"):
@@ -127,73 +91,52 @@ def test_line_scoped_constants_resolve_at_call_time():
         assert inspect.signature(fn).parameters["win_m"].default is None
 
 
-# ------------------------------------------------- the level-anchor rule
-def test_level_anchor_rule_is_declared_once():
-    a = load_analysis().level_anchor
-    assert a.method == "contamination_aware"
-    assert a.min_bed_over_surface_db == 10.0
-    assert a.combine == "median"
-    assert rbc.LEVEL_ANCHOR_RULE == a.model_dump()
+# ------------------------------------------ calibration-era conventions
+
+def test_line_overrides_declare_nothing_now():
+    """The getz attenuation pin moved from an analysis override into the
+    line's calibration block, so no line overrides the study conventions
+    today -- the first future override must be deliberate again."""
+    for name, (_resolved, changed) in rbc.LINE_ANALYSIS.items():
+        assert changed == {}, f"{name} overrides {sorted(changed)}"
 
 
-# Recorded bed-window levels (dB rel own surface peak) of the constant-gamma
-# runs the two adopted deficits were solved from.
-_ANT = {"real_low":  dict(measured=-54.28, sim_bed=-53.00, sim_surface=-89.83),
-        "real_9km":  dict(measured=-45.95, sim_bed=-50.08, sim_surface=-68.86),
-        "real_10km": dict(measured=-46.11, sim_bed=-49.68, sim_surface=-71.95)}
-_GL = {"low":  dict(measured=-107.76, sim_bed=-99.87, sim_surface=-110.20),
-       "high": dict(measured=-83.95,  sim_bed=-94.33, sim_surface=-90.19)}
+def test_regression_settings_are_declared_once():
+    a = load_analysis()
+    assert a.attenuation_regression.min_samples == 20
+    assert a.attenuation_regression.min_thickness_span_m == 200.0
+    assert rbc.ATTENUATION_REGRESSION == \
+        a.attenuation_regression.model_dump()
 
 
-def test_one_rule_reproduces_the_antarctic_deficit():
-    """The Antarctic line already solved the contamination-aware form, so
-    unifying must leave its number untouched."""
-    d, rec = rbc.solve_level_deficit(_ANT)
-    assert d == pytest.approx(3.56, abs=0.01)
-    assert rec["n_qualifying"] == 3           # all margins are +18 dB or more
+def test_every_line_declares_its_calibration():
+    """gamma_surface is MANUAL on every line (the regression intercept
+    cannot separate it from the mean bed reflectivity), with a mandatory
+    why; A is manual-with-why or 'solve'."""
+    from clutter_lines import load_all as _load
+    for name, sp in _load().items():
+        c = sp.calibration
+        assert c.gamma_surface_db.why.strip(), name
+        if c.att_db_per_km != "solve":
+            assert c.att_db_per_km.why.strip(), name
+    # the two documented manual-A lines and their reasons
+    lines = _load()
+    getz = lines["antarctica_getz"].calibration
+    assert getz.att_db_per_km.value == 20.0
+    geikie = lines["greenland_geikie01_transit"].calibration
+    assert geikie.att_db_per_km.value == 14.0
+    assert "REJECTED" in geikie.att_db_per_km.why
 
 
-def test_the_same_rule_moves_the_greenland_deficit():
-    """Greenland used a PLAIN difference, which credits the bed with power
-    the surface supplied. Invisible on the Antarctic line, worth 3.67 dB
-    here, where the bed stands only 10.3 dB clear."""
-    d, rec = rbc.solve_level_deficit(_GL)
-    assert d == pytest.approx(-11.56, abs=0.01)
-    plain, _ = rbc.solve_level_deficit(
-        _GL, {**rbc.LEVEL_ANCHOR_RULE, "method": "plain_difference"})
-    assert plain == pytest.approx(-7.89, abs=0.01)      # the retired value
-    assert d - plain == pytest.approx(-3.67, abs=0.02)
+def test_manual_value_requires_a_why():
+    from clutter_lines import ManualValue
+    with pytest.raises(ValueError):
+        ManualValue(value=20.0)
 
 
-def test_surface_dominated_passes_are_excluded_automatically():
-    """The exclusion is DERIVED from the decomposition, not a hand-written
-    pass list -- one threshold reproduces both lines' hand-made choices."""
-    _, rec = rbc.solve_level_deficit(_GL)
-    assert rec["per_pass"]["low"]["qualifies"] is True
-    assert rec["per_pass"]["high"]["qualifies"] is False
-    assert rec["per_pass"]["high"]["bed_over_surface_db"] < 0
-    _, ant = rbc.solve_level_deficit(_ANT)
-    assert all(v["qualifies"] for v in ant["per_pass"].values())
-
-
-def test_no_qualifying_pass_fails_loudly():
-    """If attenuation dims the bed until nothing clears the threshold, D is
-    unsolvable -- it must say so, not fall back to a contaminated pass."""
-    only_high = {"high": _GL["high"]}
-    with pytest.raises(ValueError, match="unsolvable"):
-        rbc.solve_level_deficit(only_high)
-
-
-def test_the_benchmark_carries_no_numbers():
-    """The merged Greenland benchmark derives everything: D and A are the
-    literal sentinel 'solve', so no rate or deficit is carried in the spec
-    (getz keeps its stated values -- its rule is the documented exception
-    and it is not part of the multi-line protocol)."""
+def test_benchmark_and_pilot_specs_carry_no_numbers():
     from clutter_spec import load_spec
-    sp = load_spec(ROOT / "config" / "experiments" / "gl_std_benchmark.yaml")
-    assert sp.run.lines == ["greenland_geikie01_transit",
-                            "greenland_westcoast"]
-    assert sp.run.reflectivity.level_deficit_db == "solve"
-    assert sp.run.physics.att_db_per_km == "solve"
-    ant = load_spec(ROOT / "config" / "experiments" / "ant_full_line.yaml")
-    assert ant.run.reflectivity.deficit_db == pytest.approx(3.56)
+    for name in ("gl_std_benchmark", "pilot_smoke"):
+        sp = load_spec(ROOT / "config" / "experiments" / f"{name}.yaml")
+        assert sp.run.physics.att_db_per_km == "solve", name
+        assert sp.run.reflectivity.gamma_from_rssnr is True
