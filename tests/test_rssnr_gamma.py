@@ -272,15 +272,20 @@ def test_calibration_gamma_accepts_solve_and_manual():
 def test_resolve_calibration_returns_the_solve_marker(monkeypatch):
     """A solve line resolves gamma to the literal 'solve' plus the solver
     settings -- main_config owns the loop; nothing here invents a number.
-    The regression fetch is stubbed out (network-free)."""
+    No shipped line uses solve today (user pinned -10 after the solved
+    values proved unphysical), so one is synthesized from a registry copy;
+    the regression fetch is stubbed out (network-free)."""
     monkeypatch.setattr(rbc, "fetch_rssnr_anchor",
                         lambda *a, **k: (_ for _ in ()).throw(
                             RuntimeError("offline test")))
     for k in rbc.LINE_GLOBALS:            # resolve_calibration activates
         monkeypatch.setattr(rbc, k, getattr(rbc, k))
     line = next(n for n in sorted(rbc.LINES)
-                if rbc.LINES[n]["CALIBRATION"]["gamma_surface_db"] == "solve"
-                and rbc.LINES[n]["CALIBRATION"]["att_db_per_km"] != "solve")
+                if rbc.LINES[n]["CALIBRATION"]["att_db_per_km"] != "solve")
+    entry = dict(rbc.LINES[line])
+    entry["CALIBRATION"] = {**entry["CALIBRATION"],
+                            "gamma_surface_db": "solve"}
+    monkeypatch.setitem(rbc.LINES, line, entry)
     gamma, att, rec = rbc.resolve_calibration(line)
     assert gamma == "solve"
     assert rec["gamma_surface_db"] == "solve"
@@ -289,16 +294,10 @@ def test_resolve_calibration_returns_the_solve_marker(monkeypatch):
     assert att == rbc.LINES[line]["CALIBRATION"]["att_db_per_km"]["value"]
 
 
-def test_bare_run_refuses_an_unresolved_solve_gamma():
+def test_bare_run_refuses_an_unresolved_solve_gamma(monkeypatch):
     """run()'s calibration fallback (manual_gamma_surface_db) must fail
     loudly on a solve line, never index 'solve' like a manual dict."""
-    line = next(n for n in sorted(rbc.LINES)
-                if rbc.LINES[n]["CALIBRATION"]["gamma_surface_db"] == "solve")
-    saved = {k: getattr(rbc, k) for k in rbc.LINE_GLOBALS}
-    try:
-        rbc.activate_line(line)
-        with pytest.raises(ValueError, match="config driver"):
-            rbc.manual_gamma_surface_db()
-    finally:
-        for k, v in saved.items():
-            setattr(rbc, k, v)
+    monkeypatch.setattr(rbc, "CALIBRATION",
+                        {**rbc.CALIBRATION, "gamma_surface_db": "solve"})
+    with pytest.raises(ValueError, match="config driver"):
+        rbc.manual_gamma_surface_db()

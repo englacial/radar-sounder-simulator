@@ -23,7 +23,7 @@ line registry (`--line`).
   (~−0.71 dB, computed, never configured). The mapping is anchoring-free:
   the former constant K and its median/level anchoring are gone. γ_surface
   in each line's `calibration:` block is either manual `{value, why}` or
-  `solve` (the study default): the config driver matches the measured
+  `solve`: the config driver matches the measured
   bed-window level by power-sum inversion — the modeled surface-clutter
   floor is subtracted from the measured level before reading the bed, so
   the solve is exact at any contamination level and needs only a seed run
@@ -34,15 +34,14 @@ line registry (`--line`).
   (degenerate with mean bed reflectivity), which is why it needs a
   simulation. Its offset from smooth Fresnel (−11.03 dB) is recorded as a
   per-line surface anomaly, and the solve history lands in
-  `run_config.json`. Solved values (pilot segments, 2026-08-20):
-  antarctica_getz **+4.3** (3 passes within 2.4 dB; carries the un-audited
-  surface-reference anomaly, +15.4 vs Fresnel); antarctica_david **+7.4**
-  (Basler pass only — both MKB60 measured windows sit below the modeled
-  clutter floor); greenland_westcoast **−3.7** (2017/2019 within 1.3 dB;
-  the +7.3 anomaly may be genuine mid-May surface wetness); 
-  greenland_geikie01_transit **−2.0 flagged suspect** (its two passes
-  disagree by 21.8 dB — the englacial-scattering missing-physics
-  signature). An optional specular/diffuse split with a
+  `run_config.json`. The 2026-08-20 solve sweep returned +4.3 (getz),
+  +7.4 (david), −3.7 (westcoast), −2.0 with a 21.8 dB pass-disagreement
+  flag (geikie) — none physically plausible as true surface
+  reflectivities (they absorb chain/model anomalies), so **every line
+  pins γ_surface = −10 dB manually** and the anomaly stays visible in
+  the recorded residuals and the per-run `gamma_solve` diagnostic
+  (per-pass numbers: `claude_notes/gamma_solve_design_2026-08-20.md`).
+  An optional specular/diffuse split with a
   tilt-gated specular component models angle-dependent bed scattering.
 - Englacial attenuation: constant one-way dB/km per line, set in the
   line's `calibration:` block as either a manual `{value, why}` pair or

@@ -137,10 +137,14 @@ def test_every_line_declares_its_calibration():
             assert c.gamma_surface_db.why.strip(), name
         if c.att_db_per_km != "solve":
             assert c.att_db_per_km.why.strip(), name
-    # the study default IS solve (user decision 2026-08-20): every current
-    # line uses it
+    # user decision 2026-08-20 (second): the in-run solve produced
+    # physically implausible surface reflectivities on every line (it
+    # absorbs chain/model anomalies), so every current line PINS the
+    # physical -10 dB manually and the anomaly lives in the recorded
+    # residuals; the solve machinery remains available and tested.
     for name, sp in _load().items():
-        assert sp.calibration.gamma_surface_db == "solve", name
+        g = sp.calibration.gamma_surface_db
+        assert g != "solve" and g.value == -10.0, name
     # the two documented manual-A lines and their reasons
     lines = _load()
     getz = lines["antarctica_getz"].calibration

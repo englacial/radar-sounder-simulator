@@ -127,8 +127,11 @@ configured.
 
 Each line file carries a `calibration:` block with exactly two parameters:
 
-- `gamma_surface_db` — manual `{value, why}` or the literal `solve`
-  (**the study default**). The solve matches the measured bed-window level
+- `gamma_surface_db` — manual `{value, why}` or the literal `solve`.
+  All current lines pin **−10 dB manually**: the 2026-08-20 solve sweep
+  returned physically implausible values on every line (see each line's
+  `why`), so the solved γ serves as a recorded chain diagnostic rather
+  than the calibration. The solve matches the measured bed-window level
   by inverting the power sum: the simulated window is S + B(γ) — surface
   returns S fixed, bed returns B moving dB-for-dB with the constant — so
   per pass γ_required = γ_seed + (M ⊖ S) − B (power-subtracting the modeled

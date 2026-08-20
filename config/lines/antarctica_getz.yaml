@@ -222,13 +222,16 @@ provenance:
     window: ft_wind hanning (scout hand-verified)
 
 calibration:
-  # solve = match the measured bed-window level in-run (power-sum
-  # inversion, modeled clutter floor subtracted)
-  # (study default 2026-08-20). EFFECTIVE, not physical, on this line: it
-  # re-absorbs the un-audited +18 dB surface-reference anomaly (handoff open
-  # item #1) -- read surface_anomaly_db in the run record, and see the
-  # -10 manual era's rationale in git (b351f80).
-  gamma_surface_db: solve
+  gamma_surface_db:
+    value: -10.0
+    why: >
+      user decision 2026-08-20: the in-run solve gave +4.34 dB, which is not
+      a physically plausible surface reflectivity (it absorbs chain/model
+      anomalies into the calibration). Pin the physical ~-10 dB (~1 dB
+      above smooth air->ice Fresnel -11.03) and read the anomaly where it
+      belongs: in the recorded bed-level residuals and the gamma_solve
+      diagnostic of every run. claude_notes/gamma_solve_design_2026-08-20.md
+      has the per-pass numbers.
   att_db_per_km:
     value: 20.0
     why: >
