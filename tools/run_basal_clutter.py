@@ -3041,11 +3041,15 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     if extra_passes:
         extra, syn = {}, list(SYNTHETIC_KEYS)
         for name, ep in extra_passes.items():
-            if ep["carrier"] not in PASSES:
+            # "reference" resolves per line, so one multi-line spec can
+            # invent the same observation on lines with different pass names
+            carrier = REF_PASS if ep["carrier"] == "reference" \
+                else ep["carrier"]
+            if carrier not in PASSES:
                 raise ValueError(f"extra pass {name!r}: carrier "
-                                 f"{ep['carrier']!r} is not a pass of line "
+                                 f"{carrier!r} is not a pass of line "
                                  f"{LINE!r}")
-            base = dict(PASSES[ep["carrier"]])
+            base = dict(PASSES[carrier])
             base["agl_med_m"] = None
             base["synthetic_msl_m"] = float(ep["altitude_m"])
             if ep.get("facet_spacing_scale"):
@@ -3111,7 +3115,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         order = [k for k in list(ORDER) + list(SYNTHETIC_KEYS)
                  if k in passes]
     else:
-        order = list(ORDER)
+        # extra passes are observations THIS experiment invented, so with no
+        # explicit passes: list they run alongside the real ones; the line's
+        # own synthetics stay opt-in (design studies, not defaults)
+        order = list(ORDER) + list(extra_passes or {})
     # A segment is a WINDOW on the line, and not every flight reaches every
     # window. Passes that do not cover this one are dropped with a note
     # rather than failing: the alternative is a line that can only have

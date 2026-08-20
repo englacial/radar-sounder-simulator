@@ -1,0 +1,57 @@
+schema_version: 1
+
+meta:
+  name:    david_full
+  status:  adopted
+  role:    benchmark
+  backs: >
+    THE full experiment for the David Glacier line: the three-way
+    on-corridor window (s 20-141 km on the 2023 axis), grounded ice to the
+    grounding line at 95.4 km, floating Drygalski tongue beyond. First run
+    2026-08-20 under the calibration era: gamma_surface -10 manual, A
+    solved by the RSSNR-vs-2H regression (12.8 dB/km), plus the cross-line
+    HAPS design points.
+  runtime: hours on a cold cache (585-trace segment, 3 real + 2 HAPS passes)
+  note: >
+    HYBRID bed: grounded side (s < 95.4 km) is the DEMOGORGN realization,
+    floating side the reference pass's radar basal picks (the Drygalski
+    shelf base), blended over the GL ramp -- same construction as the getz
+    full_line. The frequency-diversity real passes (195 MHz Basler vs
+    60 MHz MKB) make this the line where instrument idiosyncrasy is
+    separable from physics.
+
+run:
+  line:     antarctica_david
+  segment:  full
+
+  bed:
+    source:         hybrid
+    demogorgn_seed: 0
+
+  extra_passes:
+    # The cross-line design points (user decision 2026-08-20): the SAME
+    # stated instrument -- haps_60mhz, 60/15 MHz stratospheric box -- flown
+    # at 14 and 20 km over every study line, riding each line's reference
+    # pass geometry. Instrument-identical across lines by construction.
+    haps_14km:
+      carrier:    reference
+      altitude_m: 14000.0
+      instrument: haps_60mhz
+    haps_20km:
+      carrier:    reference
+      altitude_m: 20000.0
+      instrument: haps_60mhz
+
+  reflectivity:
+    gamma_from_rssnr: true
+
+  physics:
+    att_db_per_km:     solve   # -> the line calibration (regression 12.8)
+    surface_roughness: true
+
+  processing:
+    chain:      standard
+    proc_cache: true
+    companion:  false
+
+  out_name: david_full

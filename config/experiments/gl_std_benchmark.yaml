@@ -24,9 +24,9 @@ meta:
     than absorbed.
     Run:  uv run python tools/run_basal_clutter.py \
             --config config/experiments/gl_std_benchmark.yaml --line <name>
-    Passes default to the line's real ones (synthetics are design studies,
-    not benchmark members); the single-trace decomposition location defaults
-    to the line's own.
+    Passes default to the line's real ones plus the experiment's declared
+    extra passes (the line's own synthetics stay opt-in); the single-trace
+    decomposition location defaults to the line's own.
 
 run:
   lines:
@@ -36,6 +36,20 @@ run:
 
   bed:
     source: picked
+
+  extra_passes:
+    # The cross-line design points (user decision 2026-08-20): the SAME
+    # stated instrument -- haps_60mhz, 60/15 MHz stratospheric box -- flown
+    # at 14 and 20 km over every study line, riding each line's reference
+    # pass geometry. Instrument-identical across lines by construction.
+    haps_14km:
+      carrier:    reference
+      altitude_m: 14000.0
+      instrument: haps_60mhz
+    haps_20km:
+      carrier:    reference
+      altitude_m: 20000.0
+      instrument: haps_60mhz
 
   reflectivity:
     gamma_from_rssnr: true

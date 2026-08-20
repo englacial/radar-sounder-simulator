@@ -28,9 +28,11 @@ EXPERIMENTS = ROOT / "config" / "experiments"
 # Read from the registry rather than hardcoded: the lines get renamed, and a
 # schema test should not break when they do.
 LINE = rbc.DEFAULT_LINE
-SEG = next(s for s in rbc.LINES[LINE]["SEGMENTS"] if s != "full_line")
-HYBRID_LINE = next((n for n in rbc.LINES
-                    if "full_line" in rbc.LINES[n]["SEGMENTS"]), None)
+SEG = next(s for s in rbc.LINES[LINE]["SEGMENTS"]
+           if s not in rbc.LINES[LINE]["SEGMENTS_CROSSING_GL"])
+HYBRID_LINE, HYBRID_SEG = next(
+    ((n, s) for n in sorted(rbc.LINES)
+     for s in rbc.LINES[n]["SEGMENTS_CROSSING_GL"]), (None, None))
 
 
 def _doc(**over):
@@ -80,17 +82,19 @@ def test_meta_name_must_equal_out_name():
         RunSpec.model_validate(d)
 
 
-@pytest.mark.skipif(HYBRID_LINE is None, reason="no line has a full_line segment")
-def test_hybrid_and_full_line_imply_each_other():
-    """run() infers the hybrid bed from the segment; the spec states it, so a
-    disagreement must fail rather than silently building a different bed."""
-    with pytest.raises(ValueError, match="imply each other"):
-        RunSpec.model_validate(_doc(bed={"source": "hybrid"}))   # not full_line
-    d = _doc(line=HYBRID_LINE, segment="full_line",
+@pytest.mark.skipif(HYBRID_LINE is None, reason="no segment crosses a GL")
+def test_hybrid_follows_the_lines_crossing_declaration():
+    """run() infers the hybrid bed from the segment's declared crosses_gl
+    (any line, any segment name -- the old magic 'full_line' name is gone);
+    the spec states it, so a disagreement must fail rather than silently
+    building a different bed."""
+    with pytest.raises(ValueError, match="must not be 'hybrid'"):
+        RunSpec.model_validate(_doc(bed={"source": "hybrid"}))  # no crossing
+    d = _doc(line=HYBRID_LINE, segment=HYBRID_SEG,
              bed={"source": "demogorgn"})
-    with pytest.raises(ValueError, match="imply each other"):
+    with pytest.raises(ValueError, match="must be 'hybrid'"):
         RunSpec.model_validate(d)
-    ok = RunSpec.model_validate(_doc(line=HYBRID_LINE, segment="full_line",
+    ok = RunSpec.model_validate(_doc(line=HYBRID_LINE, segment=HYBRID_SEG,
                                      bed={"source": "hybrid"}))
     assert ok.to_run_kwargs()["demogorgn_bed"] is True
 
@@ -251,3 +255,39 @@ def test_solve_sentinel_reaches_run_kwargs_verbatim():
     assert kw["att"] == "solve"
     assert "level_deficit_db" not in kw
     assert "anchor" not in kw
+
+
+def test_reference_carrier_is_accepted_by_the_schema():
+    """extra_passes may name the literal carrier 'reference', resolved per
+    line at run time -- the mechanism that lets ONE multi-line spec invent
+    the same observation on lines whose pass names differ."""
+    d = _doc(extra_passes={"haps_14km": {
+        "carrier": "reference", "altitude_m": 14000.0,
+        "instrument": "haps_60mhz"}})
+    sp = RunSpec.model_validate(d)
+    assert sp.to_run_kwargs()["extra_passes"]["haps_14km"]["carrier"] \
+        == "reference"
+
+
+def test_shipped_full_specs_declare_the_cross_line_haps_points():
+    """User decision 2026-08-20: every line's full experiment simulates the
+    SAME stated instrument (haps_60mhz) at 14 and 20 km, riding the
+    reference pass. The pilot spec does not (it is the cheap smoke loop)."""
+    from clutter_spec import load_spec
+    full = ["ant_full_line", "gl_std_benchmark", "ant_david_full"]
+    for name in full:
+        sp = load_spec(EXPERIMENTS / f"{name}.yaml")
+        ep = sp.run.extra_passes
+        assert set(ep) >= {"haps_14km", "haps_20km"}, name
+        for key, alt in (("haps_14km", 14000.0), ("haps_20km", 20000.0)):
+            assert ep[key].carrier == "reference", (name, key)
+            assert ep[key].altitude_m == alt, (name, key)
+            assert ep[key].instrument == "haps_60mhz", (name, key)
+        # and they are actually simulated: either listed or defaulted in
+        if sp.run.passes is not None:
+            assert set(ep) <= set(sp.run.passes), name
+    lines_covered = set()
+    for name in full:
+        sp = load_spec(EXPERIMENTS / f"{name}.yaml")
+        lines_covered |= set(sp.run.lines or [sp.run.line])
+    assert lines_covered == set(rbc.LINES), lines_covered

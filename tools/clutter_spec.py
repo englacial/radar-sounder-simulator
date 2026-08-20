@@ -55,7 +55,9 @@ class ExtraPass(_Base):
 
     This is the second swap axis. The line declares what was really flown;
     an experiment can ask "the same line, but a stratospheric box at 14 km"
-    without editing the line definition."""
+    without editing the line definition. The literal carrier "reference"
+    resolves to each line's reference pass at run time, so one multi-line
+    spec can invent the same observation on lines whose pass names differ."""
 
     carrier: str                       # real pass supplying line + picks
     altitude_m: float
@@ -227,14 +229,27 @@ class Run(_Base):
 
     @model_validator(mode="after")
     def _hybrid_is_explicit(self):
-        """run() infers the hybrid bed from segment == 'full_line'. The spec
-        states it, so the two must agree -- otherwise a file could read
-        'demogorgn' while the run silently built a hybrid."""
+        """run() infers the hybrid bed from the segment's declared
+        crosses_gl. The spec states it, so the two must agree on every
+        named line -- otherwise a file could read 'demogorgn' while the
+        run silently built a hybrid (or vice versa)."""
+        try:
+            from clutter_lines import load_all
+            specs = load_all()
+        except Exception:
+            return self                    # registry unreadable: run() guards
         hyb = self.bed.source is BedSource.HYBRID
-        if hyb != (self.segment == "full_line"):
-            raise ValueError(
-                "bed.source 'hybrid' and segment 'full_line' imply each other "
-                f"(got source={self.bed.source!r}, segment={self.segment!r})")
+        for name in ([self.line] if self.line else self.lines):
+            seg = specs.get(name) and specs[name].segments.get(self.segment)
+            if seg is None:
+                continue                   # unknown segment: run() rejects it
+            if hyb != seg.crosses_gl:
+                raise ValueError(
+                    f"line {name!r} segment {self.segment!r} "
+                    f"{'crosses' if seg.crosses_gl else 'does not cross'} "
+                    "the grounding line, so bed.source "
+                    f"{'must' if seg.crosses_gl else 'must not'} be "
+                    f"'hybrid' (got {self.bed.source!r})")
         return self
 
 

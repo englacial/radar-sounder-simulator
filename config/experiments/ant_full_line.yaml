@@ -21,16 +21,34 @@ meta:
     BedMachine/DEMOGORGN report the SEAFLOOR beyond the GL, not the reflector
     the radar sees, and are never used there.
     CALIBRATION (2026-08-20): the old K/D anchoring is replaced by the
-    line's calibration block -- gamma_surface = +7.21 dB (effective; carries
-    the un-audited +18 dB surface anomaly) and A = 20 manual. The mapping
-    constant equals the adopted K = +7.92 exactly, and being anchoring-free
-    it is segment-independent, which retires the K_ANCHOR_SEGMENT pin.
+    line's calibration block -- gamma_surface pinned at the physical -10 dB
+    (the in-run solve gave an unphysical +4.3; recorded as a diagnostic)
+    and A solved by the RSSNR-vs-2H regression (18.61 dB/km). The former
+    att20_klevel LEVEL match is deliberately no longer reproduced: the
+    chain anomaly lives in the recorded residuals. The DC-8 syn_14km /
+    syn_20km design passes were replaced by the cross-line haps extras
+    (user decision 2026-08-20); they remain defined on the line.
 
 run:
   line:     antarctica_getz
   segment:  full_line
   out_name: full_line
-  passes:   [real_low, real_9km, real_10km, syn_14km, syn_20km]
+  passes:   [real_low, real_9km, real_10km, haps_14km, haps_20km]
+
+  extra_passes:
+    # The cross-line design points (user decision 2026-08-20): the SAME
+    # stated instrument -- haps_60mhz, 60/15 MHz stratospheric box -- flown
+    # at 14 and 20 km over every study line, riding each line's reference
+    # pass geometry. Instrument-identical across lines by construction.
+    haps_14km:
+      carrier:    reference
+      altitude_m: 14000.0
+      instrument: haps_60mhz
+    haps_20km:
+      carrier:    reference
+      altitude_m: 20000.0
+      instrument: haps_60mhz
+
 
   bed:
     source:         hybrid          # implies segment full_line, and vice versa
