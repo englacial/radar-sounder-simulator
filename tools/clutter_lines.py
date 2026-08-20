@@ -78,6 +78,12 @@ class SegmentSpec(_Base):
     n_traces: int                      # simulated traces
     decomp_s_km: list[float]           # single-trace decomposition location(s)
     k_anchor: str | None = None        # reuse another segment's RSSNR K
+    # This window spans the line's grounding line. Declared, not inferred
+    # from a segment NAME (the old trigger was `segment == "full_line"`, a
+    # getz-ism): a crossing segment gets the hybrid bed machinery -- grounded
+    # DEMOGORGN blended into the floating radar picks -- and the zone-split
+    # metrics.
+    crosses_gl: bool = False
 
 
 class Identity(_Base):
@@ -198,6 +204,10 @@ class LineSpec(_Base):
                 "list 'gamma_rssnr' in unsupported: -- otherwise a run could "
                 "ask for a reflectivity mapping there is no data for")
         for name, seg in self.segments.items():
+            if seg.crosses_gl and self.identity.grounding_line_s_km is None:
+                raise ValueError(
+                    f"segment {name!r} declares crosses_gl but the line has "
+                    "no grounding_line_s_km")
             if seg.k_anchor and seg.k_anchor not in segs:
                 raise ValueError(f"segment {name!r} anchors K on unknown "
                                  f"segment {seg.k_anchor!r}")
@@ -264,6 +274,8 @@ class LineSpec(_Base):
                             for k, v in self.segments.items()},
             "N_TRACES_BY_SEGMENT": {k: v.n_traces
                                     for k, v in self.segments.items()},
+            "SEGMENTS_CROSSING_GL": tuple(
+                k for k, v in self.segments.items() if v.crosses_gl),
             "K_ANCHOR_SEGMENT": {k: v.k_anchor
                                  for k, v in self.segments.items()
                                  if v.k_anchor},

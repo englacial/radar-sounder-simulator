@@ -18,9 +18,11 @@ from soundersim.config import AntennaConfig, RadarConfig, WaveformConfig  # noqa
 
 C = 299792458.0
 
-# Pass and segment names come from the line definition, not from literals:
-# these tests broke wholesale the last time the passes were renamed.
-LINE = rbc.DEFAULT_LINE
+# These tests assert facts about the GETZ line specifically (its scout
+# tables, segment supersets, synthetic construction), so they name it --
+# assuming the module DEFAULT would break whenever an alphabetically earlier
+# line is added, which is exactly what antarctica_david did.
+LINE = "antarctica_getz"
 rbc.activate_line(LINE)
 ORDER = list(rbc.LINES[LINE]["ORDER"])
 SYNTH = list(rbc.LINES[LINE]["SYNTHETIC_KEYS"])

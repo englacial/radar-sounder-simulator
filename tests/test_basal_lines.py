@@ -235,10 +235,15 @@ def test_segment_not_on_this_line_rejected():
 
 
 def test_pass_not_on_this_line_rejected():
-    line = rbc.DEFAULT_LINE
+    # a GL-crossing segment fails earlier (hybrid guard), so pick any line
+    # with a non-crossing segment (the default line may have none:
+    # antarctica_david's single window crosses)
+    line, seg = next(
+        (n, s) for n in sorted(rbc.LINES)
+        for s in rbc.LINES[n]["SEGMENTS"]
+        if s not in rbc.LINES[n]["SEGMENTS_CROSSING_GL"])
     with pytest.raises(ValueError, match="defines no pass"):
-        rbc.run(line=line, segment=rbc.LINES[line]["SEGMENTS"][0],
-                passes=["no_such_pass"])
+        rbc.run(line=line, segment=seg, passes=["no_such_pass"])
 
 
 @pytest.mark.parametrize(

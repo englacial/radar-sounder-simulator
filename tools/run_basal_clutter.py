@@ -287,6 +287,7 @@ LAM_ICE_M: float = 0.0                 # in-ice wavelength at FC_HZ
 PASSES: dict = {}                      # pass table (geometry + instrument)
 ORDER: list = []                       # real passes, altitude order
 SEGMENTS: tuple = ()                   # study segments
+SEGMENTS_CROSSING_GL: tuple = ()       # segments spanning the grounding line
 S0_KM: dict = {}                       # per-segment display origin
 DECOMP_S_KM: dict = {}                 # per-segment single-trace location(s)
 N_TRACES_BY_SEGMENT: dict = {}         # per-segment simulated trace count
@@ -3079,13 +3080,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                    "demogorgn_bed": "DEMOGORGN is an ANTARCTIC-only bed "
                    "ensemble (Bedmap3 grid)"}[feat])
     proc = processing == "standard"
-    hybrid = segment == "full_line"
+    hybrid = segment in SEGMENTS_CROSSING_GL
     if hybrid and not demogorgn_bed:
-        raise ValueError("--segment full_line spans the grounding line and "
-                         "uses the HYBRID bed (grounded DEMOGORGN + floating "
-                         "low-pass picks): run it with --demogorgn-bed "
-                         "(BedMachine/plain beds would model the SEAFLOOR "
-                         "beyond the GL)")
+        raise ValueError(
+            f"segment {segment!r} spans the grounding line (the line "
+            "declares crosses_gl) and uses the HYBRID bed -- grounded "
+            "DEMOGORGN blended into the floating reference-pass picks -- "
+            "so it must run with the DEMOGORGN bed enabled: "
+            "BedMachine/plain beds would model the SEAFLOOR beyond the GL")
     if hybrid and bed_ablation:
         raise ValueError("--bed-ablation is not wired for the full_line "
                          "hybrid segment")

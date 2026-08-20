@@ -113,6 +113,7 @@ segments:
   full:
     s0_km: 20.0
     n_traces: 585
+    crosses_gl: true
     decomp_s_km:
     - 55.0      # grounded: mid-window, ~1.5 km ice
     - 120.0     # floating: mid-tongue, past the GL transition
@@ -138,14 +139,14 @@ rssnr:
     prefix: icechunk/antarctica
     region: us-west-2
 
-# The floating stretch (s > 95.4) must NOT be simulated against
-# BedMachine/DEMOGORGN (seafloor, not the shelf base); the picks-based
-# hybrid bed is wired only for the getz full_line segment today, so bed
-# sources beyond BedMachine+picks are off until that machinery is
-# generalised to this line.
-unsupported:
-- demogorgn_bed
-- hybrid
+# The hybrid bed (grounded DEMOGORGN blended into the floating reference
+# picks at the GL) is SUPPORTED: the machinery is line-generic and the
+# DEMOGORGN store covers this window (verified 2026-08-19: 100% finite over
+# the David bounds). CAVEAT, recorded not hidden: unlike getz, the ensemble
+# is NOT known to be conditioned on these flights, so the nadir
+# DEMOGORGN-vs-picks offset here is unverified until the per-pass
+# dgn_nadir_bed_offset metric reports it on the first hybrid run.
+unsupported: []
 
 provenance:
   measured_caveats: >

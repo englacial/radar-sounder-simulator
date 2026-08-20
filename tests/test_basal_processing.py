@@ -58,6 +58,9 @@ def test_processing_chain_recorded(monkeypatch):
          # product posting, the refined grid's own values at --posting-div>1)
          "s_sim": s, "bot_sim": np.full(T, 8e-6),
          "surf_sim": np.full(T, 6e-6)}
+    # the chain records the ACTIVE line's own product provenance; assert on
+    # the getz chain by activating it, since '11 looks' is a getz fact
+    rbc.activate_line("antarctica_getz")
     out = rbc.process_standard(p, {"field": F, "twtt": twtt})
     ch = out["chain"]
     assert ch["real_chain"] == rbc.REAL_CHAIN
@@ -116,7 +119,10 @@ def test_synthetic_pass_spec_and_tags():
     """A synthetic pass rides its carrier's frames; the proc tag composes
     into the coordinator's output-dir name. Names come from the line
     definition rather than literals -- the passes get renamed."""
-    line = rbc.DEFAULT_LINE
+    # a line WITH synthetics is the subject; the default line need not have
+    # any (antarctica_david does not)
+    line = next(n for n in sorted(rbc.LINES)
+                if rbc.LINES[n]["SYNTHETIC_KEYS"])
     rbc.activate_line(line)
     key = rbc.LINES[line]["SYNTHETIC_KEYS"][0]
     carrier = rbc.LINE_SPECS[line].synthetic_passes[key].carrier

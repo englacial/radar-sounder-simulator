@@ -181,6 +181,7 @@ segments:
     k_anchor: full
   full_line:
     s0_km: 0.0
+    crosses_gl: true
     n_traces: 714
     decomp_s_km:
     - 31.0
