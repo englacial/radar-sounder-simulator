@@ -3,6 +3,7 @@ tools/run_basal_clutter.py: the alias-limited aperture math, the recorded
 processing chain (real-chain provenance + honest gap list), and the 30 km
 synthetic-pass geometry construction. No network, no kernels."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -133,3 +134,22 @@ def test_synthetic_pass_spec_and_tags():
         rbc.LINE_SPECS[line].synthetic_passes[key].altitude_m
     assert rbc.case_tag(True, True, True) == "_pbed_rssnr_proc"
     assert rbc.case_tag(True, True, False) == "_pbed_rssnr"  # existing runs
+
+
+def test_chunk_digests_forwards_the_hypothesis_knobs(tmp_path):
+    """--specular-fraction / --bed-rough with --proc-cache crashed
+    (2026-08-21): the digest step rebuilt chunk rids WITHOUT the knob
+    suffixes chunk_rid appends, then looked for chunk files that never
+    existed. The digests must be computed with the same knobs the chunks
+    were simulated with."""
+    p = {"key": "k", "segment": "pilot", "picked_bed": False,
+         "gamma_rssnr": True, "proc": True, "dgn": True}
+    spec, brough = (0.5, 3.0, 1.0), (0.22, 0.886)
+    rid = rbc.chunk_rid(p, 0, 18.61, True, bed_rough=brough, spec=spec)
+    assert "_fs0.5" in rid and "_brough0.22" in rid
+    (tmp_path / f"{rid}.json").write_text(json.dumps({"meta_key": "m"}))
+    d = rbc.chunk_digests(p, tmp_path, 1, 18.61, True,
+                          bed_rough=brough, spec=spec)
+    assert set(d) == {rid}
+    with pytest.raises(FileNotFoundError):    # knobs dropped = old bug
+        rbc.chunk_digests(p, tmp_path, 1, 18.61, True)

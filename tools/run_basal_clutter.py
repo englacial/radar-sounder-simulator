@@ -1327,12 +1327,21 @@ def proc_rid(p):
             + ("_hyb" if p.get("hybrid") else ""))
 
 
-def chunk_digests(p, runs_dir, n_chunks, att, surf_rough):
-    """{chunk rid: sha256(meta_key)[:16]} over the pass's chunk caches."""
+def chunk_digests(p, runs_dir, n_chunks, att, surf_rough,
+                  antenna=None, bed_rough=None, spec=None):
+    """{chunk rid: sha256(meta_key)[:16]} over the pass's chunk caches.
+
+    The hypothesis knobs MUST be forwarded: chunk_rid suffixes the file
+    name with them, so reconstructing the rid without them looked for a
+    chunk that never existed (--specular-fraction + --proc-cache crashed
+    here, 2026-08-21)."""
     import hashlib
     out = {}
     for ci in range(n_chunks):
-        rid = chunk_rid(p, ci, att, surf_rough)
+        rid = chunk_rid(p, ci, att, surf_rough,
+                        antenna=antenna if antenna is not None
+                        else ANT_DEFAULT,
+                        bed_rough=bed_rough, spec=spec)
         d = json.loads((Path(runs_dir) / f"{rid}.json").read_text())
         out[rid] = hashlib.sha256(d["meta_key"].encode()).hexdigest()[:16]
     return out
@@ -1362,7 +1371,9 @@ def _proc_from_stacks(Fs, Fb, twtt, chain):
             "Fs": Fs, "Fb": Fb}
 
 
-def process_standard_cached(p, sim, out_dir, att, surf_rough, force=False):
+def process_standard_cached(p, sim, out_dir, att, surf_rough,
+                            force=False, antenna=None, bed_rough=None,
+                            spec=None):
     """Cache-first process_standard (module-section comment). Also stores
     the light per-trace arrays + scalars that let load_proc_pass rebuild a
     figure-ready (p_lite, sim_lite, proc) with NO scene prep or chunk
@@ -1377,7 +1388,9 @@ def process_standard_cached(p, sim, out_dir, att, surf_rough, force=False):
             "spacing_m": round(p["spacing"], 4),
             "att_db_per_km": att, "surf_rough": bool(surf_rough),
             "chunk_digests": chunk_digests(p, Path(out_dir) / "runs",
-                                           sim["n_chunks"], att, surf_rough)}
+                                           sim["n_chunks"], att, surf_rough,
+                                           antenna=antenna,
+                                           bed_rough=bed_rough, spec=spec)}
     key = json.dumps(meta, sort_keys=True)
     if jp.exists() and npz_p.exists() and not force:
         doc = json.loads(jp.read_text())
@@ -3240,7 +3253,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                   spec=spec)
         if proc:
             procs[key] = (process_standard_cached(p, sims[key], out, att,
-                                                  surf_rough, force=force)
+                                                  surf_rough, force=force,
+                                                  antenna=antenna,
+                                                  bed_rough=bed_rough,
+                                                  spec=spec)
                           if proc_cache else process_standard(p, sims[key]))
             ch = procs[key]["chain"]
             print(f"  processed: aperture {ch['aperture_m']:.0f} m "
