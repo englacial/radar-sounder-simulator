@@ -64,7 +64,7 @@ def load_pass(spec, key, segment):
     frames, bots, full_ll = [], [], []
     for part in parts:
         f = load_frame(season, part.frame)
-        a, b = part.slice
+        a, b = part.slice or (0, f.sizes["slow_time"])
         # unsliced nav, kept for the map: the segment is a WINDOW on these
         # frames, and a map that shows only the window cannot show that.
         full_ll.append((np.asarray(f.Latitude.values, np.float64),

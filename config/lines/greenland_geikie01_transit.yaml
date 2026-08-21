@@ -39,13 +39,7 @@ passes:
         - 700
         - 3332
       - frame: '20140421_01_070'
-        slice:
-        - 0
-        - 3332
       - frame: '20140421_01_071'
-        slice:
-        - 0
-        - 3332
   high:
     agl_med_m: 2483.0
     season: 2017_Greenland_P3
@@ -65,13 +59,7 @@ passes:
         - 1976
       transit:
       - frame: '20170424_01_067'
-        slice:
-        - 0
-        - 3335
       - frame: '20170424_01_068'
-        slice:
-        - 0
-        - 3335
       - frame: '20170424_01_069'
         slice:
         - 0

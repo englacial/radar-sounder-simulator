@@ -27,6 +27,22 @@ rbc.activate_line(LINE)
 ORDER = list(rbc.LINES[LINE]["ORDER"])
 SYNTH = list(rbc.LINES[LINE]["SYNTHETIC_KEYS"])
 SEGS = list(rbc.LINES[LINE]["SEGMENTS"])
+
+# Recorded slow-time lengths of the frames this line's windows take WHOLE
+# (slice omitted in the YAML = the entire frame). Verified against the OPR
+# products 2026-08-21; lets the trace-count consistency checks below stay
+# exact without loading any data.
+FRAME_LEN = {"20161105_05_005": 3333, "20161105_05_006": 3333,
+             "20161028_05_005": 3337, "20161028_05_006": 3337,
+             "20161031_07_003": 3340, "20161031_07_004": 3336}
+
+
+def _resolve(parts):
+    """[(fid, (a, b))] with whole-frame (None, None) made concrete."""
+    return [(fid, (a if a is not None else 0,
+                   b if b is not None else FRAME_LEN[fid]))
+            for fid, (a, b) in parts]
+
 CARRIER = rbc.LINE_SPECS[LINE].synthetic_passes[SYNTH[0]].carrier if SYNTH \
     else ORDER[0]
 SEG = next(s for s in SEGS if s != "full_line")
@@ -393,8 +409,8 @@ def test_extended_segment_table_is_a_superset_of_the_full_segment():
     assert set(("pilot", "full", "extended", "full_line")) <= set(SEGS)
     counts = {}
     for key in ORDER:
-        ext = rbc.PASSES[key]["extended"]
-        full = dict(rbc.PASSES[key]["full"])
+        ext = _resolve(rbc.PASSES[key]["extended"])
+        full = dict(_resolve(rbc.PASSES[key]["full"]))
         assert ext, key
         for fid, (a, b) in ext:
             assert 0 <= a < b, (key, fid)
@@ -516,8 +532,8 @@ def test_full_line_segment_table_spans_the_whole_line():
     after reversal, with trace counts matching across the triplet."""
     counts = {}
     for key in ORDER:
-        line = rbc.PASSES[key]["full_line"]
-        ext = dict(rbc.PASSES[key]["extended"])
+        line = _resolve(rbc.PASSES[key]["full_line"])
+        ext = dict(_resolve(rbc.PASSES[key]["extended"]))
         for fid, (a, b) in line:
             assert 0 <= a < b, (key, fid)
             if fid in ext:

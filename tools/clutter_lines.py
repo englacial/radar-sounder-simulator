@@ -40,14 +40,18 @@ class _Base(BaseModel):
 
 
 class FramePart(_Base):
-    """One frame and the half-open slow_time slice taken from it."""
+    """One frame and the half-open slow_time slice taken from it.
+
+    An omitted slice means THE WHOLE FRAME -- the common case for interior
+    frames of a multi-frame window, kept out of the YAML so the files carry
+    only the numbers that actually select something."""
 
     frame: str
-    slice: tuple[int, int]
+    slice: tuple[int, int] | None = None
 
     @model_validator(mode="after")
     def _ordered(self):
-        if self.slice[1] <= self.slice[0]:
+        if self.slice is not None and self.slice[1] <= self.slice[0]:
             raise ValueError(f"{self.frame}: empty slice {self.slice}")
         return self
 
@@ -256,7 +260,10 @@ class LineSpec(_Base):
             if ps.season is not None:
                 entry["season"] = ps.season
             for seg, parts in ps.segments.items():
-                entry[seg] = [(p.frame, tuple(p.slice)) for p in parts]
+                # whole frame -> (None, None): slice(None, None) and [a:b]
+                # take everything, so consumers need no special case
+                entry[seg] = [(p.frame, (None, None) if p.slice is None
+                               else tuple(p.slice)) for p in parts]
             entry["_segments"] = tuple(ps.segments)
             out[key] = entry
         for key, syn in self.synthetic_passes.items():

@@ -83,7 +83,12 @@ def test_geikie_transit_is_one_path_through_all_three_frames():
                          "20140421_01_071"]
     assert tr["high"] == ["20170424_01_067", "20170424_01_068",
                           "20170424_01_069"]
-    n = {k: sum(p.slice[1] - p.slice[0] for p in ps.segments["transit"])
+    # whole frames (slice omitted) resolved from recorded lengths
+    # (verified against the OPR products 2026-08-21)
+    flen = {"20140421_01_070": 3332, "20140421_01_071": 3332,
+            "20170424_01_067": 3335, "20170424_01_068": 3335}
+    n = {k: sum((p.slice[1] - p.slice[0]) if p.slice is not None
+                else flen[p.frame] for p in ps.segments["transit"])
          for k, ps in ln.passes.items()}
     assert abs(n["low"] - n["high"]) / max(n.values()) < 0.01
     # the decomposition locations must sit in the WELL-ALIGNED stretches,

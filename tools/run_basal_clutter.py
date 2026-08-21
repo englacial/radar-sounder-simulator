@@ -660,10 +660,12 @@ def segment_s_range(ref, segment):
     trace slices (the axis's own frames)."""
     off = dict(zip(ref["frames"],
                    np.concatenate([[0], np.cumsum(ref["frame_len"])[:-1]])))
+    n_by = dict(zip(ref["frames"], ref["frame_len"]))
     ss = []
     # the REFERENCE pass, not a hardcoded name: this is the pass whose picks
     # define the axis, and 'low' stopped existing when the passes were renamed
     for fid, (a, b) in PASSES[REF_PASS][segment]:
+        a, b = (a or 0), (n_by[fid] if b is None else b)
         ss += [ref["s"][off[fid] + a], ref["s"][off[fid] + b - 1]]
     return float(min(ss)), float(max(ss))
 
@@ -1575,11 +1577,15 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
     columns). A ``synthetic_msl_m`` pass spec rewrites the geometry via
     synth_altitude_fsub."""
     spec = PASSES[key]
-    parts = spec[segment]
     season = pass_season(spec)
-    fsubs, bots, tw_ref = [], [], None
-    for fid, (a, b) in parts:
+    fsubs, bots, tw_ref, parts = [], [], None, []
+    for fid, (a, b) in spec[segment]:
         frame = load_frame(season, fid)
+        # whole-frame parts ((None, None) from an omitted YAML slice) become
+        # concrete HERE, where the frame length is known -- p['parts'] and
+        # therefore chunk_meta stay byte-identical with existing caches
+        a, b = (a or 0), (frame.sizes["slow_time"] if b is None else b)
+        parts.append((fid, (a, b)))
         tw = np.asarray(frame.twtt.values, np.float64)
         if tw_ref is None:
             tw_ref = tw
