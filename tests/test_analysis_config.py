@@ -125,6 +125,21 @@ def test_gamma_solve_settings_are_declared_once():
     assert "GAMMA_SURFACE_SOLVE" in rbc.ANALYSIS_GLOBALS
 
 
+def test_facet_scale_default_is_declared_once_and_capped():
+    """User decision 2026-08-22: EVERY simulation runs at facet scale
+    <= 0.7 (convergence evidence: native spacing leaves facet edges past
+    the Fresnel-zone limit at altitude). The default lives in analysis.yaml
+    only; a pass may declare its own scale but never a coarser one, and no
+    shipped pass declares > 0.7."""
+    a = load_analysis()
+    assert a.compute.facet_spacing_scale == 0.7
+    assert rbc.FACET_SPACING_SCALE == 0.7
+    for name, entry in rbc.LINES.items():
+        for key, ps in entry["PASSES"].items():
+            s = ps.get("facet_spacing_scale")
+            assert s is None or s <= 0.7, (name, key, s)
+
+
 def test_every_line_declares_its_calibration():
     """gamma_surface is manual-with-why or 'solve' (the study default:
     resolved in-run by zeroing the qualifying-median bed-level residual --

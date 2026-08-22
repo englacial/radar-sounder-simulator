@@ -103,3 +103,11 @@ compute:
   # the chunk cache key, so changing it re-simulates everything.
   chunk_m: 10500.0
   chunk_m_fine_posting: 3000.0
+  # Default facet-lattice refinement applied to EVERY pass that does not
+  # declare its own (a pass may only go FINER). Convergence evidence
+  # 2026-08-21 (getz 10 km, claude_notes/facet_convergence_refit_*.md):
+  # native spacing leaves facet edges at 1.0-1.6x the Fresnel-zone limit at
+  # altitude; 0.7 removes the visible discretization granularity, energy
+  # metrics converge by 0.5. Changing this re-simulates everything
+  # (spacing is in the chunk cache key).
+  facet_spacing_scale: 0.7

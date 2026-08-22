@@ -115,6 +115,7 @@ class Compute(_Base):
 
     chunk_m: float
     chunk_m_fine_posting: float
+    facet_spacing_scale: float = 1.0
 
 
 class AnalysisSpec(_Base):
@@ -166,6 +167,7 @@ class AnalysisSpec(_Base):
             "N_LOOKS_SIM": self.processing.n_looks,
             "RADARGRAM_PCT": tuple(self.figures.radargram_percentiles),
             "CHUNK_M": self.compute.chunk_m,
+            "FACET_SPACING_SCALE": self.compute.facet_spacing_scale,
             "CHUNK_M_PROC": self.compute.chunk_m_fine_posting,
         }
 

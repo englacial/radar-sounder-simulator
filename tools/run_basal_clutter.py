@@ -262,6 +262,7 @@ EPS_SEAWATER: float = 0.0              # floating reflector: ice -> seawater
 N_LOOKS_SIM: int = 0                   # incoherent looks in matched proc
 RADARGRAM_PCT: tuple = ()              # per_panel robust scaling limits
 CHUNK_M: float = 0.0                   # along-track chunk target
+FACET_SPACING_SCALE: float = 0.0       # default lattice refinement (<= 1)
 CHUNK_M_PROC: float = 0.0              # ... at fine posting
 
 ANALYSIS = clutter_analysis.load_analysis()
@@ -1674,8 +1675,12 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
     reach = derive_reach(h_max, dbs_max, d_min)
 
     lam = C / f0
-    spacing = rac.facet_spacing(lam, r_min, thick_med) * spec.get(
-        "facet_spacing_scale", 1.0)
+    # a pass may declare its own refinement but only FINER than the study
+    # default (analysis.yaml compute.facet_spacing_scale; convergence
+    # evidence 2026-08-21)
+    spacing = rac.facet_spacing(lam, r_min, thick_med) * min(
+        spec.get("facet_spacing_scale") or FACET_SPACING_SCALE,
+        FACET_SPACING_SCALE)
     bed_fill = np.where(np.isfinite(bot_sub), bot_sub, np.nanmax(bot_sub))
     rc_sim, rc_frame, b0 = radar_grid(params, surf, bed_fill, dt, t0f,
                                       oversample, window, antenna=ant_cfg)
