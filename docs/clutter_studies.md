@@ -42,7 +42,11 @@ line registry (`--line`).
   the recorded residuals and the per-run `gamma_solve` diagnostic
   (per-pass numbers: `claude_notes/gamma_solve_design_2026-08-20.md`).
   An optional specular/diffuse split with a
-  tilt-gated specular component models angle-dependent bed scattering.
+  tilt-gated specular component models angle-dependent bed scattering,
+  and Gerekos sub-facet bed roughness broadens each facet's angular
+  response; both are ON in every experiment spec since 2026-08-21
+  (specular_fraction 0.5, tilt 3 deg, sigma 0.10 m at l = lambda_ice) --
+  the evidence is `docs/bed_scattering.md`.
 - Englacial attenuation: constant one-way dB/km per line, set in the
   line's `calibration:` block as either a manual `{value, why}` pair or
   `solve` — a Theil–Sen regression of RSSNR on 2H over the line's own

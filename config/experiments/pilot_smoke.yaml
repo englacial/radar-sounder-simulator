@@ -23,12 +23,24 @@ run:
   bed:
     source: picked
 
+  # Bed scattering physics (adopted 2026-08-21, getz pilot evidence --
+  # docs/bed_scattering.md): tilt-gated specular/diffuse split (T5) fixes
+  # the post-bed falloff; Gerekos sub-facet bed roughness at sigma = 0.10 m
+  # (l = lambda_ice) draws a continuous bed horizon instead of specular
+  # glint spots, with the bed-arm mean profile landing on the measured
+  # curve. sigma = 0.22 (T1) floods below-bed and stays rejected.
   reflectivity:
     gamma_from_rssnr: true
+    specular_diffuse:
+      specular_fraction: 0.5
+      tilt_s0_deg: 3.0
 
   physics:
     att_db_per_km:     solve   # -> each line's calibration
     surface_roughness: true
+    bed_roughness:
+      sigma_m: 0.10
+      corr_length_m: 0.886
 
   processing:
     chain:      standard
