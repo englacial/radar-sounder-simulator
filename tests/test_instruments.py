@@ -181,3 +181,114 @@ def test_extra_pass_rides_its_carrier_and_carries_its_own_radar():
     assert ep["altitude_m"] == 14000.0       # new altitude
     assert ep["instrument"] == synth         # new radar
     assert kw["passes"] == [carrier, "swapped"]
+
+
+# ---------------------------------------- realistic antenna models (M-ant)
+def test_david_instruments_declare_real_antennas():
+    """The david-line YAMLs carry the models read from the product's own
+    param structs; the placeholders were `isotropic` clutter upper bounds."""
+    insts = load_all()
+    a195 = insts["basler195_2017"].simulated.antenna
+    assert a195.kind == "array_tapered"
+    assert a195.spacing_lam == pytest.approx(0.304)
+    assert a195.tx_weights == [39.4, 72.6, 125.8, 177.6, 156.0, 120.7,
+                               92.9, 44.8]
+    assert len(a195.rx_weights) == 8               # hanning(8)
+    assert a195.rx_weights[3] == pytest.approx(0.9698, abs=1e-4)
+    assert a195.roll_source == "nav"
+    a60 = insts["mkb60_basler"].simulated.antenna
+    assert a60.kind == "finite_dipole"
+    assert a60.axis == "cross_track"
+    assert a60.length_lam == pytest.approx(0.4)
+    assert a60.roll_source == "nav"
+
+
+def _ant(**kw):
+    return rbc.AntennaConfig(**kw)
+
+
+def test_legacy_instrument_antennas_leave_cache_keys_byte_stable():
+    """The three resolved states every pre-existing cache was built under
+    (isotropic placeholders, mcords 7-el array, haps 8-el/no-roll array)
+    contribute NO key: rid and meta stay byte-identical."""
+    for ant in (_ant(kind="isotropic"),
+                _ant(kind="array", n_elements=7, spacing_lam=0.5,
+                     roll_source="nav"),
+                _ant(kind="array", n_elements=8, spacing_lam=0.5,
+                     roll_source="none")):
+        p = _p(rc_sim=rbc.RadarConfig(dt=1e-9, n_samples=64, t0=0.0,
+                                      f0=195e6, antenna=ant))
+        assert rbc.chunk_rid(p, 0, 14.0, True) == \
+            "low_full_pbed_proc_c00_srough_att14"
+        meta = rbc.chunk_meta(p, 0, np.arange(198), 5, 1939, 14.0, True)
+        assert "instrument_antenna" not in meta
+
+
+def test_realistic_instrument_antenna_forks_the_cache_key():
+    """A non-legacy resolved antenna is fingerprinted into rid AND meta, so
+    editing a YAML pattern under the same instrument name can never silently
+    reuse a stale chunk -- and the new rid means legacy chunk files survive
+    on disk."""
+    fd = _ant(kind="finite_dipole", axis="cross_track", length_lam=0.4,
+              roll_source="nav")
+    p = _p(rc_sim=rbc.RadarConfig(dt=1e-9, n_samples=64, t0=0.0, f0=60e6,
+                                  antenna=fd))
+    rid = rbc.chunk_rid(p, 0, 14.0, True)
+    assert "_ia" in rid and rid != "low_full_pbed_proc_c00_srough_att14"
+    meta = rbc.chunk_meta(p, 0, np.arange(198), 5, 1939, 14.0, True)
+    assert meta["instrument_antenna"] == {
+        "kind": "finite_dipole", "roll_source": "nav",
+        "axis": "cross_track", "length_lam": 0.4}
+    # a changed parameter moves the fingerprint
+    p2 = _p(rc_sim=rbc.RadarConfig(
+        dt=1e-9, n_samples=64, t0=0.0, f0=60e6,
+        antenna=_ant(kind="finite_dipole", axis="cross_track",
+                     length_lam=0.5, roll_source="nav")))
+    assert rbc.chunk_rid(p2, 0, 14.0, True) != rid
+    # an EDITED plain array (not a legacy state) is fingerprinted too
+    p3 = _p(rc_sim=rbc.RadarConfig(
+        dt=1e-9, n_samples=64, t0=0.0, f0=195e6,
+        antenna=_ant(kind="array", n_elements=8, spacing_lam=0.5,
+                     roll_source="nav")))
+    assert "_ia" in rbc.chunk_rid(p3, 0, 14.0, True)
+
+
+def test_cli_antenna_override_bypasses_the_instrument_fingerprint():
+    """--antenna isotropic/array8 overrides the instrument antenna entirely;
+    those runs stay keyed by the override NAME exactly as before, even when
+    the instrument YAML now declares a realistic pattern."""
+    fd = _ant(kind="finite_dipole", axis="cross_track", length_lam=0.4,
+              roll_source="nav")
+    p = _p(rc_sim=rbc.RadarConfig(dt=1e-9, n_samples=64, t0=0.0, f0=60e6,
+                                  antenna=fd))
+    rid = rbc.chunk_rid(p, 0, 14.0, True, "array8")
+    assert rid == "low_full_pbed_proc_c00_srough_att14_antarray8"
+    meta = rbc.chunk_meta(p, 0, np.arange(198), 5, 1939, 14.0, True,
+                          "array8")
+    assert meta["antenna"] == "array8"
+    assert "instrument_antenna" not in meta
+
+
+def test_radar_grid_carries_every_antenna_field():
+    """The rc_sim rebuild must not drop the tapered/finite-dipole params
+    (the old 4-field rebuild silently dropped `axis`)."""
+    from clutter_instruments import Antenna
+    params = {"waveform": {"center_frequency_Hz": 195e6,
+                           "bandwidth_Hz": 30e6,
+                           "bed_waveform_pulse_length_s": 3e-6,
+                           "pulse_compression_freq_window": "hann"}}
+    surf = np.array([4.0e-6]); bed = np.array([2.0e-5])
+    ant = Antenna(kind="array_tapered", spacing_lam=0.304,
+                  tx_weights=[1.0] * 8, rx_weights=[2.0] * 8,
+                  roll_source="nav")
+    rc_sim, _, _ = rbc.radar_grid(params, surf, bed, 2e-8, 0.0, 4, "hann",
+                                  antenna=ant)
+    a = rc_sim.antenna
+    assert a.kind == "array_tapered"
+    assert a.tx_weights == [1.0] * 8 and a.rx_weights == [2.0] * 8
+    assert a.spacing_lam == pytest.approx(0.304)
+    ant2 = Antenna(kind="finite_dipole", axis="cross_track", length_lam=0.4)
+    rc_sim2, _, _ = rbc.radar_grid(params, surf, bed, 2e-8, 0.0, 4, "hann",
+                                   antenna=ant2)
+    assert rc_sim2.antenna.axis == "cross_track"
+    assert rc_sim2.antenna.length_lam == pytest.approx(0.4)
