@@ -397,3 +397,141 @@ def test_isotropic_explicit_equals_default():
         facets=FacetConfig()))
     assert np.array_equal(a.field.values, b.field.values)
     assert np.array_equal(a.dropped_power.values, b.dropped_power.values)
+
+
+# --------------------------------------- realistic david-line models (M-ant)
+
+TX8 = [39.4, 72.6, 125.8, 177.6, 156.0, 120.7, 92.9, 44.8]  # 2017 Basler TX
+HANN8 = [float(np.sin(np.pi * k / 9.0) ** 2) for k in range(1, 9)]
+D8 = 0.304  # 0.468 m at 195 MHz, in carrier wavelengths
+
+
+def tapered_af(u, w, d_lam):
+    """|sum_m w_m exp(i 2 pi d m u)| / sum w, element index m centered."""
+    w = np.asarray(w, np.float64)
+    m = np.arange(len(w)) - (len(w) - 1) / 2.0
+    ph = 2.0 * np.pi * d_lam * np.asarray(u, np.float64)[..., None] * m
+    return np.hypot(np.cos(ph) @ w, np.sin(ph) @ w) / w.sum()
+
+
+def _ct_dhats(theta_deg):
+    """Departure directions theta off-nadir in the cross-track plane."""
+    th = np.deg2rad(np.asarray(theta_deg, np.float64))
+    return np.column_stack([np.zeros(len(th)), -np.sin(th), -np.cos(th)])
+
+
+def test_array_tapered_closed_form_angles():
+    """g = sqrt(AF_tx * AF_rx) at nadir/30/60/75/82 deg; the David clutter
+    band sits at the two-way (40 log10 g) sidelobe floor near -60 dB."""
+    ant = AntennaConfig(kind="array_tapered", spacing_lam=D8,
+                        tx_weights=TX8, rx_weights=HANN8)
+    angles = [0.0, 30.0, 60.0, 75.0, 82.0]
+    g = antenna.field_gain(ant, _ct_dhats(angles), U_AT, U_CT)
+    u = np.sin(np.deg2rad(angles))
+    expect = np.sqrt(tapered_af(u, TX8, D8) * tapered_af(u, HANN8, D8))
+    np.testing.assert_allclose(g, expect, rtol=1e-12)
+    assert g[0] == pytest.approx(1.0, abs=1e-12)  # peak-normalized at nadir
+    tw = 40.0 * np.log10(g[1:])                   # two-way POWER dB
+    assert -30.0 < tw[0] < -27.0                  # 30 deg: -28.5
+    assert -59.0 < tw[1] < -56.5                  # 60 deg: -57.8
+    assert -60.5 < tw[2] < -57.5                  # 75 deg: -59.0
+    assert -62.0 < tw[3] < -59.0                  # 82 deg: -60.6
+
+
+def test_array_tapered_uniform_matches_array_kind():
+    """Uniform tx = rx weights collapse to the plain array factor."""
+    n, d = 8, 0.304
+    us = np.array([0.0, 0.1, 0.3, 0.6, 0.9])
+    dhats = np.column_stack([np.zeros(5), -us, -np.sqrt(1.0 - us ** 2)])
+    g_t = antenna.field_gain(
+        AntennaConfig(kind="array_tapered", spacing_lam=d,
+                      tx_weights=[1.0] * n, rx_weights=[1.0] * n),
+        dhats, U_AT, U_CT)
+    np.testing.assert_allclose(g_t, array_factor(us, n, d), atol=1e-12)
+
+
+def test_array_tapered_kernel_two_way():
+    """Kernels weight field by g**2 and power by g**4 for array_tapered."""
+    ant = AntennaConfig(kind="array_tapered", spacing_lam=D8,
+                        tx_weights=TX8, rx_weights=HANN8)
+    dhats = _ct_dhats([0.0, 20.0, 45.0, 75.0])
+    g = antenna.field_gain(ant, dhats, U_AT, U_CT)
+    fr, pr = _facet_ratio(dhats, ant)
+    np.testing.assert_allclose(fr, g ** 2, rtol=2e-3, atol=1e-8)
+    np.testing.assert_allclose(pr, g ** 4, rtol=4e-3, atol=1e-12)
+
+
+def finite_dipole_gain(cos_psi, L):
+    """Closed-form finite-length thin dipole, peak-normalized at broadside."""
+    kh = np.pi * L
+    s = np.sqrt(1.0 - np.asarray(cos_psi, np.float64) ** 2)
+    return np.abs(np.cos(kh * cos_psi) - np.cos(kh)) / (s * (1 - np.cos(kh)))
+
+
+def test_finite_dipole_closed_form_angles():
+    """Cross-track finite dipole (MARFA wing plate, L = 0.4 lam at 60 MHz):
+    two-way values at the David clutter angles vs the -16/-36 dB bracket."""
+    ant = AntennaConfig(kind="finite_dipole", axis="cross_track",
+                        length_lam=0.4)
+    angles = [0.0, 30.0, 60.0, 75.0, 82.0]
+    g = antenna.field_gain(ant, _ct_dhats(angles), U_AT, U_CT)
+    # psi from the cross-track axis: cos(psi) = -sin(theta) * (u_ct . -y)
+    cos_psi = np.sin(np.deg2rad(angles))
+    np.testing.assert_allclose(g, finite_dipole_gain(cos_psi + 1e-300, 0.4),
+                               rtol=1e-9)
+    assert g[0] == pytest.approx(1.0, abs=1e-12)  # nadir is broadside
+    tw = 40.0 * np.log10(g[1:])
+    assert -3.5 < tw[0] < -2.8    # 30 deg: -3.1
+    assert -14.5 < tw[1] < -13.4  # 60 deg: -13.9
+    assert -26.5 < tw[2] < -25.0  # 75 deg: -25.8
+    assert -37.5 < tw[3] < -36.0  # 82 deg: -36.7 (inside the -16/-36 bracket)
+
+
+def test_finite_dipole_limits():
+    """L = 0.5 reproduces the half-wave `dipole` kind exactly; L -> 0 tends
+    to the short-dipole sin(psi)."""
+    dhats = _ct_dhats([5.0, 25.0, 50.0, 75.0, 88.0])
+    g_half = antenna.field_gain(
+        AntennaConfig(kind="finite_dipole", axis="cross_track",
+                      length_lam=0.5), dhats, U_AT, U_CT)
+    g_dip = antenna.field_gain(
+        AntennaConfig(kind="dipole", axis="cross_track"), dhats, U_AT, U_CT)
+    np.testing.assert_allclose(g_half, g_dip, rtol=1e-12)
+    g_short = antenna.field_gain(
+        AntennaConfig(kind="finite_dipole", axis="cross_track",
+                      length_lam=0.01), dhats, U_AT, U_CT)
+    cos_psi = np.sin(np.deg2rad([5.0, 25.0, 50.0, 75.0, 88.0]))
+    np.testing.assert_allclose(g_short, np.sqrt(1.0 - cos_psi ** 2),
+                               rtol=1e-3)
+
+
+def test_finite_dipole_kernel_two_way():
+    ant = AntennaConfig(kind="finite_dipole", axis="cross_track",
+                        length_lam=0.4)
+    dhats = _ct_dhats([0.0, 30.0, 60.0, 80.0])
+    g = antenna.field_gain(ant, dhats, U_AT, U_CT)
+    fr, pr = _facet_ratio(dhats, ant)
+    np.testing.assert_allclose(fr, g ** 2, rtol=2e-3, atol=1e-8)
+    np.testing.assert_allclose(pr, g ** 4, rtol=4e-3, atol=1e-12)
+
+
+def test_new_kind_config_validation():
+    with pytest.raises(ValueError):
+        AntennaConfig(kind="array_tapered", spacing_lam=0.3)  # no weights
+    with pytest.raises(ValueError):
+        AntennaConfig(kind="array_tapered", spacing_lam=0.3,
+                      tx_weights=[1, 2, 3], rx_weights=[1, 2])  # mismatch
+    with pytest.raises(ValueError):
+        AntennaConfig(kind="array_tapered", spacing_lam=0.3,
+                      tx_weights=[1, -1], rx_weights=[1, 1])  # negative
+    with pytest.raises(ValueError):
+        AntennaConfig(kind="array_tapered", spacing_lam=0.0,
+                      tx_weights=[1, 1], rx_weights=[1, 1])
+    with pytest.raises(ValueError):
+        AntennaConfig(kind="finite_dipole", length_lam=0.0)
+    with pytest.raises(ValueError):
+        AntennaConfig(kind="finite_dipole", length_lam=1.5)
+    # round-trip
+    ant = AntennaConfig(kind="array_tapered", spacing_lam=D8,
+                        tx_weights=TX8, rx_weights=HANN8, roll_source="nav")
+    assert AntennaConfig.model_validate_json(ant.model_dump_json()) == ant

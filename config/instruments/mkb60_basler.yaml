@@ -14,15 +14,27 @@ simulated:
   pulse_length_s: null
   window:         null
   antenna:
-    # The true antenna configuration of this platform at 60 MHz is NOT
-    # verified here. Isotropic = no cross-track suppression, so simulated
-    # off-nadir clutter is an UPPER bound; the --antenna brackets exist for
-    # sensitivity. Replace with the real array once its config is read from
-    # the season documentation.
-    kind: isotropic
-    roll_source: none
+    # REAL MARFA/HiCARS wing antenna. The product is the RIGHT wing alone --
+    # single phase center, NO beamforming (param_array of 20231212_02_015 and
+    # 20221212_01_016: method 'standard', one wf-adc pair per image,
+    # out_path 'right_noise'; fcs y ~ -9.62 m) -- so the whole cross-track
+    # rejection is the two-way ELEMENT pattern. Element: 200 x 40 cm
+    # flat-plate dipole under the wing (NASA Earthdata HiCARS docs),
+    # dipole axis cross-track. Model: finite-length thin dipole,
+    # length 2.0 m = 0.40 lambda at 60 MHz; the plate width and the wing
+    # act mainly on the fore/aft + absolute gain, not the cross-track cut,
+    # and are not modeled (uncertainty: null fill-in). Two-way power at the
+    # David bed-window clutter angles: -23 dB (72 deg) to -42 dB (84 deg),
+    # band power-average -28 dB -- inside the -16..-36 dB credible bracket.
+    kind: finite_dipole
+    axis: cross_track
+    length_lam: 0.4
+    # Frames carry full Roll (checked 20221212_01_016 / 20231212_02_015:
+    # 0% NaN, +/-2.6 and +/-8 deg); reversal negation handled by the tool.
+    roll_source: nav
 provenance: >
   fc/B/pulse/window are read per pass from its own OPR frame. Both seasons
   report identical 60/15 MHz on the same 20 ns product lattice, and the two
   flights repeat the same line one year apart to the day -- a same-instrument
-  repeat pair. ANTENNA UNVERIFIED (see simulated.antenna).
+  repeat pair. Antenna model 2026-08-24 from the product param structs +
+  HiCARS hardware docs (see simulated.antenna); plate/wing effects unmodeled.

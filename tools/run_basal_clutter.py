@@ -60,6 +60,7 @@ Run:  uv run python tools/run_basal_clutter.py \
 
 import argparse
 import base64
+import hashlib
 import datetime
 import html
 import json
@@ -1567,9 +1568,10 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window,
     ant = (AntennaConfig(kind="array", n_elements=rac.N_ELEMENTS,
                          spacing_lam=rac.SPACING_LAM, roll_source="nav")
            if antenna is None else
-           AntennaConfig(kind=antenna.kind, n_elements=antenna.n_elements,
-                         spacing_lam=antenna.spacing_lam,
-                         roll_source=antenna.roll_source))
+           # carry EVERY declared field (the old 4-field rebuild silently
+           # dropped axis and would drop the tapered/finite-dipole params)
+           AntennaConfig(**{k: v for k, v in antenna.model_dump().items()
+                            if v is not None}))
     f0 = wf["center_frequency_Hz"]
     t0 = t0f + b0 * dt
     rc_sim = RadarConfig(dt=dt / oversample, n_samples=oversample * (nb - 1) + 1,
@@ -1838,6 +1840,61 @@ def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
                     DemInterface(name="bed", roughness=rcb)])
 
 
+# The exact resolved instrument-antenna states every PRE-EXISTING chunk cache
+# was built under when the CLI antenna is the default ('array' = "use the
+# instrument YAML"): the david isotropic placeholders, the uniform MCoRDS
+# 7-element array (all four mcords YAMLs), and the HAPS 8-element/no-roll
+# array. These states contribute NO cache key (byte-identical rid + meta with
+# every existing cache); any OTHER resolved antenna -- the realistic david
+# models, or a future edit to an array YAML's numbers -- is fingerprinted
+# into both the rid and the meta, so a YAML pattern change can never silently
+# reuse a stale chunk. CLI antenna overrides ('isotropic'/'array8') bypass
+# the instrument antenna entirely and stay keyed by name as before.
+_LEGACY_INSTRUMENT_ANTS = (
+    AntennaConfig(kind="isotropic"),
+    AntennaConfig(kind="array", n_elements=7, spacing_lam=0.5,
+                  roll_source="nav"),
+    AntennaConfig(kind="array", n_elements=8, spacing_lam=0.5,
+                  roll_source="none"),
+)
+
+
+def inst_ant_meta(p, antenna):
+    """{'instrument_antenna': resolved params} or {} (legacy/overridden)."""
+    rc = p.get("rc_sim")
+    if antenna != ANT_DEFAULT or rc is None:
+        return {}          # CLI override active: instrument antenna unused
+    a = rc.antenna
+    if any(a == la for la in _LEGACY_INSTRUMENT_ANTS):
+        return {}
+    fp = {"kind": a.kind, "roll_source": a.roll_source}
+    if a.kind in ("dipole", "finite_dipole"):
+        fp["axis"] = a.axis
+    if a.kind == "finite_dipole":
+        fp["length_lam"] = a.length_lam
+    if a.kind == "array":
+        fp.update(n_elements=a.n_elements, spacing_lam=a.spacing_lam)
+    if a.kind == "array_tapered":
+        fp.update(spacing_lam=a.spacing_lam,
+                  tx_weights=list(a.tx_weights),
+                  rx_weights=list(a.rx_weights))
+    if a.kind == "tabulated":
+        fp.update(theta_deg=list(a.theta_deg), gain=list(a.gain))
+    return {"instrument_antenna": fp}
+
+
+def inst_ant_tag(p, antenna):
+    """Chunk-file-name suffix for a fingerprinted instrument antenna: new
+    patterns get NEW file names, so legacy chunk files (isotropic-placeholder
+    baselines) survive on disk instead of being overwritten."""
+    fpm = inst_ant_meta(p, antenna)
+    if not fpm:
+        return ""
+    h = hashlib.sha1(json.dumps(fpm["instrument_antenna"],
+                                sort_keys=True).encode()).hexdigest()[:8]
+    return f"_ia{h}"
+
+
 def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
               spec=None):
     """Cache file name for one chunk. Non-default hypothesis knobs append a
@@ -1857,7 +1914,8 @@ def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
                else f"_fs{spec[0]:g}_s0{spec[1]:g}_n{spec[2]:g}")
             + ("" if p.get("instrument") in (None,
                                              p.get("instrument_default"))
-               else f"_i{p['instrument']}"))
+               else f"_i{p['instrument']}")
+            + inst_ant_tag(p, antenna))
 
 
 def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
@@ -1893,6 +1951,7 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
             **({} if p.get("instrument") in (None,
                                              p.get("instrument_default"))
                else {"instrument": p["instrument"]}),
+            **inst_ant_meta(p, antenna),
             "window": p["window"], "surf_rough": bool(surf_rough),
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
             "t0_us": round(p["rc_sim"].t0 * 1e6, 5),

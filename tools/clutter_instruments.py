@@ -55,9 +55,14 @@ class Source(_Base):
 
 
 class Antenna(_Base):
-    kind: Literal["isotropic", "dipole", "array", "tabulated"] = "array"
+    kind: Literal["isotropic", "dipole", "array", "array_tapered",
+                  "finite_dipole", "tabulated"] = "array"
+    axis: Literal["along_track", "cross_track"] = "along_track"
     n_elements: int = 7
     spacing_lam: float = 0.5
+    tx_weights: list[float] | None = None   # array_tapered: TX amplitude taper
+    rx_weights: list[float] | None = None   # array_tapered: RX combine taper
+    length_lam: float = 0.5                 # finite_dipole length (wavelengths)
     roll_source: Literal["none", "nav"] = "nav"
 
 

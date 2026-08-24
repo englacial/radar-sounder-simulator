@@ -52,6 +52,19 @@ class AntennaConfig(BaseModel):
       MCoRDS-like case); element spacing ``spacing_lam`` is in CARRIER
       WAVELENGTHS (dimensionless). g = |array factor|
       = sin(N x)/(N sin x), x = pi * spacing_lam * sin(theta_ct).
+    - ``array_tapered``: like ``array`` but with separate TX and RX
+      amplitude tapers (arbitrary units, each normalized by its own sum);
+      n_elements = len(tx_weights) = len(rx_weights). One-way FIELD gain is
+      the geometric mean g = sqrt(AF_tx * AF_rx) of the two tapered array
+      factors, so the kernels' monostatic two-way field weight g**2 equals
+      the physical AF_tx * AF_rx product (tapered transmit, tapered
+      delay-and-sum receive).
+    - ``finite_dipole``: finite-length thin dipole of length ``length_lam``
+      CARRIER WAVELENGTHS along ``axis`` (parametric broadening/narrowing of
+      ``dipole``): g = |cos(pi L cos psi) - cos(pi L)| /
+      (sin(psi) (1 - cos(pi L))), peak-normalized at broadside.
+      length_lam = 0.5 reproduces ``dipole`` exactly; length_lam -> 0 tends
+      to the short-dipole sin(psi).
     - ``tabulated``: g(theta) linearly interpolated from ``theta_deg`` /
       ``gain`` samples, rotationally symmetric about the nadir boresight;
       theta is the angle from boresight in degrees, ascending (clamped at the
@@ -62,10 +75,14 @@ class AntennaConfig(BaseModel):
     down; scenes without roll data use 0).
     """
 
-    kind: Literal["isotropic", "dipole", "array", "tabulated"] = "isotropic"
-    axis: Literal["along_track", "cross_track"] = "along_track"  # dipole only
+    kind: Literal["isotropic", "dipole", "array", "array_tapered",
+                  "finite_dipole", "tabulated"] = "isotropic"
+    axis: Literal["along_track", "cross_track"] = "along_track"  # dipole kinds
     n_elements: int = 5          # array only
     spacing_lam: float = 0.5     # array element spacing (carrier wavelengths)
+    tx_weights: Optional[list[float]] = None  # array_tapered: TX taper
+    rx_weights: Optional[list[float]] = None  # array_tapered: RX taper
+    length_lam: float = 0.5      # finite_dipole length (carrier wavelengths)
     theta_deg: Optional[list[float]] = None  # tabulated: angle from boresight
     gain: Optional[list[float]] = None       # tabulated: one-way FIELD gain
     roll_source: Literal["none", "nav"] = "none"
@@ -77,6 +94,24 @@ class AntennaConfig(BaseModel):
                 raise ValueError("array antenna requires n_elements >= 2")
             if self.spacing_lam <= 0:
                 raise ValueError("array antenna requires spacing_lam > 0")
+        if self.kind == "array_tapered":
+            if not self.tx_weights or not self.rx_weights:
+                raise ValueError("array_tapered antenna requires tx_weights "
+                                 "and rx_weights")
+            if len(self.tx_weights) != len(self.rx_weights) \
+                    or len(self.tx_weights) < 2:
+                raise ValueError("array_tapered needs >= 2 matching "
+                                 "tx_weights/rx_weights")
+            for w in (self.tx_weights, self.rx_weights):
+                if any(v < 0 for v in w) or sum(w) <= 0:
+                    raise ValueError("array_tapered weights must be >= 0 "
+                                     "with a positive sum")
+            if self.spacing_lam <= 0:
+                raise ValueError("array_tapered requires spacing_lam > 0")
+        if self.kind == "finite_dipole":
+            if not (0.0 < self.length_lam <= 1.0):
+                raise ValueError("finite_dipole requires 0 < length_lam <= 1 "
+                                 "(carrier wavelengths)")
         if self.kind == "tabulated":
             if not self.theta_deg or not self.gain:
                 raise ValueError(
