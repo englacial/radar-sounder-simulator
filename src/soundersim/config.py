@@ -180,6 +180,47 @@ class RoughnessConfig(BaseModel):
         return self
 
 
+class GrazingFixConfig(BaseModel):
+    """Grazing-angle facet-lattice fix (coherent mode only; opt-in -- the
+    field's absence traces exactly the legacy kernels, so every existing
+    cache and regression gate is untouched).
+
+    ONE switch enables two coupled changes, because they are two faces of
+    the same artifact -- facet-grid spatial aliasing once the LPA phase ramp
+    across a facet exceeds pi (2kL sin(theta) >> pi at grazing) -- and the
+    acceptance criterion (facet-size-invariant effective sigma0) needs both:
+
+    - COHERENT off-specular taper: each facet's smooth (sinc*sinc specular)
+      FIELD is multiplied by T(alpha) = exp(-tan^2(alpha)/(2 s_eff^2)),
+      alpha the arrival angle off the facet normal. Physical basis: the
+      sub-facet slope distribution -- a facet only mirrors power back within
+      its slope spread. Near-specular returns (alpha << s_eff, e.g. glinting
+      valley walls) keep T ~ 1; the non-converging sinc/grid-lobe tails at
+      grazing go to 0. The removed power is grid aliasing, not physical
+      power, and is dropped rather than re-booked (the physical off-specular
+      return is the D_Phi channel below, plus the optional spec/diffuse
+      split).
+    - AREA-TERM-ONLY D_Phi: the sub-facet-roughness incoherent variance
+      keeps only its facet-area-scaling term (the per-facet infinite-surface
+      PO law, Gerekos et al. 2023 Appendix C; roughness.d_phi area_only),
+      dropping the facet-edge remainder whose sigma0 goes as 1/L^2 * O(1)
+      (facet-size dependent, +30 dB unphysical at grazing).
+
+    ``s_eff``: effective rms slope of the taper, in tan(alpha) units.
+    Physical scale ~ sqrt(2) * sigma/l of the sub-facet roughness (0.02-0.16
+    for the campaign interfaces); the default 0.05 (~3 deg) is a mildly
+    conservative single value for all interfaces.
+    """
+
+    s_eff: float = 0.05
+
+    @model_validator(mode="after")
+    def _positive(self):
+        if self.s_eff <= 0:
+            raise ValueError("grazing_fix s_eff must be > 0")
+        return self
+
+
 class _InterfaceBase(BaseModel):
     """Fields shared by every interface kind."""
 
@@ -265,6 +306,10 @@ class SimConfig(BaseModel):
     realizations. It also seeds the DIFFUSE channel's phasors (independent
     stream).
 
+    ``grazing_fix`` (default None = off, the legacy program) enables the
+    grazing-angle facet-lattice fix -- coherent off-specular taper +
+    area-term-only D_Phi -- see ``GrazingFixConfig``.
+
     ``diffuse_exponent`` is the exponent n of the cos^n(theta_incidence)
     angular law of the diffuse channel, used only when a scene attaches
     ``diffuse_maps`` (per-facet diffuse FIELD amplitudes; see
@@ -275,6 +320,7 @@ class SimConfig(BaseModel):
     mode: Literal["incoherent", "coherent"]
     split_sides: bool = False
     refraction: Literal["sequential", "joint"] = "joint"
+    grazing_fix: Optional[GrazingFixConfig] = None
     roughness_seed: int = 0
     diffuse_exponent: float = 1.0
     radar: RadarConfig
@@ -292,6 +338,9 @@ class SimConfig(BaseModel):
                                            for i in self.interfaces):
             raise ValueError("interface roughness requires coherent mode "
                              "(the incoherent kernel has no phase to perturb)")
+        if self.mode != "coherent" and self.grazing_fix is not None:
+            raise ValueError("grazing_fix requires coherent mode (it tapers "
+                             "the coherent facet response)")
         names = [i.name for i in self.interfaces]
         for i, iface in enumerate(self.interfaces):
             if isinstance(iface, OffsetInterface):
