@@ -4459,7 +4459,9 @@ def main():
                     nargs="+", metavar="S_KM",
                     help="anchor along-track position(s) (km) of the "
                     "SINGLE-TRACE decomposition figure, one panel each "
-                    f"(default {DECOMP_S_KM['full']:g} km on full/extended "
+                    "(default "
+                    f"{'/'.join(f'{v:g}' for v in np.atleast_1d(DECOMP_S_KM['full']))}"
+                    " km on full/extended "
                     "-- the scout's deep trough with the brightest "
                     "structured bed clutter; full_line adds a floating "
                     "location at 120 km). The nearest trace of every pass "
