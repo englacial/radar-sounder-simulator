@@ -208,10 +208,13 @@ def simulate(scene: SyntheticScene, sim_config: SimConfig):
     check_facet_size(facets, lam, min_range)
     rough = _roughness_args(sim_config.interfaces[0], facets,
                             2.0 * np.pi / lam, (sim_config.roughness_seed, 0))
+    gfx = sim_config.grazing_fix
     field, dropped = coherent_cluttergram(
         track.positions, track.u_ct, facets.centers, facets.normals,
         facets.areas, facets.e1, facets.e2, k=2.0 * np.pi / lam, gamma=gamma,
-        interp_bins=rc.waveform.interp_bins, roughness=rough, **window)
+        interp_bins=rc.waveform.interp_bins, roughness=rough,
+        taper_s=gfx.s_eff if gfx else None, d_phi_area=gfx is not None,
+        **window)
     field = apply_waveform(field, rc, "coherent")
     return build_dataset(np.abs(field) ** 2, dropped, field=field, scene=scene,
                          frame=frame, facets=facets, track=track,
@@ -294,6 +297,9 @@ def _simulate_multilayer(scene, sim_config):
             check_facet_size(f, lam_j, min_range)
 
     ifaces = sim_config.interfaces
+    gfx = sim_config.grazing_fix  # None (legacy) or the grazing-fix pair
+    gfx_kw = dict(taper_s=gfx.s_eff if gfx else None,
+                  d_phi_area=gfx is not None)
     sig_all = np.array([(ic.roughness.sigma_m if ic.roughness else 0.0)
                         for ic in ifaces])
 
@@ -335,7 +341,7 @@ def _simulate_multilayer(scene, sim_config):
                 out, drop = coherent_cluttergram(
                     track.positions, track.u_ct, surf.centers, surf.normals,
                     surf.areas, surf.e1, surf.e2, k=k0, gamma=gamma_j,
-                    roughness=rough, **window)
+                    roughness=rough, **gfx_kw, **window)
             else:
                 out, drop = incoherent_cluttergram(
                     track.positions, track.u_ct, surf.centers, surf.normals,
@@ -358,7 +364,7 @@ def _simulate_multilayer(scene, sim_config):
                 k0=k0 if coherent else None, refraction=refr,
                 pad_to=_joint_pad_to(j, n_max) if refr == "joint" else None,
                 roughness=rough, crossed_sigma=crossed_sig, diffuse=dif,
-                **window)
+                **(gfx_kw if coherent else {}), **window)
         outs.append(out)
         drops.append(drop)
 

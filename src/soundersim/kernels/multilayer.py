@@ -145,7 +145,8 @@ the power away from nadir (recorded, not compensated).
 
 Compilation caching: the jitted callable is built once per static
 configuration -- ``(mode, split_sides, n_samples, n_crossed, pattern,
-refraction, joint budgets, roughness statics, diffuse)``, memoized via
+refraction, joint budgets, roughness statics, diffuse, grazing-fix
+statics)``, memoized via
 ``functools.lru_cache`` -- with
 every run-varying number (t0/dt/c/gamma/k0, per-leg eps/index/attenuation,
 interface lookup constants, facet blocks, positions) passed as traced
@@ -242,7 +243,8 @@ def _joint_consts(crossed, pad_to, z_platform):
 def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                   pattern="isotropic", refraction="sequential",
                   joint_newton=6, joint_backtrack=4, rough_terms=0,
-                  rough_cross=False, gamma_facet=False, diffuse=False):
+                  rough_cross=False, gamma_facet=False, diffuse=False,
+                  taper=False, rough_area=False):
     """Build (once per static configuration) the jitted vmapped kernel.
 
     Everything numeric that can vary between runs is a traced argument:
@@ -357,7 +359,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                 c_surf, c_last, r2.x[0])
 
     def one_trace(p, u, pv, blocks, consts, n_leg, eps_leg, att, t0, dt, c,
-                  gamma, k0, pa, pb, sig_t, l_t, sig_c, n_exp):
+                  gamma, k0, pa, pb, sig_t, l_t, sig_c, n_exp, tps):
         if refraction == "sequential":
             assert len(consts) == n_crossed
 
@@ -416,6 +418,13 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                               * (kj / np.pi))
                 amp = ((kj / TWO_PI) * gam * cos_t * fa * s1 * s2 * spread
                        * att_f)
+                if taper:
+                    # off-specular taper on the SPECULAR term only
+                    # (coherent.py _off_specular_taper, same form; cos_t is
+                    # the incidence cosine at the REFRACTED arrival)
+                    ct2 = jnp.clip(cos_t, _C_MIN, 1.0) ** 2
+                    amp = amp * jnp.exp(-(1.0 - ct2)
+                                        / (ct2 * (2.0 * tps * tps)))
                 if rough_terms:
                     f1d, f2d = f1.astype(jnp.float64), f2.astype(jnp.float64)
                     d1 = jnp.sum(rhat * f1d, -1)
@@ -425,7 +434,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                     kk = 2.0 * kj * cos_t
                     dp = d_phi(sig_t, l_t, kk, 2.0 * kj * d1 / l1,
                                2.0 * kj * d2 / l2, l1, l2,
-                               n_terms=rough_terms)
+                               n_terms=rough_terms, area_only=rough_area)
                     # area-mask: zero-padded block slots (f1 = f2 = 0) make
                     # the d_phi args 0/0 -> NaN; the smooth term is killed by
                     # fa = 0 but the incoherent term has no area factor
@@ -465,13 +474,14 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
         (hist, dropped), _ = jax.lax.scan(step, init, blocks)
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 16))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 17))
 
 
 def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                           *, mode, t0, dt, n_samples, c, gamma=0.0, k0=None,
                           split_sides=False, pattern=None, roughness=None,
-                          crossed_sigma=None, diffuse=None, block_size=None,
+                          crossed_sigma=None, diffuse=None, taper_s=None,
+                          d_phi_area=False, block_size=None,
                           refraction="sequential", pad_to=None,
                           joint_newton=6, joint_backtrack=4):
     """Binned refracted-path contributions from one target interface.
@@ -498,6 +508,10 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     None or per-crossed-interface RMS heights (m, len == len(crossed),
     zeros where smooth) for the two-way transmission attenuation
     exp(-2 sigma^2 K_t^2) per crossing (module docstring).
+    ``taper_s``/``d_phi_area`` (coherent mode only): the grazing-fix pair
+    (coherent.py, config.py ``GrazingFixConfig``) -- the off-specular taper
+    s_eff on the target's SPECULAR term (None = off) and the area-term-only
+    D_Phi; the defaults trace exactly the pre-fix program.
 
     ``refraction`` selects the crossing solver (module docstring): the
     kernel-level default stays ``"sequential"``; simulate() passes the
@@ -519,6 +533,8 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     joint = refraction == "joint"
     if (roughness is not None or crossed_sigma is not None) and not coherent:
         raise ValueError("roughness requires coherent mode")
+    if (taper_s is not None or d_phi_area) and not coherent:
+        raise ValueError("the grazing fix requires coherent mode")
     gamma_arr = np.asarray(gamma, np.float64)
     gamma_facet = gamma_arr.ndim > 0
     if gamma_facet and not coherent:
@@ -598,14 +614,16 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                        None if joint else len(crossed), kind, refraction,
                        int(joint_newton), int(joint_backtrack), int(n_terms),
                        crossed_sigma is not None, gamma_facet,
-                       diffuse is not None)
+                       diffuse is not None, taper_s is not None,
+                       bool(d_phi_area))
     with jax.enable_x64():
         hist, dropped = fn(pos, uct, pv, blk, consts, n_leg, eps, att,
                            np.float64(t0), np.float64(dt), np.float64(c),
                            np.float64(0.0 if gamma_facet else gamma),
                            np.float64(0.0 if k0 is None else k0), pa, pb,
                            np.float64(sig_t), np.float64(l_t), sig_c,
-                           np.float64(n_exp))
+                           np.float64(n_exp),
+                           np.float64(0.0 if taper_s is None else taper_s))
         hist, dropped = np.asarray(hist), np.asarray(dropped)
     if split_sides:
         hist = hist.reshape(-1, 2, n_samples).transpose(0, 2, 1)

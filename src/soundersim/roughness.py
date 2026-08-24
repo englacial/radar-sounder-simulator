@@ -104,7 +104,7 @@ def _f_factor(m, a0, edge, l):
     return 1.0 - ey2 * jnp.cos(edge * a0) + _SQRT_PI * (t1 - t2)
 
 
-def d_phi(sigma, l, K, A0, B0, Lx, Ly, *, n_terms):
+def d_phi(sigma, l, K, A0, B0, Lx, Ly, *, n_terms, area_only=False):
     """Incoherent phase-response variance D_Phi (Eq 21), units of area^2.
 
     Broadcasts over facet arrays (K/A0/B0/Lx/Ly); ``sigma``/``l`` are
@@ -113,6 +113,18 @@ def d_phi(sigma, l, K, A0, B0, Lx, Ly, *, n_terms):
     memory stays O(facets). Exactly 0.0 at sigma = 0 (the log-space Poisson
     weight underflows to 0 before any multiply). Clamped at >= 0 so
     sqrt(d_phi) is always finite.
+
+    ``area_only`` (static) keeps only the facet-AREA-scaling part of each
+    term's F_A * F_B -- the (-sqrt(pi) y e^{-x^2}) pieces of the
+    sqrt(pi) e^{-x^2} Re{A_m erfi(A_m)} terms of Eqs 22-24, whose product is
+    F_A * F_B -> pi * (Lx Ly m / l^2) * e^{-(A0^2 + B0^2) l^2 / (4m)} --
+    which turns each series term into pi l^2 Lx Ly / m * exp(-(A0^2 + B0^2)
+    l^2 / (4m)): the paper's Appendix-C infinite-surface law applied per
+    facet. This drops the O(1) facet-EDGE remainder (the Dawson-tail part),
+    whose effective sigma0 scales as 1/(Lx*Ly) -- facet-size dependent and
+    unphysically dominant at grazing incidence. With area_only,
+    sigma0 = (k^2/pi) gamma^2 cos^2 D_Phi/(Lx Ly) is exactly facet-size
+    invariant (the grazing-fix option; config.py ``GrazingFixConfig``).
     """
     x = (sigma * K) ** 2
     shape = jnp.broadcast_shapes(jnp.shape(x), jnp.shape(A0), jnp.shape(B0),
@@ -124,8 +136,12 @@ def d_phi(sigma, l, K, A0, B0, Lx, Ly, *, n_terms):
 
     def body(acc, mf):
         logp = mf * logx - gammaln(mf + 1.0) - x
-        term = jnp.exp(logp) * (l4 / (mf * mf)) * _f_factor(mf, A0, Lx, l) \
-            * _f_factor(mf, B0, Ly, l)
+        if area_only:
+            term = jnp.exp(logp - (A0 * A0 + B0 * B0) * (l * l) / (4.0 * mf)) \
+                * (np.pi * (l * l) / mf) * Lx * Ly
+        else:
+            term = jnp.exp(logp) * (l4 / (mf * mf)) \
+                * _f_factor(mf, A0, Lx, l) * _f_factor(mf, B0, Ly, l)
         return acc + term, None
 
     ms = jnp.arange(1, n_terms + 1, dtype=dt)

@@ -129,6 +129,10 @@ class Physics(_Base):
     surface_roughness: bool = True
     antenna: Literal["array", "isotropic", "array8"] = "array"
     bed_roughness: BedRoughness | None = None
+    # grazing-angle facet-lattice fix: null = off (legacy), a number = the
+    # coherent off-specular taper s_eff (soundersim GrazingFixConfig; also
+    # switches D_Phi to its area-only form). Forks every chunk cache key.
+    grazing_fix: float | None = None
 
 
 class Processing(_Base):
@@ -311,6 +315,7 @@ class RunSpec(_Base):
                            phy.bed_roughness.corr_length_m)),
             "bed_rough_extra_db": (0.0 if phy.bed_roughness is None
                                    else phy.bed_roughness.extra_db),
+            "grazing_fix": phy.grazing_fix,
             "processing": proc.chain,
             "proc_cache": proc.proc_cache,
             "posting_div": proc.posting_div,
