@@ -135,7 +135,10 @@ figures:
   radargram:
     y_us: [-1.0, 30.0]
     db: [-110.0, 5.0]
-    scale: per_panel      # 20 vs 33 ns lattices, 60 vs 195 MHz products
+    # shared (user decision 2026-08-24): one fixed window for every panel
+    # so sub-figures are visually comparable; the per-instrument dynamic
+    # -range concern (60 vs 195 MHz) lost to cross-panel comparability.
+    scale: shared
   profile:
     rel_us: [-1.5, 30.5]
     x_us: [-1.0, 30.0]
