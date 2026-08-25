@@ -81,3 +81,16 @@ Single-trace bed-window margins stay physical (+25 dB low, +18 dB at
 
 Chronology and per-run numbers: `claude_notes/gamma_solve_design_2026-08-20.md`
 (calibration era) and the session outputs under `outputs/antarctica_getz/pilot_dgn*`.
+
+## Postscript (2026-08-24): the grazing fix changes the numbers here
+
+The David clutter campaign found a facet-lattice aliasing artifact in the
+coherent channel (and a facet-edge term in the incoherent channel) that
+inflated all grazing-angle clutter; the fix is now default-ON
+(`analysis.yaml grazing_fix`). Consequences for this page: the below-bed
+energy fractions and tail slopes above were measured **with** the artifact
+present, and part of the below-bed pedestal the σ sweep traded against was
+artifact rather than physics. The σ = 0.10 m choice itself is expected to
+survive (its continuous-horizon effect is near-nadir, area-term territory)
+but should be re-checked when the benchmarks are re-run at fixed physics.
+See `claude_notes/david_clutter_resolution_2026-08-24.md`.

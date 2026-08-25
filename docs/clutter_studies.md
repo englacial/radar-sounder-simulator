@@ -59,6 +59,17 @@ line registry (`--line`).
   regression's γ_bed–thickness independence assumption is rejected there:
   a thawed-bed Γ–H confounder gives A ≈ 0.7, r = 0.11);
   greenland_westcoast **34.3 solved** [29.6–38.4, r = 0.85].
+- Antennas: per-instrument patterns (cross-track arrays with nav roll for
+  the MCoRDS3 systems; an 8-element amplitude-tapered array for the 2017
+  Basler; a finite wing-plate dipole for the 60 MHz MKB), fingerprinted
+  into the chunk cache keys. Isotropic is a declared clutter upper bound,
+  not a default.
+- Grazing-angle facet-lattice fix (default ON since 2026-08-24): the
+  coherent facet response is tapered off-specular and the sub-facet
+  roughness variance keeps only its area term, removing a facet-size
+  -dependent (unphysical) grazing clutter floor. This is a bug fix, not a
+  model option; `--no-grazing-fix` exists only for artifact demonstration.
+  Root-cause record: `claude_notes/david_clutter_resolution_2026-08-24.md`.
 - Processing: the simulated stacks can be passed through a chain matched to
   CSARP_standard (product-posting simulation, motion compensation,
   time-domain backprojection at the alias-limited aperture, multilook)
@@ -79,20 +90,39 @@ line registry (`--line`).
 
 ## Headline results to date
 
+> **Re-derivation pending (2026-08-24).** The grazing fix removed a
+> clutter artifact that was present in every run behind the quantitative
+> results below. Validation pilots show the qualitative findings survive,
+> but the numbers need re-deriving at fixed physics: on getz the 9–10 km
+> mid-column "match" becomes a 4–8 dB under-prediction and the low-pass
+> mid-column is unexplained; on david the bed is no longer obscured (the
+> original artifact symptom) but sits 7–22 dB dim with the two instruments
+> disagreeing. The universal **mid-column under-prediction** is now the
+> primary open physics question (candidates: englacial scattering, surface
+> roughness spectrum beyond the C&S statistics).
+
 - The measured growth of ice-column clutter with platform altitude is
-  reproduced by surface+bed geometry on the Antarctic line, and the
-  decomposition attributes it to off-nadir surface returns arriving at
-  bed-range delays at every altitude.
+  qualitatively reproduced by surface+bed geometry on the Antarctic line,
+  and the decomposition attributes it to off-nadir surface returns arriving
+  at bed-range delays at every altitude. (Quantitative closure was partly
+  artifact — see the note above.)
 - Design ladder (Antarctic line, best-model config): the bed remains
   visible above the clutter at ~14-30 km platform altitudes, while at
   orbital altitudes (300-500 km) the grounded bed is buried by 13-26 dB;
-  specular targets (ice-shelf base) remain detectable longest.
+  specular targets (ice-shelf base) remain detectable longest. (Pre-fix
+  numbers; the ladder should be re-run.)
 - RSSNR-driven reflectivity reproduces measured along-track bed-brightness
   structure (correlation ~0.6-0.8 against data ceilings of 0.9) on both a
   West Antarctic coastal line and a Greenland interior line.
 - On the thick Greenland interior line, surface+bed geometry cannot explain
   the measured column power (flat with altitude where geometry predicts
-  +17 dB): the column there is englacial-scattering dominated.
+  +17 dB): the column there is englacial-scattering dominated. The post-fix
+  results extend this class of gap to every line's mid-column.
+- The David-line investigation (2026-08-24) resolved why simulated surface
+  clutter obscured the bed there when measurements showed none: a kernel
+  discretization artifact plus isotropic-placeholder antennas. With both
+  fixed, every David pass's bed window is bed-dominated and all three
+  passes qualify for the γ solve for the first time.
 
 ## Reproducing a study
 
@@ -113,4 +143,4 @@ every line's calibration block and attenuation-regression diagnostics
 straight from the RSSNR store.
 
 Detailed chronology, per-study findings, and data-source scouting notes
-live in `claude_notes/` (see `agent_handoff_2026-08-17.md` for the index).
+live in `claude_notes/` (see `agent_handoff_2026-08-24.md` for the index).

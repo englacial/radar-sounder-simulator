@@ -66,6 +66,17 @@ re-authoring.
 Stating a value on an `opr_frame` instrument is legal but never silent — it is
 reported in the run config as `deviations_from_recorded_system`.
 
+**Antennas are modeled per instrument** (2026-08-24): the MCoRDS3 systems as
+cross-track element arrays with nav roll, the 2017 Basler as an 8-element
+amplitude-tapered array (transmit taper from the product's own param records ×
+the hann receive combine), the 60 MHz MKB as a finite wing-plate dipole (its
+product has no beamforming — a single right-wing phase center). The resolved
+antenna is fingerprinted into the chunk cache keys, so editing a pattern can
+never silently reuse stale chunks. An `isotropic` antenna is a declared
+clutter *upper bound*, not a default — the David clutter campaign
+(`claude_notes/david_clutter_resolution_2026-08-24.md`) measured the cost of
+that placeholder at 16–21 dB of spurious bed-window clutter.
+
 > **Quote your ids.** YAML 1.1 treats `_` as a digit separator, so an unquoted
 > `20161105_05` becomes the integer `2016110505`. Segment and frame ids must be
 > quoted; the loader says so explicitly if you forget.
@@ -110,6 +121,18 @@ and both the resolved values and a `line_overrides` diff land in every run
 config, so a line that measures differently says so out loud. Neither shipped
 line currently overrides anything, and a test asserts that — so the first one
 has to be deliberate.
+
+### Grazing-angle facet-lattice fix
+
+`grazing_fix.s_eff` (0.05) parameterizes the off-specular taper of the
+coherent facet response; together with the area-only sub-facet roughness
+variance it removes a **discretization artifact** — at grazing incidence the
+LPA phase ramp across a facet exceeds π and the sinc/grid-lobe tails stop
+converging, producing a facet-size-dependent (hence unphysical) clutter
+floor. It is a bug fix, **ON for every run**; `--no-grazing-fix` /
+`physics.grazing_fix: false` exists only for artifact demonstrations and A/B
+regression. `s_eff` is part of every chunk cache key. Evidence and
+validation: `claude_notes/david_clutter_resolution_2026-08-24.md`.
 
 ### Calibration
 

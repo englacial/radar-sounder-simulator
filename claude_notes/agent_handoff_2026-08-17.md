@@ -1,5 +1,11 @@
 # Agent handoff — clutter studies state (2026-08-17)
 
+> **SUPERSEDED by `agent_handoff_2026-08-24.md`.** This note predates the
+> config-driven refactor, the (gamma_surface, A) calibration era, the bed
+> scattering adoption, and the grazing-angle fix; its K/D anchoring
+> machinery and "best config" values no longer exist. Kept for the
+> pre-2026-08-18 chronology and the notes index.
+
 Read this first, then the per-topic notes it links. Everything below is
 committed through `61540c0`; working tree clean; 352 unit tests green
 (`uv run pytest tests -q --ignore=tests/integration`).
