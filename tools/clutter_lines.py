@@ -139,6 +139,9 @@ class RadargramFraming(_Base):
     y_us: tuple[float, float]
     db: tuple[float, float]
     scale: Literal["shared", "per_panel"] = "shared"
+    # Colour simulated panels by energy source (surface / bed / layers);
+    # brightness stays the total power. docs/source_color_radargrams.md.
+    source_color: bool = False
 
 
 class ProfileFraming(_Base):
@@ -323,6 +326,7 @@ class LineSpec(_Base):
             "RADARGRAM_Y_US": tuple(self.figures.radargram.y_us),
             "RADARGRAM_DB": tuple(self.figures.radargram.db),
             "RADARGRAM_SCALE": self.figures.radargram.scale,
+            "RADARGRAM_SOURCE_COLOR": self.figures.radargram.source_color,
             "PROFILE_REL_US": tuple(self.figures.profile.rel_us),
             "PROFILE_X_US": tuple(self.figures.profile.x_us),
             "PROFILE_DB": tuple(self.figures.profile.db),

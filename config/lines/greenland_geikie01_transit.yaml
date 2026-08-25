@@ -112,6 +112,7 @@ figures:
     - -120.0
     - 5.0
     scale: shared
+    source_color: false   # tint sim panels by source (docs/source_color_radargrams.md)
   profile:
     rel_us:
     - -1.5

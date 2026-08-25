@@ -139,6 +139,7 @@ figures:
     # so sub-figures are visually comparable; the per-instrument dynamic
     # -range concern (60 vs 195 MHz) lost to cross-panel comparability.
     scale: shared
+    source_color: false   # tint sim panels by source (docs/source_color_radargrams.md)
   profile:
     rel_us: [-1.5, 30.5]
     x_us: [-1.0, 30.0]

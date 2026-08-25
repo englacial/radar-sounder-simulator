@@ -307,6 +307,11 @@ REAL_CHAIN: dict = {}                  # the measured product's own chain
 RADARGRAM_Y_US: tuple = ()             # radargram framing
 RADARGRAM_DB: tuple = ()
 RADARGRAM_SCALE: str = "shared"
+RADARGRAM_SOURCE_COLOR: bool = False   # colour sim panels by energy source
+# Okabe-Ito (colour-blind safe). "layers" is reserved for a future
+# internal-layer field; the kernel returns surface + bed today.
+SOURCE_COLORS: dict = {"surface": "#56B4E9", "bed": "#E69F00",
+                       "layers": "#009E73"}
 PROFILE_REL_US: tuple = ()             # profile DATA window (not just axes)
 PROFILE_X_US: tuple = ()
 PROFILE_DB: tuple = ()
@@ -2745,10 +2750,38 @@ def _panel_scale(arr, vmin, vmax):
     return float(lo), float(hi), f"  [{lo:.0f}, {hi:.0f}] dB"
 
 
+def source_color_rgb(db_total, db_surf, db_bed, vmin, vmax):
+    """Source-coloured radargram (docs/source_color_radargrams.md): pixel
+    brightness is the TOTAL power on the panel's grey scale, unchanged; hue
+    is the dominant source (SOURCE_COLORS) and saturation is its dominance,
+    linear in |bed fraction - 0.5| * 2, so a 50/50 pixel stays grey."""
+    from matplotlib.colors import to_rgb
+    lum = np.clip((db_total - vmin) / (vmax - vmin), 0.0, 1.0)
+    ps = np.nan_to_num(10.0 ** (db_surf / 10.0))   # NaN: no field there
+    pb = np.nan_to_num(10.0 ** (db_bed / 10.0))
+    fb = pb / (ps + pb + 1e-300)
+    sat = (np.abs(fb - 0.5) * 2.0)[..., None]
+    hue = np.where(fb[..., None] > 0.5,
+                   np.array(to_rgb(SOURCE_COLORS["bed"])),
+                   np.array(to_rgb(SOURCE_COLORS["surface"])))
+    tint = (1.0 - sat) + sat * hue
+    return np.clip(lum[..., None] * tint, 0.0, 1.0)
+
+
+def _source_color_legend(ax):
+    from matplotlib.patches import Patch
+    h = [Patch(color=SOURCE_COLORS[k], label=f"{k} returns")
+         for k in ("surface", "bed")]
+    h.append(Patch(color="0.6", label="mixed (~50/50)"))
+    ax.legend(handles=h, fontsize=7, loc="lower left", framealpha=0.7)
+
+
 def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
     """One simulated-pass panel: dB rel per-pass median simulated surface
     peak, surface-referenced twtt axis. NO bed overlay (see
-    BED_OVERLAY_STYLE): the sim's bed nadir twtt is a model input."""
+    BED_OVERLAY_STYLE): the sim's bed nadir twtt is a model input.
+    RADARGRAM_SOURCE_COLOR tints the panel by energy source
+    (source_color_rgb); the brightness is the same grey image."""
     twtt_s = p["rc_frame"].t0 + np.arange(
         p["rc_frame"].n_samples) * p["rc_frame"].dt
     ref_s = 10.0 * np.log10(max(float(np.nanmedian(
@@ -2760,8 +2793,16 @@ def _sim_radargram_panel(ax, p, a, key, label, s0, y_lo, y_hi, vmin, vmax):
     s_sim = s0 + p["s_sim"] / 1e3
     img = _db(a["P"])[:, ms].T - ref_s
     vmin, vmax, note = _panel_scale(img, vmin, vmax)
-    ax.imshow(img, aspect="auto", cmap="gray", vmin=vmin, vmax=vmax,
-              extent=[s_sim[0], s_sim[-1], rel_s[ms][-1], rel_s[ms][0]])
+    extent = [s_sim[0], s_sim[-1], rel_s[ms][-1], rel_s[ms][0]]
+    if RADARGRAM_SOURCE_COLOR:
+        rgb = source_color_rgb(img, _db(a["Ps"])[:, ms].T - ref_s,
+                               _db(a["Pb"])[:, ms].T - ref_s, vmin, vmax)
+        ax.imshow(rgb, aspect="auto", extent=extent)
+        _source_color_legend(ax)
+        note += "  [colour: source]"
+    else:
+        ax.imshow(img, aspect="auto", cmap="gray", vmin=vmin, vmax=vmax,
+                  extent=extent)
     ax.set_title(f"{key} sim {label} (ct ±{p['reach']['ct_m'] / 1e3:.1f} km,"
                  f" {p['spacing']:.1f} m facets){note}", fontsize=10)
 

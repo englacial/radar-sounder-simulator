@@ -83,8 +83,15 @@ line registry (`--line`).
   off-nadir surface clutter.
 - Metrics use incoherent mean power over windows and traces. Bed models are
   scored on the bed-return component when the total is surface-dominated.
-- All figure framing (time/dB windows, color scaling) is per-line; per-panel
-  robust scaling is used where passes' dynamic ranges differ widely.
+- All figure framing (time/dB windows, color scaling) is per-line. Shared
+  scaling is the default everywhere: per-panel robust percentiles stretch a
+  simulated panel down to its numerical floor (there is no receiver-noise
+  model), which renders −100 dB bed clutter as mid-grey next to a measured
+  panel whose noise floor is black at the same level.
+- Simulated radargram panels can be coloured by energy source (surface vs
+  bed; brightness unchanged) with `figures.radargram.source_color: true` —
+  see [source_color_radargrams.md](source_color_radargrams.md). Off by
+  default.
 - Simulation chunks and focused stacks are cached (`--proc-cache`), so
   figure iteration and re-analysis do not re-simulate. Chunk cache keys
   carry the kernel numerics era (`soundersim.kernels.KERNEL_VERSION`);
