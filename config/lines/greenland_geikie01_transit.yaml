@@ -111,7 +111,7 @@ figures:
     db:
     - -120.0
     - 5.0
-    scale: per_panel
+    scale: shared
   profile:
     rel_us:
     - -1.5
