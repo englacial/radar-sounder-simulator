@@ -12,12 +12,26 @@ simulated:
   pulse_length_s: null
   window:         null
   antenna:
-    # Same caveat as mkb60_basler: the Basler's array config is not the P-3
-    # readme's 7 elements and is not verified here. Isotropic = clutter
-    # upper bound; revisit from season documentation before quantitative
-    # cross-frequency clutter claims.
-    kind: isotropic
-    roll_source: none
+    # REAL 2017 Basler array, read from the product's own param structs
+    # (outputs/cache/xopr 20171217_01_022: param_records tx weights,
+    # param_combine.combine method 'standard' with cross-track hanning
+    # window over 8 wf-adc pairs) plus OPR lever_arm.m phase centers
+    # (y = +/-[9.19 27.6 46.0 64.5] in -> 0.468 m element spacing
+    # = 0.304 lambda at 195 MHz). Model: 8-element cross-track array,
+    # TX amplitude taper as recorded, RX = hann-tapered delay-and-sum
+    # (MATLAB hanning(8) = sin^2(pi k/9)). One-way FIELD gain is
+    # sqrt(AF_tx * AF_rx), so the kernel's two-way g^2 equals the physical
+    # AF_tx * AF_rx. Two-way power suppression at the David bed-window
+    # clutter angles (72-84 deg): -58 to -61 dB. ELEMENT pattern omitted
+    # (unmeasured): modeled rejection is a LOWER bound on the real system's.
+    kind: array_tapered
+    spacing_lam: 0.304
+    tx_weights: [39.4, 72.6, 125.8, 177.6, 156.0, 120.7, 92.9, 44.8]
+    rx_weights: [0.117, 0.4132, 0.75, 0.9698, 0.9698, 0.75, 0.4132, 0.117]
+    # Frames carry full Roll (checked 20171217_01_022: 0% NaN, -20..+14 deg
+    # incl. turns); reversal negation is handled by the tool.
+    roll_source: nav
 provenance: >
   fc/B match the P-3-era MCoRDS systems but the platform and antenna do not;
-  recorded as its own instrument. ANTENNA UNVERIFIED (see simulated.antenna).
+  recorded as its own instrument. Antenna model 2026-08-24 from the product
+  param structs (see simulated.antenna); element pattern still unmodeled.

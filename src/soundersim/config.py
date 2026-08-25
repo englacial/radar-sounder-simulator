@@ -52,6 +52,19 @@ class AntennaConfig(BaseModel):
       MCoRDS-like case); element spacing ``spacing_lam`` is in CARRIER
       WAVELENGTHS (dimensionless). g = |array factor|
       = sin(N x)/(N sin x), x = pi * spacing_lam * sin(theta_ct).
+    - ``array_tapered``: like ``array`` but with separate TX and RX
+      amplitude tapers (arbitrary units, each normalized by its own sum);
+      n_elements = len(tx_weights) = len(rx_weights). One-way FIELD gain is
+      the geometric mean g = sqrt(AF_tx * AF_rx) of the two tapered array
+      factors, so the kernels' monostatic two-way field weight g**2 equals
+      the physical AF_tx * AF_rx product (tapered transmit, tapered
+      delay-and-sum receive).
+    - ``finite_dipole``: finite-length thin dipole of length ``length_lam``
+      CARRIER WAVELENGTHS along ``axis`` (parametric broadening/narrowing of
+      ``dipole``): g = |cos(pi L cos psi) - cos(pi L)| /
+      (sin(psi) (1 - cos(pi L))), peak-normalized at broadside.
+      length_lam = 0.5 reproduces ``dipole`` exactly; length_lam -> 0 tends
+      to the short-dipole sin(psi).
     - ``tabulated``: g(theta) linearly interpolated from ``theta_deg`` /
       ``gain`` samples, rotationally symmetric about the nadir boresight;
       theta is the angle from boresight in degrees, ascending (clamped at the
@@ -62,10 +75,14 @@ class AntennaConfig(BaseModel):
     down; scenes without roll data use 0).
     """
 
-    kind: Literal["isotropic", "dipole", "array", "tabulated"] = "isotropic"
-    axis: Literal["along_track", "cross_track"] = "along_track"  # dipole only
+    kind: Literal["isotropic", "dipole", "array", "array_tapered",
+                  "finite_dipole", "tabulated"] = "isotropic"
+    axis: Literal["along_track", "cross_track"] = "along_track"  # dipole kinds
     n_elements: int = 5          # array only
     spacing_lam: float = 0.5     # array element spacing (carrier wavelengths)
+    tx_weights: Optional[list[float]] = None  # array_tapered: TX taper
+    rx_weights: Optional[list[float]] = None  # array_tapered: RX taper
+    length_lam: float = 0.5      # finite_dipole length (carrier wavelengths)
     theta_deg: Optional[list[float]] = None  # tabulated: angle from boresight
     gain: Optional[list[float]] = None       # tabulated: one-way FIELD gain
     roll_source: Literal["none", "nav"] = "none"
@@ -77,6 +94,24 @@ class AntennaConfig(BaseModel):
                 raise ValueError("array antenna requires n_elements >= 2")
             if self.spacing_lam <= 0:
                 raise ValueError("array antenna requires spacing_lam > 0")
+        if self.kind == "array_tapered":
+            if not self.tx_weights or not self.rx_weights:
+                raise ValueError("array_tapered antenna requires tx_weights "
+                                 "and rx_weights")
+            if len(self.tx_weights) != len(self.rx_weights) \
+                    or len(self.tx_weights) < 2:
+                raise ValueError("array_tapered needs >= 2 matching "
+                                 "tx_weights/rx_weights")
+            for w in (self.tx_weights, self.rx_weights):
+                if any(v < 0 for v in w) or sum(w) <= 0:
+                    raise ValueError("array_tapered weights must be >= 0 "
+                                     "with a positive sum")
+            if self.spacing_lam <= 0:
+                raise ValueError("array_tapered requires spacing_lam > 0")
+        if self.kind == "finite_dipole":
+            if not (0.0 < self.length_lam <= 1.0):
+                raise ValueError("finite_dipole requires 0 < length_lam <= 1 "
+                                 "(carrier wavelengths)")
         if self.kind == "tabulated":
             if not self.theta_deg or not self.gain:
                 raise ValueError(
@@ -142,6 +177,47 @@ class RoughnessConfig(BaseModel):
             raise ValueError("roughness sigma_m must be >= 0")
         if self.corr_length_m <= 0:
             raise ValueError("roughness corr_length_m must be > 0")
+        return self
+
+
+class GrazingFixConfig(BaseModel):
+    """Grazing-angle facet-lattice fix (coherent mode only; opt-in -- the
+    field's absence traces exactly the legacy kernels, so every existing
+    cache and regression gate is untouched).
+
+    ONE switch enables two coupled changes, because they are two faces of
+    the same artifact -- facet-grid spatial aliasing once the LPA phase ramp
+    across a facet exceeds pi (2kL sin(theta) >> pi at grazing) -- and the
+    acceptance criterion (facet-size-invariant effective sigma0) needs both:
+
+    - COHERENT off-specular taper: each facet's smooth (sinc*sinc specular)
+      FIELD is multiplied by T(alpha) = exp(-tan^2(alpha)/(2 s_eff^2)),
+      alpha the arrival angle off the facet normal. Physical basis: the
+      sub-facet slope distribution -- a facet only mirrors power back within
+      its slope spread. Near-specular returns (alpha << s_eff, e.g. glinting
+      valley walls) keep T ~ 1; the non-converging sinc/grid-lobe tails at
+      grazing go to 0. The removed power is grid aliasing, not physical
+      power, and is dropped rather than re-booked (the physical off-specular
+      return is the D_Phi channel below, plus the optional spec/diffuse
+      split).
+    - AREA-TERM-ONLY D_Phi: the sub-facet-roughness incoherent variance
+      keeps only its facet-area-scaling term (the per-facet infinite-surface
+      PO law, Gerekos et al. 2023 Appendix C; roughness.d_phi area_only),
+      dropping the facet-edge remainder whose sigma0 goes as 1/L^2 * O(1)
+      (facet-size dependent, +30 dB unphysical at grazing).
+
+    ``s_eff``: effective rms slope of the taper, in tan(alpha) units.
+    Physical scale ~ sqrt(2) * sigma/l of the sub-facet roughness (0.02-0.16
+    for the campaign interfaces); the default 0.05 (~3 deg) is a mildly
+    conservative single value for all interfaces.
+    """
+
+    s_eff: float = 0.05
+
+    @model_validator(mode="after")
+    def _positive(self):
+        if self.s_eff <= 0:
+            raise ValueError("grazing_fix s_eff must be > 0")
         return self
 
 
@@ -230,6 +306,10 @@ class SimConfig(BaseModel):
     realizations. It also seeds the DIFFUSE channel's phasors (independent
     stream).
 
+    ``grazing_fix`` (default None = off, the legacy program) enables the
+    grazing-angle facet-lattice fix -- coherent off-specular taper +
+    area-term-only D_Phi -- see ``GrazingFixConfig``.
+
     ``diffuse_exponent`` is the exponent n of the cos^n(theta_incidence)
     angular law of the diffuse channel, used only when a scene attaches
     ``diffuse_maps`` (per-facet diffuse FIELD amplitudes; see
@@ -240,6 +320,7 @@ class SimConfig(BaseModel):
     mode: Literal["incoherent", "coherent"]
     split_sides: bool = False
     refraction: Literal["sequential", "joint"] = "joint"
+    grazing_fix: Optional[GrazingFixConfig] = None
     roughness_seed: int = 0
     diffuse_exponent: float = 1.0
     radar: RadarConfig
@@ -257,6 +338,9 @@ class SimConfig(BaseModel):
                                            for i in self.interfaces):
             raise ValueError("interface roughness requires coherent mode "
                              "(the incoherent kernel has no phase to perturb)")
+        if self.mode != "coherent" and self.grazing_fix is not None:
+            raise ValueError("grazing_fix requires coherent mode (it tapers "
+                             "the coherent facet response)")
         names = [i.name for i in self.interfaces]
         for i, iface in enumerate(self.interfaces):
             if isinstance(iface, OffsetInterface):

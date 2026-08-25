@@ -53,7 +53,11 @@ def _rc():
         dt=1e-9, n_samples=64, t0=0.0, f0=rbc.FC_HZ,
         waveform=WaveformConfig(kind="chirp", bandwidth=50e6,
                                 pulse_length=1e-5, window="hann"),
-        antenna=AntennaConfig(kind="array", n_elements=5, spacing_lam=0.5,
+        # n_elements=7: the REAL legacy resolved state (mcords YAMLs).
+        # A non-legacy instrument antenna is deliberately fingerprinted
+        # into the cache key (M-ant), so the fixture must be a state
+        # existing caches were actually built under.
+        antenna=AntennaConfig(kind="array", n_elements=7, spacing_lam=0.5,
                               roll_source="nav"))
 
 
@@ -74,7 +78,7 @@ def test_sim_cfg_antenna_and_bed_roughness_wiring():
     rc = _rc()
     base = rbc.sim_cfg(rc, 10.0, 15.0, True)
     assert base.radar.antenna.kind == "array"          # default untouched
-    assert base.radar.antenna.n_elements == 5
+    assert base.radar.antenna.n_elements == 7
     assert base.interfaces[1].roughness is None        # bed smooth by default
     assert base.interfaces[0].roughness.sigma_m == rac.SURF_ROUGH_SIGMA_M
 

@@ -39,6 +39,17 @@ in the jit-factory key (the isotropic path traces exactly the pre-M22
 program); the per-trace pattern vector and parameters are traced, so value
 changes never recompile.
 
+Grazing fix (opt-in, config.py ``GrazingFixConfig``): at grazing incidence
+the LPA phase ramp across a facet is 2kL sin(theta) >> pi, the sinc tails
+stop converging with facet size (facet-lattice aliasing: grid lobes), and
+the resulting floor is non-physical. ``taper_s`` multiplies each facet's
+SMOOTH (specular) field by exp(-tan^2(alpha)/(2 s_eff^2)) with alpha the
+off-normal arrival angle (``_off_specular_taper``); the removed power is
+grid aliasing, not physical power, so it is dropped, not re-booked -- the
+physical off-specular return is the D_Phi incoherent channel, which
+``d_phi_area`` reduces to its facet-area-scaling (infinite-surface PO) term.
+Both default off and then trace exactly the legacy program.
+
 Phase precision (stage-2 plan constraint 2, decided by measurement): the f32
 hot loop computes the carrier phase from 2k*(r - r_ref) with r_ref a per-trace
 float64 reference range (platform -> facet-centroid distance), keeping the
@@ -79,14 +90,28 @@ from .geometry import twtt_bin
 TWO_PI = 2.0 * np.pi
 
 
+def _off_specular_taper(cos, taper_s, xp=jnp):
+    """Coherent off-specular taper T(alpha) = exp(-tan^2(alpha)/(2 s_eff^2))
+    on the FIELD, with alpha the arrival angle off the facet normal
+    (cos = cos(alpha)) and ``taper_s`` the effective rms slope s_eff
+    (config.py ``GrazingFixConfig``): a facet only mirrors power back within
+    its sub-facet slope spread, so the non-converging sinc/grid-lobe tails at
+    grazing are suppressed while near-specular (glinting) facets keep T ~ 1.
+    Back-facing facets (cos <= 0) taper to 0 via the clamp."""
+    c = xp.clip(cos, 1e-9, 1.0)
+    c2 = c * c
+    return xp.exp(-(1.0 - c2) / (c2 * (2.0 * taper_s * taper_s)))
+
+
 def lpa_contributions(position, centers, normals, areas, e1, e2, k, gamma,
-                      r_ref=0.0, xp=jnp):
+                      r_ref=0.0, xp=jnp, taper_s=None):
     """Per-facet complex LPA field contributions and ranges.
 
     Phase is computed from (r - r_ref); the caller owes a constant factor
     exp(-2j*k*r_ref) (r_ref=0 gives the absolute field). ``xp`` selects the
     array module (jnp inside the kernel; np for float64 reference use --
-    dtype follows the inputs).
+    dtype follows the inputs). ``taper_s``: None (exact legacy program) or
+    the s_eff of ``_off_specular_taper``.
     """
     d = position - centers
     r = xp.sqrt(xp.sum(d * d, axis=-1))
@@ -96,16 +121,23 @@ def lpa_contributions(position, centers, normals, areas, e1, e2, k, gamma,
     s1 = xp.sinc(xp.sum(rhat * e1, axis=-1) * (k / np.pi))
     s2 = xp.sinc(xp.sum(rhat * e2, axis=-1) * (k / np.pi))
     amp = (k / TWO_PI) * gamma * cos * areas * s1 * s2 / (r * r)
+    if taper_s is not None:
+        amp = amp * _off_specular_taper(cos, taper_s, xp=xp)
     phase = (-2.0 * k) * (r - r_ref)  # dtype (and precision) follows the inputs
     return 1j * amp * xp.exp(1j * phase), r
 
 
 def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
-                            gamma, sigma, l, phasors, n_terms, r_ref=0.0):
+                            gamma, sigma, l, phasors, n_terms, r_ref=0.0,
+                            taper_s=None, area_only=False):
     """Rough-facet LPA contributions (module docstring): the smooth response
     times exp(-sigma^2 K^2 / 2) plus the incoherent sqrt(D_Phi)*phi_r term
     with the same non-phase factor. Ops shared with ``lpa_contributions`` are
-    computed identically (sigma = 0 is bit-identical to the smooth path)."""
+    computed identically (sigma = 0 is bit-identical to the smooth path).
+    ``taper_s`` tapers the SMOOTH (specular) term only
+    (``_off_specular_taper``; the D_Phi term is the physical off-specular
+    channel and is never tapered); ``area_only`` selects the area-term-only
+    D_Phi (roughness.d_phi). Both default to the exact legacy program."""
     d = position - centers
     r = jnp.sqrt(jnp.sum(d * d, axis=-1))
     cos = jnp.sum(d * normals, axis=-1) / r
@@ -115,13 +147,15 @@ def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
     s1 = jnp.sinc(d1 * (k / np.pi))
     s2 = jnp.sinc(d2 * (k / np.pi))
     amp = (k / TWO_PI) * gamma * cos * areas * s1 * s2 / (r * r)
+    if taper_s is not None:
+        amp = amp * _off_specular_taper(cos, taper_s)
     phase = (-2.0 * k) * (r - r_ref)
     # facet-local in-plane coefficients: sinc arg k*d1 == Lx*A0/2
     l1 = jnp.sqrt(jnp.sum(e1 * e1, axis=-1))
     l2 = jnp.sqrt(jnp.sum(e2 * e2, axis=-1))
     kk = 2.0 * k * cos
     dp = d_phi(sigma, l, kk, 2.0 * k * d1 / l1, 2.0 * k * d2 / l2, l1, l2,
-               n_terms=n_terms)
+               n_terms=n_terms, area_only=area_only)
     # area-mask: zero-padded block slots have e1 = e2 = 0, so l1 = l2 = 0 and
     # the d_phi args are 0/0 -> NaN; the smooth term is killed by areas = 0
     # but the incoherent term has no area factor, so mask it explicitly
@@ -133,7 +167,8 @@ def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
 
 @functools.lru_cache(maxsize=None)
 def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
-                 rough_terms=0, gamma_facet=False):
+                 rough_terms=0, gamma_facet=False, taper=False,
+                 rough_area=False):
     """Jitted vmapped kernel for one static configuration; run-varying
     numbers (facet blocks, positions, reference ranges, k/gamma/t0/dt/c,
     pattern vector/params pv/pa/pb) are traced arguments, so value changes
@@ -143,12 +178,15 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
     traces exactly the pre-M22 program. ``rough_terms`` (static: series
     length) switches the per-facet response to the rough-facet form (module
     docstring); 0 (smooth) traces exactly the pre-roughness program (the
-    phasor blocks and sigma/l scalars are then unused)."""
+    phasor blocks and sigma/l scalars are then unused). ``taper`` (static:
+    it changes the graph) enables the off-specular taper -- the traced
+    ``tps`` scalar carries s_eff -- and ``rough_area`` the area-term-only
+    D_Phi; both False trace exactly the pre-grazing-fix program."""
     n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
     gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
     def one_trace(p, u, pv, rr, cb, nb, ab, e1b, e2b, phb, gfb, sig, lc, kf,
-                  gf, t0, dt, c, ga, gb):
+                  gf, t0, dt, c, ga, gb, tps):
         def step(carry, blk):
             hist, dropped = carry
             # per-facet gamma rides the blocked scan like the phasors do; the
@@ -163,13 +201,14 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
             else:
                 fc, fn, fa, f1, f2 = blk
             gam = fg if gamma_facet else gf
+            ts = tps if taper else None
             if rough_terms:
                 contrib, r = rough_lpa_contributions(
                     p, fc, fn, fa, f1, f2, kf, gam, sig, lc, fph, rough_terms,
-                    r_ref=rr)
+                    r_ref=rr, taper_s=ts, area_only=rough_area)
             else:
                 contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gam,
-                                               r_ref=rr)
+                                               r_ref=rr, taper_s=ts)
             if gfn is not None:
                 g = gfn((fc - p) / r[..., None], pv, ga, gb)
                 contrib = contrib * (g * g)  # two-way FIELD gain
@@ -199,13 +238,13 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
         (hist, dropped), _ = jax.lax.scan(step, init, xs)
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 16))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 17))
 
 
 def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
                          k, gamma, t0, dt, n_samples, c, split_sides=False,
                          interp_bins=False, pattern=None, roughness=None,
-                         block_size=65536):
+                         taper_s=None, d_phi_area=False, block_size=65536):
     """Binned coherent field for every trace.
 
     Same conventions as ``incoherent_cluttergram`` (local-frame float inputs,
@@ -225,6 +264,10 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     ``phasors`` the (n_facets,) complex per-facet speckle phasors
     (``roughness.speckle_phasors``) and ``n_terms`` the static series length
     (``roughness.n_terms_for``); see the module docstring.
+    ``taper_s``/``d_phi_area``: the grazing-fix pair (config.py
+    ``GrazingFixConfig``) -- the coherent off-specular taper s_eff (None =
+    off) and the area-term-only D_Phi; the defaults trace exactly the
+    pre-fix program.
     """
     n = centers.shape[0]
     block_size = min(block_size, n)
@@ -279,11 +322,13 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
         gfb = jnp.zeros((), jnp.float32)  # unused (gamma_facet == False)
 
     fn = _coherent_fn(split_sides, int(n_samples), bool(interp_bins), kind,
-                      int(n_terms), gamma_facet)
+                      int(n_terms), gamma_facet, taper_s is not None,
+                      bool(d_phi_area))
     hist, dropped = fn(pos, uct, pv, r_ref, cb, nb, ab, e1b, e2b, phb, gfb,
                        np.float32(sigma), np.float32(lcorr),
                        np.float32(k), np.float32(gamma), np.float32(t0),
-                       np.float32(dt), np.float32(c), pa, pb)
+                       np.float32(dt), np.float32(c), pa, pb,
+                       np.float32(0.0 if taper_s is None else taper_s))
     field = (np.asarray(hist) * phase_ref[:, None]).astype(np.complex64)
     if split_sides:
         field = field.reshape(-1, 2, n_samples).transpose(0, 2, 1)

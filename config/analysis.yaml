@@ -51,6 +51,16 @@ bed_tail:
   guard_db: 10.0
   floor_margin_db: 3.0          # measured tail counted floor-limited below
 
+grazing_fix:
+  # Grazing-angle facet-lattice fix (coherent off-specular taper + area-only
+  # D_Phi; see src/soundersim/config.py GrazingFixConfig). A BUG FIX, not a
+  # model choice: ON for every study run (adopted 2026-08-24, david clutter
+  # campaign -- claude_notes/david_clutter_resolution_2026-08-24.md).
+  # s_eff = the taper's effective rms slope (tan units, ~3 deg default).
+  # --no-grazing-fix exists only for artifact demonstrations / regression
+  # A-B runs. Changing s_eff forks every chunk cache.
+  s_eff: 0.05
+
 gamma_surface_solve:
   # Settings for gamma_surface = solve: match the measured bed-window level
   # by inverting the power sum. The simulated window is S + B(gamma) --

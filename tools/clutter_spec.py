@@ -129,6 +129,11 @@ class Physics(_Base):
     surface_roughness: bool = True
     antenna: Literal["array", "isotropic", "array8"] = "array"
     bed_roughness: BedRoughness | None = None
+    # grazing-angle facet-lattice fix (coherent off-specular taper +
+    # area-only D_Phi). A BUG FIX, ON by default: omitted/null = analysis.yaml
+    # grazing_fix.s_eff; a number = override s_eff; false = the legacy
+    # artifact path (debug/A-B only). s_eff is part of the chunk cache key.
+    grazing_fix: float | Literal[False] | None = None
 
 
 class Processing(_Base):
@@ -311,6 +316,7 @@ class RunSpec(_Base):
                            phy.bed_roughness.corr_length_m)),
             "bed_rough_extra_db": (0.0 if phy.bed_roughness is None
                                    else phy.bed_roughness.extra_db),
+            "grazing_fix": phy.grazing_fix,
             "processing": proc.chain,
             "proc_cache": proc.proc_cache,
             "posting_div": proc.posting_div,

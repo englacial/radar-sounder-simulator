@@ -140,6 +140,25 @@ def test_facet_scale_default_is_declared_once_and_capped():
             assert s is None or s <= 0.7, (name, key, s)
 
 
+def test_grazing_fix_is_declared_once_and_on_by_default():
+    """The facet-lattice fix is a BUG FIX (2026-08-24 david clutter
+    campaign): its s_eff lives in analysis.yaml only, and a run/spec that
+    says nothing gets the fix ON. The legacy artifact path survives only as
+    an explicit debug opt-out (--no-grazing-fix / grazing_fix: false)."""
+    a = load_analysis()
+    assert a.grazing_fix.s_eff == 0.05
+    assert rbc.GRAZING_FIX == a.grazing_fix.model_dump()
+    assert "GRAZING_FIX" in rbc.ANALYSIS_GLOBALS
+    from clutter_spec import RunSpec
+    doc = {"schema_version": 1, "meta": {"name": "demo"},
+           "run": {"line": "antarctica_getz", "segment": "pilot",
+                   "out_name": "demo", "physics": {"att_db_per_km": 20.0}}}
+    assert RunSpec.model_validate(doc).to_run_kwargs()["grazing_fix"] is None
+    doc["run"]["physics"]["grazing_fix"] = False        # debug opt-out
+    sp = RunSpec.model_validate(doc)
+    assert sp.to_run_kwargs()["grazing_fix"] is False
+
+
 def test_every_line_declares_its_calibration():
     """gamma_surface is manual-with-why or 'solve' (the study default:
     resolved in-run by zeroing the qualifying-median bed-level residual --

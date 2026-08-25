@@ -60,6 +60,7 @@ Run:  uv run python tools/run_basal_clutter.py \
 
 import argparse
 import base64
+import hashlib
 import datetime
 import html
 import json
@@ -89,8 +90,8 @@ import run_altitude_comparison as rac  # noqa: E402  shared machinery
 from run_opr_comparison import _db  # noqa: E402
 
 from soundersim.config import (AntennaConfig, DemInterface, FacetConfig,  # noqa: E402
-                               Medium, RadarConfig, RoughnessConfig, SimConfig,
-                               WaveformConfig)
+                               GrazingFixConfig, Medium, RadarConfig,
+                               RoughnessConfig, SimConfig, WaveformConfig)
 from soundersim.opr import load_bottom_pick, load_frame  # noqa: E402
 from soundersim.physics import fresnel_normal  # noqa: E402
 
@@ -255,6 +256,7 @@ TAIL_FLOOR_MARGIN_DB: float = 0.0
 CALIBRATION: dict = {}                 # gamma_surface + A (manual or solve)
 ATTENUATION_REGRESSION: dict = {}      # A-solver settings (analysis.yaml)
 GAMMA_SURFACE_SOLVE: dict = {}         # gamma-solver settings (analysis.yaml)
+GRAZING_FIX: dict = {}                 # facet-lattice fix s_eff (analysis.yaml)
 CORR_WIN_M: float = 0.0                # bed-brightness smoothing scale
 ROUGH_WIN_M: float = 0.0               # bed-roughness detrend window
 GL_RAMP_KM: float = 0.0                # hybrid-bed blend ramp past the GL
@@ -1329,7 +1331,7 @@ def proc_rid(p):
 
 
 def chunk_digests(p, runs_dir, n_chunks, att, surf_rough,
-                  antenna=None, bed_rough=None, spec=None):
+                  antenna=None, bed_rough=None, spec=None, gfix=None):
     """{chunk rid: sha256(meta_key)[:16]} over the pass's chunk caches.
 
     The hypothesis knobs MUST be forwarded: chunk_rid suffixes the file
@@ -1342,7 +1344,7 @@ def chunk_digests(p, runs_dir, n_chunks, att, surf_rough,
         rid = chunk_rid(p, ci, att, surf_rough,
                         antenna=antenna if antenna is not None
                         else ANT_DEFAULT,
-                        bed_rough=bed_rough, spec=spec)
+                        bed_rough=bed_rough, spec=spec, gfix=gfix)
         d = json.loads((Path(runs_dir) / f"{rid}.json").read_text())
         out[rid] = hashlib.sha256(d["meta_key"].encode()).hexdigest()[:16]
     return out
@@ -1374,7 +1376,7 @@ def _proc_from_stacks(Fs, Fb, twtt, chain):
 
 def process_standard_cached(p, sim, out_dir, att, surf_rough,
                             force=False, antenna=None, bed_rough=None,
-                            spec=None):
+                            spec=None, gfix=None):
     """Cache-first process_standard (module-section comment). Also stores
     the light per-trace arrays + scalars that let load_proc_pass rebuild a
     figure-ready (p_lite, sim_lite, proc) with NO scene prep or chunk
@@ -1391,7 +1393,8 @@ def process_standard_cached(p, sim, out_dir, att, surf_rough,
             "chunk_digests": chunk_digests(p, Path(out_dir) / "runs",
                                            sim["n_chunks"], att, surf_rough,
                                            antenna=antenna,
-                                           bed_rough=bed_rough, spec=spec)}
+                                           bed_rough=bed_rough, spec=spec,
+                                           gfix=gfix)}
     key = json.dumps(meta, sort_keys=True)
     if jp.exists() and npz_p.exists() and not force:
         doc = json.loads(jp.read_text())
@@ -1567,9 +1570,10 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window,
     ant = (AntennaConfig(kind="array", n_elements=rac.N_ELEMENTS,
                          spacing_lam=rac.SPACING_LAM, roll_source="nav")
            if antenna is None else
-           AntennaConfig(kind=antenna.kind, n_elements=antenna.n_elements,
-                         spacing_lam=antenna.spacing_lam,
-                         roll_source=antenna.roll_source))
+           # carry EVERY declared field (the old 4-field rebuild silently
+           # dropped axis and would drop the tapered/finite-dipole params)
+           AntennaConfig(**{k: v for k, v in antenna.model_dump().items()
+                            if v is not None}))
     f0 = wf["center_frequency_Hz"]
     t0 = t0f + b0 * dt
     rc_sim = RadarConfig(dt=dt / oversample, n_samples=oversample * (nb - 1) + 1,
@@ -1801,10 +1805,12 @@ def chunk_scene(base, rows, ct, gamma=False):
 
 
 def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
-            bed_rough=None, diffuse_exponent=1.0):
+            bed_rough=None, diffuse_exponent=1.0, gfix=None):
     """``antenna``: 'array' (the MCoRDS-like default) or 'isotropic' (the
     T4 pattern-sensitivity bound). ``bed_rough`` = (sigma_m, corr_length_m)
-    attaches Gerekos sub-facet roughness to the BED interface (T1)."""
+    attaches Gerekos sub-facet roughness to the BED interface (T1).
+    ``gfix``: None (legacy) or the grazing-fix taper s_eff
+    (GrazingFixConfig)."""
     rcg = (RoughnessConfig(sigma_m=rac.SURF_ROUGH_SIGMA_M,
                            corr_length_m=rac.SURF_ROUGH_CL_M)
            if surf_rough else None)
@@ -1827,6 +1833,7 @@ def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
                             spacing_lam=rac.SPACING_LAM, roll_source="nav")
     return SimConfig(
         mode="coherent", split_sides=False,
+        grazing_fix=(None if gfix is None else GrazingFixConfig(s_eff=gfix)),
         diffuse_exponent=diffuse_exponent,
         radar=rc_sim.model_copy(update={"antenna": ant}),
         facets=FacetConfig(spacing=spacing),
@@ -1838,8 +1845,63 @@ def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
                     DemInterface(name="bed", roughness=rcb)])
 
 
+# The exact resolved instrument-antenna states every PRE-EXISTING chunk cache
+# was built under when the CLI antenna is the default ('array' = "use the
+# instrument YAML"): the david isotropic placeholders, the uniform MCoRDS
+# 7-element array (all four mcords YAMLs), and the HAPS 8-element/no-roll
+# array. These states contribute NO cache key (byte-identical rid + meta with
+# every existing cache); any OTHER resolved antenna -- the realistic david
+# models, or a future edit to an array YAML's numbers -- is fingerprinted
+# into both the rid and the meta, so a YAML pattern change can never silently
+# reuse a stale chunk. CLI antenna overrides ('isotropic'/'array8') bypass
+# the instrument antenna entirely and stay keyed by name as before.
+_LEGACY_INSTRUMENT_ANTS = (
+    AntennaConfig(kind="isotropic"),
+    AntennaConfig(kind="array", n_elements=7, spacing_lam=0.5,
+                  roll_source="nav"),
+    AntennaConfig(kind="array", n_elements=8, spacing_lam=0.5,
+                  roll_source="none"),
+)
+
+
+def inst_ant_meta(p, antenna):
+    """{'instrument_antenna': resolved params} or {} (legacy/overridden)."""
+    rc = p.get("rc_sim")
+    if antenna != ANT_DEFAULT or rc is None:
+        return {}          # CLI override active: instrument antenna unused
+    a = rc.antenna
+    if any(a == la for la in _LEGACY_INSTRUMENT_ANTS):
+        return {}
+    fp = {"kind": a.kind, "roll_source": a.roll_source}
+    if a.kind in ("dipole", "finite_dipole"):
+        fp["axis"] = a.axis
+    if a.kind == "finite_dipole":
+        fp["length_lam"] = a.length_lam
+    if a.kind == "array":
+        fp.update(n_elements=a.n_elements, spacing_lam=a.spacing_lam)
+    if a.kind == "array_tapered":
+        fp.update(spacing_lam=a.spacing_lam,
+                  tx_weights=list(a.tx_weights),
+                  rx_weights=list(a.rx_weights))
+    if a.kind == "tabulated":
+        fp.update(theta_deg=list(a.theta_deg), gain=list(a.gain))
+    return {"instrument_antenna": fp}
+
+
+def inst_ant_tag(p, antenna):
+    """Chunk-file-name suffix for a fingerprinted instrument antenna: new
+    patterns get NEW file names, so legacy chunk files (isotropic-placeholder
+    baselines) survive on disk instead of being overwritten."""
+    fpm = inst_ant_meta(p, antenna)
+    if not fpm:
+        return ""
+    h = hashlib.sha1(json.dumps(fpm["instrument_antenna"],
+                                sort_keys=True).encode()).hexdigest()[:8]
+    return f"_ia{h}"
+
+
 def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
-              spec=None):
+              spec=None, gfix=None):
     """Cache file name for one chunk. Non-default hypothesis knobs append a
     suffix; the default case keeps the pre-campaign names (cache reuse)."""
     return (f"{p['key']}_{p['segment']}"
@@ -1855,13 +1917,15 @@ def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
                else f"_pdiv{p['posting_div']:d}")
             + ("" if not spec
                else f"_fs{spec[0]:g}_s0{spec[1]:g}_n{spec[2]:g}")
+            + ("" if gfix is None else f"_gfx{gfix:g}")
             + ("" if p.get("instrument") in (None,
                                              p.get("instrument_default"))
-               else f"_i{p['instrument']}"))
+               else f"_i{p['instrument']}")
+            + inst_ant_tag(p, antenna))
 
 
 def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
-               antenna=ANT_DEFAULT, bed_rough=None, spec=None):
+               antenna=ANT_DEFAULT, bed_rough=None, spec=None, gfix=None):
     """run_level cache key for one chunk. Optional features (gamma,
     DEMOGORGN, and the hypothesis knobs) contribute keys ONLY when they are
     ON, so every pre-existing cache stays valid byte-for-byte."""
@@ -1890,9 +1954,12 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
                else {"posting_div": int(p["posting_div"])}),
             **({} if not spec else {"spec_diffuse": [float(v)
                                                      for v in spec]}),
+            **({} if gfix is None
+               else {"grazing_fix": {"s_eff": float(gfix)}}),
             **({} if p.get("instrument") in (None,
                                              p.get("instrument_default"))
                else {"instrument": p["instrument"]}),
+            **inst_ant_meta(p, antenna),
             "window": p["window"], "surf_rough": bool(surf_rough),
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
             "t0_us": round(p["rc_sim"].t0 * 1e6, 5),
@@ -1900,21 +1967,23 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
 
 
 def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
-                  bed_rough=None, spec=None):
+                  bed_rough=None, spec=None, gfix=None):
     """Chunked cached coherent surface+bed runs; assembled per-layer fields.
     Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...)."""
     chunks = chunk_rows(p)
     cfg = sim_cfg(p["rc_sim"], p["spacing"], att, surf_rough, antenna,
-                  bed_rough, diffuse_exponent=spec[2] if spec else 1.0)
+                  bed_rough, diffuse_exponent=spec[2] if spec else 1.0,
+                  gfix=gfix)
     n = len(p["idx"])
     field = twtt = nadir = None
     wall, facets, dropped = 0.0, [], []
     for ci, rows in enumerate(chunks):
         scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"],
                             gamma=p["gamma_rssnr"])
-        rid = chunk_rid(p, ci, att, surf_rough, antenna, bed_rough, spec)
+        rid = chunk_rid(p, ci, att, surf_rough, antenna, bed_rough, spec,
+                        gfix)
         meta = chunk_meta(p, ci, rows, len(chunks), n, att, surf_rough,
-                          antenna, bed_rough, spec)
+                          antenna, bed_rough, spec, gfix)
         diag, arrs = rac.run_level(rid, scene, cfg, meta, runs_dir,
                                    p["oversample"], force)
         if field is None:
@@ -3053,6 +3122,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
         bed_rough_extra_db=0.0, passes=None, spec=None,
+        grazing_fix=None,   # None -> ON at GRAZING_FIX['s_eff']; False -> off
+
         gamma_surface_db=None, trace_decomp_s_km=None,
         per_pass_figs=False,
         plot_s_max_km=None, proc_cache=False, line=None,
@@ -3061,6 +3132,13 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     # Always re-activate: this resets PASSES to the line definition, so
     # extra_passes added below cannot leak into a later run in-process.
     activate_line(line or LINE)
+    # The grazing-angle facet-lattice fix is a BUG FIX and is ON by default
+    # (analysis.yaml grazing_fix.s_eff); False (--no-grazing-fix) is the
+    # legacy path, kept only for artifact demonstrations and A/B regression.
+    if grazing_fix is None:
+        grazing_fix = float(GRAZING_FIX["s_eff"])
+    elif grazing_fix is False:
+        grazing_fix = None
     instruments = dict(instruments or {})
     if extra_passes:
         extra, syn = {}, list(SYNTHETIC_KEYS)
@@ -3255,13 +3333,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         preps[key] = p
         sims[key] = simulate_pass(p, runs_dir, att, surf_rough, force,
                                   antenna=antenna, bed_rough=bed_rough,
-                                  spec=spec)
+                                  spec=spec, gfix=grazing_fix)
         if proc:
             procs[key] = (process_standard_cached(p, sims[key], out, att,
                                                   surf_rough, force=force,
                                                   antenna=antenna,
                                                   bed_rough=bed_rough,
-                                                  spec=spec)
+                                                  spec=spec,
+                                                  gfix=grazing_fix)
                           if proc_cache else process_standard(p, sims[key]))
             ch = procs[key]["chain"]
             print(f"  processed: aperture {ch['aperture_m']:.0f} m "
@@ -3300,7 +3379,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                   flush=True)
             p_const = dict(preps[key])
             p_const["gamma_rssnr"] = False
-            sim_c = simulate_pass(p_const, runs_const, att, surf_rough, False)
+            sim_c = simulate_pass(p_const, runs_const, att, surf_rough,
+                                  False, gfix=grazing_fix)
             proc_c = process_standard(preps[key], sim_c) if proc else None
             a_const = analyze_pass(preps[key], sim_c, proc=proc_c)
             corr_stats[key], corr_series[key] = bed_profile_correlations(
@@ -3331,7 +3411,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                       flush=True)
                 p_ab = prep_pass(key, segment, n_traces, ref=None, gmap=gmap,
                                  axis=axis, fine_posting=proc, dgn_seed=seed)
-                s_ab = simulate_pass(p_ab, runs_ab, att, surf_rough, force)
+                s_ab = simulate_pass(p_ab, runs_ab, att, surf_rough, force,
+                                     gfix=grazing_fix)
                 proc_ab = process_standard(p_ab, s_ab) if proc else None
                 pr[key], sm[key] = p_ab, s_ab
                 an[key] = analyze_pass(p_ab, s_ab, proc=proc_ab)
@@ -3698,6 +3779,16 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "demogorgn_bed": bool(demogorgn_bed),
         "antenna": antenna,
         "posting_div": posting_div,
+        "grazing_fix": (None if grazing_fix is None else {
+            "s_eff": grazing_fix,
+            "model": "Grazing-angle facet-lattice fix (GrazingFixConfig): "
+                     "coherent specular facet FIELD tapered by "
+                     "exp(-tan^2(alpha)/(2 s_eff^2)) off the facet normal "
+                     "(sub-facet slope spread; removed sinc/grid-lobe "
+                     "aliasing power is dropped, not re-booked), and the "
+                     "sub-facet-roughness D_Phi reduced to its facet-area "
+                     "term (per-facet infinite-surface PO law) -- effective "
+                     "sigma0 is then facet-size invariant at grazing"}),
         "spec_diffuse": (None if not spec else {
             "specular_fraction": spec[0], "spec_tilt_s0_deg": spec[1],
             "diffuse_exponent": spec[2], "model": SPEC_DIFFUSE_NOTE,
@@ -4415,6 +4506,18 @@ def main():
                     f"PROVENANCE CAVEAT: {_n} elements is the 2017 P-3 "
                     "centre-array readme value; it is applied unchanged to "
                     "the 2016 DC-8 line, which is an unverified transfer")
+    ap.add_argument("--grazing-fix", nargs="?", type=float,
+                    const=None, default=None, metavar="S_EFF",
+                    help="override the grazing-fix taper s_eff (default: "
+                    "analysis.yaml grazing_fix.s_eff). The fix itself -- "
+                    "coherent off-specular taper + area-term-only D_Phi -- "
+                    "is ON by default (it removes a facet-lattice aliasing "
+                    "artifact); s_eff is part of the chunk cache key")
+    ap.add_argument("--no-grazing-fix", action="store_true",
+                    help="DEBUG: run the legacy kernels with the "
+                    "facet-lattice aliasing artifact (bit-identical to "
+                    "pre-fix; matches pre-fix caches). For artifact "
+                    "demonstrations and A/B regression only")
     ap.add_argument("--bed-rough", nargs=2, type=float, default=None,
                     metavar=("SIGMA_M", "CORR_LEN_M"),
                     help="Gerekos sub-facet roughness on the BED interface "
@@ -4485,6 +4588,7 @@ def main():
         companion=not args.no_companion, out_name=args.out_name,
         antenna=args.antenna,
         bed_rough=tuple(args.bed_rough) if args.bed_rough else None,
+        grazing_fix=(False if args.no_grazing_fix else args.grazing_fix),
         posting_div=args.posting_div, passes=args.passes,
         bed_rough_extra_db=args.bed_rough_extra_db,
         trace_decomp_s_km=args.trace_decomp_s,
