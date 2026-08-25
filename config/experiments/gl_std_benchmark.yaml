@@ -73,6 +73,6 @@ run:
   processing:
     chain:      standard
     proc_cache: true
-    companion:  true
+    companion:  false    # constant-gamma re-sim dropped 2026-08-24 (runtime; was 6.2 h of 30.6)
 
   out_name: std_benchmark

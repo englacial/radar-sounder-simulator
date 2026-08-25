@@ -85,7 +85,8 @@ import numpy as np
 
 from ..antenna import gain_fn
 from ..roughness import d_phi, mean_attenuation
-from .geometry import twtt_bin
+from .geometry import (along_track_order, auto_block_size, block_windows,
+                       twtt_bin, window_reach_m)
 
 TWO_PI = 2.0 * np.pi
 
@@ -185,21 +186,20 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
     n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
     gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
-    def one_trace(p, u, pv, rr, cb, nb, ab, e1b, e2b, phb, gfb, sig, lc, kf,
-                  gf, t0, dt, c, ga, gb, tps):
-        def step(carry, blk):
+    def one_trace(p, u, pv, rr, off, n_win, cb, nb, ab, e1b, e2b, phb, gfb,
+                  sig, lc, kf, gf, t0, dt, c, ga, gb, tps):
+        def step(carry, i):
             hist, dropped = carry
-            # per-facet gamma rides the blocked scan like the phasors do; the
-            # scalar path (gamma_facet=False) traces exactly the old program
-            fg = None
-            if rough_terms and gamma_facet:
-                fc, fn, fa, f1, f2, fph, fg = blk
-            elif rough_terms:
-                fc, fn, fa, f1, f2, fph = blk
-            elif gamma_facet:
-                fc, fn, fa, f1, f2, fg = blk
-            else:
-                fc, fn, fa, f1, f2 = blk
+            # this trace's i-th window block (geometry.block_windows): the
+            # per-trace offset makes the block fetch a batched gather
+            j = off + i
+            take = lambda x: jax.lax.dynamic_index_in_dim(x, j, 0, False)
+            fc, fn, fa, f1, f2 = (take(cb), take(nb), take(ab), take(e1b),
+                                  take(e2b))
+            # per-facet gamma / phasors ride the blocked scan; the scalar
+            # path (gamma_facet=False) traces exactly the old program
+            fph = take(phb) if rough_terms else None
+            fg = take(gfb) if gamma_facet else None
             gam = fg if gamma_facet else gf
             ts = tps if taper else None
             if rough_terms:
@@ -233,18 +233,18 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
             return (hist, dropped), None
 
         init = (jnp.zeros(n_seg, jnp.complex64), jnp.float32(0.0))
-        xs = ((cb, nb, ab, e1b, e2b) + ((phb,) if rough_terms else ())
-              + ((gfb,) if gamma_facet else ()))
-        (hist, dropped), _ = jax.lax.scan(step, init, xs)
+        (hist, dropped), _ = jax.lax.scan(step, init, jnp.arange(n_win))
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 17))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0, 0) + (None,) * 18),
+                   static_argnums=(5,))
 
 
 def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
                          k, gamma, t0, dt, n_samples, c, split_sides=False,
                          interp_bins=False, pattern=None, roughness=None,
-                         taper_s=None, d_phi_area=False, block_size=65536):
+                         taper_s=None, d_phi_area=False, block_size=None,
+                         window_cull=True):
     """Binned coherent field for every trace.
 
     Same conventions as ``incoherent_cluttergram`` (local-frame float inputs,
@@ -268,14 +268,29 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     ``GrazingFixConfig``) -- the coherent off-specular taper s_eff (None =
     off) and the area-term-only D_Phi; the defaults trace exactly the
     pre-fix program.
+    ``window_cull``: per-trace along-track facet windowing (geometry.py
+    ``block_windows``): each trace scans only the facet blocks that can bin
+    inside the fast-time window. Exact (skipped facets are silent); False
+    scans every block (regression use). ``block_size`` (default
+    ``geometry.auto_block_size``, ~512k f32 lanes per step) sets the window
+    granularity and is otherwise a performance knob.
     """
     n = centers.shape[0]
-    block_size = min(block_size, n)
+    block_size = min(block_size or auto_block_size(len(positions), 1 << 19),
+                     n)
     n_blocks = -(-n // block_size)
     pad = n_blocks * block_size - n
 
+    # Along-track facet order + per-trace block windows (geometry.py): the
+    # facet SUM is order-dependent only at complex64 ulp level; skipped
+    # blocks are provably silent, so the result equals the all-facet sum.
+    order, s_t, s_sorted = along_track_order(positions, centers)
+    reach = (window_reach_m(t0, dt, n_samples, c) if window_cull
+             else np.inf)
+    off, n_win = block_windows(s_sorted, s_t, reach, block_size, n_blocks)
+
     def blocks(a):
-        a = np.asarray(a, dtype=np.float32)
+        a = np.asarray(a, dtype=np.float32)[order]
         a = np.pad(a, ((0, pad),) + ((0, 0),) * (a.ndim - 1))
         return jnp.asarray(a.reshape(n_blocks, block_size, *a.shape[1:]))
 
@@ -287,8 +302,8 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
 
     # Per-trace f64 reference range (platform -> facet centroid) and its
     # constant phase, reduced mod 2pi in f64 and folded back after the scan.
-    r_ref64 = np.linalg.norm(pos64 - np.asarray(centers, np.float64).mean(0),
-                             axis=1)
+    r_ref64 = np.linalg.norm(
+        pos64 - np.asarray(centers, np.float64)[order].mean(0), axis=1)
     phase_ref = np.exp(-1j * ((2.0 * k * r_ref64) % TWO_PI))  # complex128 (T,)
     r_ref = jnp.asarray(r_ref64.astype(np.float32))
 
@@ -299,7 +314,7 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
 
     if roughness is not None:
         sigma, lcorr, phasors, n_terms = roughness
-        ph = np.pad(np.asarray(phasors, np.complex64), (0, pad))
+        ph = np.pad(np.asarray(phasors, np.complex64)[order], (0, pad))
         phb = jnp.asarray(ph.reshape(n_blocks, block_size))
     else:
         sigma = lcorr = 0.0
@@ -315,7 +330,7 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
         if gamma_arr.shape != (n,):
             raise ValueError(
                 f"per-facet gamma shape {gamma_arr.shape} != ({n},)")
-        gfb = jnp.asarray(np.pad(gamma_arr, (0, pad)).reshape(
+        gfb = jnp.asarray(np.pad(gamma_arr[order], (0, pad)).reshape(
             n_blocks, block_size))
         gamma = 0.0
     else:
@@ -324,7 +339,8 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     fn = _coherent_fn(split_sides, int(n_samples), bool(interp_bins), kind,
                       int(n_terms), gamma_facet, taper_s is not None,
                       bool(d_phi_area))
-    hist, dropped = fn(pos, uct, pv, r_ref, cb, nb, ab, e1b, e2b, phb, gfb,
+    hist, dropped = fn(pos, uct, pv, r_ref, jnp.asarray(off), n_win,
+                       cb, nb, ab, e1b, e2b, phb, gfb,
                        np.float32(sigma), np.float32(lcorr),
                        np.float32(k), np.float32(gamma), np.float32(t0),
                        np.float32(dt), np.float32(c), pa, pb,
