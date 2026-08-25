@@ -11,7 +11,7 @@ meta:
     2026-08-20 under the calibration era: gamma_surface -10 manual, A
     solved by the RSSNR-vs-2H regression (12.8 dB/km), plus the cross-line
     HAPS design points.
-  runtime: hours on a cold cache (585-trace segment, 3 real + 2 HAPS passes)
+  runtime: 127 min on a cold cache (2026-08-25 kernels; 551 min before; 3 real + 2 HAPS passes)
   note: >
     HYBRID bed: grounded side (s < 95.4 km) is the DEMOGORGN realization,
     floating side the reference pass's radar basal picks (the Drygalski

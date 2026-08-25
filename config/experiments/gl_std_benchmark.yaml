@@ -10,8 +10,8 @@ meta:
     identically on either line. Its purpose is the "did a simulator change
     help or hurt" loop: re-run per line, compare the recorded metrics.
   runtime: >
-    per line, cold cache: geikie ~2 h + the constant-gamma arm; westcoast
-    ~2.2 h + arm. A moved solved-A re-simulates (different physics); a
+    per line, cold cache (2026-08-25 kernels): geikie 35 min, westcoast
+    84 min (were ~2 h / ~2.2 h plus the constant-gamma arm, now off). A moved solved-A re-simulates (different physics); a
     converged one replays from cache.
   note: >
     NO NUMBERS in this spec. The bed comes from the reference pass's picks,

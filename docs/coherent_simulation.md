@@ -10,7 +10,7 @@ Per rectangular mean-plane facet (center, edge vectors `e1`/`e2`, area A, normal
 field = (j·k/2π) · Γ · cosθ · A · sinc(k·r̂·e1) · sinc(k·r̂·e2) · exp(−2j·k·r) / r²
 ```
 
-with `sinc(x) = sin(x)/x` and `k = 2πf₀/c`. Contributions are complex-summed into fast-time bins by `floor((2r/c − t0)/dt)` (drop-not-wrap, `dropped_power` accumulates `|contribution|²`). The response is a delta pulse at the carrier; waveform/chirp convolution is a later processing stage.
+with `sinc(x) = sin(x)/x` and `k = 2πf₀/c`. Contributions are complex-summed into fast-time bins by `floor((2r/c − t0)/dt)` (drop-not-wrap, `dropped_power` accumulates `|contribution|²`). **Per-trace facet windowing** (2026-08-24): facets are ordered along the track and each trace only visits the facet blocks within `R = c·t_end/2` of its own along-track position — any facet farther away has `2r/c ≥ t_end` and could only ever land in the drop bin, so the binned field is identical to the all-facet sum; `dropped_power` no longer counts those provably-silent facets (it still counts everything that was evaluated and fell outside the window). The block size adapts to the trace count (`kernels/geometry.py`). The response is a delta pulse at the carrier; waveform/chirp convolution is a later processing stage.
 
 **Normalization** is absolute, not relative: the convention (documented in the brute-force reference module) makes the total return from an infinite flat interface at nadir range h equal `Γ·exp(−2jkh)/(2h)` — the image-method result. This is what lets the Haynes verification check *constants*, not just slopes.
 

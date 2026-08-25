@@ -86,7 +86,17 @@ line registry (`--line`).
 - All figure framing (time/dB windows, color scaling) is per-line; per-panel
   robust scaling is used where passes' dynamic ranges differ widely.
 - Simulation chunks and focused stacks are cached (`--proc-cache`), so
-  figure iteration and re-analysis do not re-simulate.
+  figure iteration and re-analysis do not re-simulate. Chunk cache keys
+  carry the kernel numerics era (`soundersim.kernels.KERNEL_VERSION`);
+  bumping it re-simulates everything.
+- Runtime (2026-08-25, all four full experiments, sequential on the
+  9900X): getz 82 min, david 127, geikie 35, westcoast 84 — 5.5 h total
+  (30.6 h before the per-trace facet windowing / fused bed path of
+  2026-08-24). Cost per pass falls with altitude because the Fresnel-scaled
+  facet spacing coarsens faster (`∝ √h`) than the reach grows; low-altitude,
+  high-frequency passes dominate. The Greenland `std_benchmark` no longer
+  runs the constant-gamma companion simulation (its bed-brightness
+  correlation row is therefore absent from new reports).
 
 ## Headline results to date
 
@@ -113,7 +123,9 @@ line registry (`--line`).
   numbers; the ladder should be re-run.)
 - RSSNR-driven reflectivity reproduces measured along-track bed-brightness
   structure (correlation ~0.6-0.8 against data ceilings of 0.9) on both a
-  West Antarctic coastal line and a Greenland interior line.
+  West Antarctic coastal line and a Greenland interior line. (From the
+  constant-gamma companion runs, switched off in `gl_std_benchmark` on
+  2026-08-24 for runtime; re-enable `processing.companion` to reproduce.)
 - On the thick Greenland interior line, surface+bed geometry cannot explain
   the measured column power (flat with altitude where geometry predicts
   +17 dB): the column there is englacial-scattering dominated. The post-fix

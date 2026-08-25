@@ -46,7 +46,7 @@ Products that simc exposes as separate arrays (left/right) are optional *dimensi
 | `nadir_twtt` | Two-way time to the surface directly below the platform. |
 | `first_return_twtt` | Earliest in-window arrival (simc's "fret"). |
 | `first_return_lat`, `first_return_lon` | Ground location of that first return. |
-| `dropped_power` | Total facet power that fell outside the `twtt` window (validity check on window choice). |
+| `dropped_power` | Total power of evaluated facet contributions that fell outside the `twtt` window (validity check on window choice). Facets that provably cannot reach the window (horizontal distance ≥ `c·t_end/2`) are skipped by the per-trace windowing and not counted. |
 
 ## Metadata (attrs)
 

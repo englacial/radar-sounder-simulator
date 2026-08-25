@@ -13,7 +13,7 @@ meta:
     calibrated) and extended (0-69.7 km) -- were retired when the
     experiments were consolidated to one per line; they are in git history
     if the intermediate extents are ever needed again.
-  runtime: ~65 min sim for all five passes on a cold cache
+  runtime: 82 min for all five passes on a cold cache (2026-08-25 kernels; 321 min before)
   note: >
     HYBRID bed: the grounded side (s < 69.7 km) is the DEMOGORGN realization,
     the floating side is the LOW pass's radar basal picks -- the ice-ocean

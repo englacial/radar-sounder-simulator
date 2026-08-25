@@ -10,7 +10,7 @@ meta:
     line calibration, matched processing). Run it after a simulator change
     to see all four lines move -- or not -- in minutes per line rather than
     hours.
-  runtime: minutes per line on a warm data cache
+  runtime: 3-11 min per line on a warm data cache (2026-08-25 kernels)
 
 run:
   lines:

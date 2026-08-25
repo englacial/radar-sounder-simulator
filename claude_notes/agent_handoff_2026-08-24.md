@@ -42,6 +42,19 @@ greenland_geikie01_transit (englacial-dominated column), greenland_westcoast
    structs), finite_dipole (MKB wing plate), nav roll enabled; isotropic =
    declared upper bound only.
 
+## Kernel era "2026-08-24-cull" (runtime work, merged 2026-08-24)
+
+Per-trace along-track facet windowing in both kernels (exact: skipped facets
+are provably outside the window; `dropped_power` no longer counts them),
+component-form + `fori_loop` Newton bed path, adaptive facet block size,
+and `KERNEL_VERSION` in every chunk cache key (all caches re-simulated on
+2026-08-24/25). Greenland `std_benchmark` companion re-sim is OFF. Full
+campaign now 5.5 h (getz 82 / david 127 / geikie 35 / westcoast 84 min) vs
+30.6 h; all results in the standard experiment dirs are from this run.
+The box is DRAM-bandwidth-bound — local multi-process/pmap fan-out gains
+nothing; next lever if needed is the Newton budget (proposal 2b). Evidence:
+`runtime_reduction_proposals_2026-08-24.md`, harness `runtime_opt/`.
+
 ## Calibration (per line, `calibration:` block)
 
 gamma_surface: pinned -10 dB manual everywhere (solved values were
