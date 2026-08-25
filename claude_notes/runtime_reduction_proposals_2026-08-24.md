@@ -114,3 +114,11 @@ getz 2.5-2.9x, david 2.7-2.8x, geikie high 4.8x / low 4.9x, westcoast 5.6x;
 all pilot kernel time 124 -> 28 min (4.5x). Full-run projection with these
 per-line factors: getz ~2.0 h, david ~3.4 h, geikie ~0.65 h, westcoast
 ~1.5 h, + ~0.6 h orchestration => ~8 h (was 30.6 h).
+
+## Full campaign at the merged kernels (main af9917f, 2026-08-24 21:35 -> 08-25 03:04)
+
+outputs/sim_runs_2026-08-24/full_all.log, all rc=0, every chunk re-simulated:
+getz 82 min (was 321), david 127 (551), geikie 35 (264), westcoast 84 (700)
+=> 328 min = 5.5 h wall (was 30.6 h, 5.6x). Kernel hours: getz 0.96 (4.96),
+david 2.02 (9.08), geikie 0.58 (2.76 + 1.9 companion), westcoast see
+metrics.json (7.29 + 4.3 companion).
