@@ -129,10 +129,11 @@ class Physics(_Base):
     surface_roughness: bool = True
     antenna: Literal["array", "isotropic", "array8"] = "array"
     bed_roughness: BedRoughness | None = None
-    # grazing-angle facet-lattice fix: null = off (legacy), a number = the
-    # coherent off-specular taper s_eff (soundersim GrazingFixConfig; also
-    # switches D_Phi to its area-only form). Forks every chunk cache key.
-    grazing_fix: float | None = None
+    # grazing-angle facet-lattice fix (coherent off-specular taper +
+    # area-only D_Phi). A BUG FIX, ON by default: omitted/null = analysis.yaml
+    # grazing_fix.s_eff; a number = override s_eff; false = the legacy
+    # artifact path (debug/A-B only). s_eff is part of the chunk cache key.
+    grazing_fix: float | Literal[False] | None = None
 
 
 class Processing(_Base):

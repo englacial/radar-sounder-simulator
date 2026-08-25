@@ -100,9 +100,6 @@ VER_ROOT = ROOT / "outputs" / "verification"
 
 
 ANT_DEFAULT = "array"
-# --grazing-fix default s_eff (GrazingFixConfig: effective rms slope of the
-# coherent off-specular taper; the value is part of the chunk cache key)
-GFIX_S_EFF = 0.05
 SPEC_DIFFUSE_NOTE = (
     "Angle-dependent bed reflectivity: the RSSNR-mapped |Gamma_bed|^2(x) is "
     "split into a SPECULAR share f_s, weighted by the facet tilt "
@@ -259,6 +256,7 @@ TAIL_FLOOR_MARGIN_DB: float = 0.0
 CALIBRATION: dict = {}                 # gamma_surface + A (manual or solve)
 ATTENUATION_REGRESSION: dict = {}      # A-solver settings (analysis.yaml)
 GAMMA_SURFACE_SOLVE: dict = {}         # gamma-solver settings (analysis.yaml)
+GRAZING_FIX: dict = {}                 # facet-lattice fix s_eff (analysis.yaml)
 CORR_WIN_M: float = 0.0                # bed-brightness smoothing scale
 ROUGH_WIN_M: float = 0.0               # bed-roughness detrend window
 GL_RAMP_KM: float = 0.0                # hybrid-bed blend ramp past the GL
@@ -3123,7 +3121,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         demogorgn_bed=False,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
-        bed_rough_extra_db=0.0, passes=None, spec=None, grazing_fix=None,
+        bed_rough_extra_db=0.0, passes=None, spec=None,
+        grazing_fix=None,   # None -> ON at GRAZING_FIX['s_eff']; False -> off
+
         gamma_surface_db=None, trace_decomp_s_km=None,
         per_pass_figs=False,
         plot_s_max_km=None, proc_cache=False, line=None,
@@ -3132,6 +3132,13 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     # Always re-activate: this resets PASSES to the line definition, so
     # extra_passes added below cannot leak into a later run in-process.
     activate_line(line or LINE)
+    # The grazing-angle facet-lattice fix is a BUG FIX and is ON by default
+    # (analysis.yaml grazing_fix.s_eff); False (--no-grazing-fix) is the
+    # legacy path, kept only for artifact demonstrations and A/B regression.
+    if grazing_fix is None:
+        grazing_fix = float(GRAZING_FIX["s_eff"])
+    elif grazing_fix is False:
+        grazing_fix = None
     instruments = dict(instruments or {})
     if extra_passes:
         extra, syn = {}, list(SYNTHETIC_KEYS)
@@ -4500,13 +4507,17 @@ def main():
                     "centre-array readme value; it is applied unchanged to "
                     "the 2016 DC-8 line, which is an unverified transfer")
     ap.add_argument("--grazing-fix", nargs="?", type=float,
-                    const=GFIX_S_EFF, default=None, metavar="S_EFF",
-                    help="enable the grazing-angle facet-lattice fix "
-                    "(coherent off-specular taper + area-term-only D_Phi; "
-                    "GrazingFixConfig). Optional value overrides the taper "
-                    f"s_eff (default {GFIX_S_EFF:g}). Forks every chunk "
-                    "cache key; OFF leaves all caches and physics "
-                    "bit-identical")
+                    const=None, default=None, metavar="S_EFF",
+                    help="override the grazing-fix taper s_eff (default: "
+                    "analysis.yaml grazing_fix.s_eff). The fix itself -- "
+                    "coherent off-specular taper + area-term-only D_Phi -- "
+                    "is ON by default (it removes a facet-lattice aliasing "
+                    "artifact); s_eff is part of the chunk cache key")
+    ap.add_argument("--no-grazing-fix", action="store_true",
+                    help="DEBUG: run the legacy kernels with the "
+                    "facet-lattice aliasing artifact (bit-identical to "
+                    "pre-fix; matches pre-fix caches). For artifact "
+                    "demonstrations and A/B regression only")
     ap.add_argument("--bed-rough", nargs=2, type=float, default=None,
                     metavar=("SIGMA_M", "CORR_LEN_M"),
                     help="Gerekos sub-facet roughness on the BED interface "
@@ -4577,7 +4588,7 @@ def main():
         companion=not args.no_companion, out_name=args.out_name,
         antenna=args.antenna,
         bed_rough=tuple(args.bed_rough) if args.bed_rough else None,
-        grazing_fix=args.grazing_fix,
+        grazing_fix=(False if args.no_grazing_fix else args.grazing_fix),
         posting_div=args.posting_div, passes=args.passes,
         bed_rough_extra_db=args.bed_rough_extra_db,
         trace_decomp_s_km=args.trace_decomp_s,

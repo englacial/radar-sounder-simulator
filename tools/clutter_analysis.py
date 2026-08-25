@@ -79,6 +79,10 @@ class BedTail(_Base):
     floor_margin_db: float
 
 
+class GrazingFix(_Base):
+    s_eff: float
+
+
 class GammaSurfaceSolve(_Base):
     seed_db: float
     tolerance_db: float
@@ -125,6 +129,7 @@ class AnalysisSpec(_Base):
     noise_floor: NoiseFloor
     bed_tail: BedTail
     gamma_surface_solve: GammaSurfaceSolve
+    grazing_fix: GrazingFix
     attenuation_regression: AttenuationRegression
     smoothing: Smoothing
     hybrid_bed: HybridBed
@@ -158,6 +163,7 @@ class AnalysisSpec(_Base):
             "TAIL_GUARD_DB": bt.guard_db,
             "TAIL_FLOOR_MARGIN_DB": bt.floor_margin_db,
             "GAMMA_SURFACE_SOLVE": self.gamma_surface_solve.model_dump(),
+            "GRAZING_FIX": self.grazing_fix.model_dump(),
             "ATTENUATION_REGRESSION":
                 self.attenuation_regression.model_dump(),
             "CORR_WIN_M": sm.profile_m,
