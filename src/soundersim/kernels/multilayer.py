@@ -166,13 +166,104 @@ import numpy as np
 
 from ..antenna import gain_fn
 from ..physics import fresnel_te
-from ..refraction import snell_crossing
 from ..refraction_joint import joint_crossings, sequential_chain
 from ..roughness import d_phi, mean_attenuation
-from .geometry import twtt_bin
+from .geometry import (along_track_order, auto_block_size, block_windows,
+                       twtt_bin, window_reach_m)
 
 TWO_PI = 2.0 * np.pi
 _C_MIN = 1e-9  # grazing-cosine clamp: keeps 1/c^2 finite; amplitudes -> 0
+
+
+# ---------------------------------------------------------------------------
+# Component-form vector math (2026-08-24 runtime work, "1b"). The sequential
+# path keeps every 3-vector as a tuple of (..., ) arrays instead of a
+# (..., 3) array: XLA:CPU then fuses the whole per-facet chain into a few
+# loops instead of breaking it at every ``sum(axis=-1)`` reduction, which
+# materialised hundreds of (traces, block) float64 temporaries per scan step
+# (the kernel was DRAM-bandwidth-bound). Dot products sum in the same
+# ((x + y) + z) order as the reduce they replace.
+# ---------------------------------------------------------------------------
+def _dot3(a, b):
+    return (a[0] * b[0] + a[1] * b[1]) + a[2] * b[2]
+
+
+def _c3(v):
+    """(..., 3) array -> component tuple."""
+    return (v[..., 0], v[..., 1], v[..., 2])
+
+
+def _snell_c(p, q, o, nrm, n1, n2, n_iter):
+    """``refraction.snell_crossing`` in component form (same operations, same
+    order; see that docstring). p/q/o/nrm are 3-tuples of broadcastable
+    arrays, ``nrm`` unit length. Returns (x (3-tuple), theta1, theta2, s1,
+    s2, residual, valid)."""
+    dt = jnp.result_type(*q)
+    eps = jnp.finfo(dt).eps
+    tiny = jnp.asarray(1e-30, dt)
+    tol = 1e-9 if eps < 1e-10 else 1e-3
+    h1 = _dot3((p[0] - o[0], p[1] - o[1], p[2] - o[2]), nrm)
+    h2 = _dot3((q[0] - o[0], q[1] - o[1], q[2] - o[2]), nrm)
+    a, b = jnp.abs(h1), jnp.abs(h2)
+    fp = (p[0] - h1 * nrm[0], p[1] - h1 * nrm[1], p[2] - h1 * nrm[2])
+    fq = (q[0] - h2 * nrm[0], q[1] - h2 * nrm[1], q[2] - h2 * nrm[2])
+    w = (fq[0] - fp[0], fq[1] - fp[1], fq[2] - fp[2])
+    L = jnp.sqrt(_dot3(w, w))
+    Lm = jnp.maximum(L, tiny)
+    u = (w[0] / Lm, w[1] / Lm, w[2] / Lm)
+    s = jnp.maximum(a + b + L, tiny)
+    inv_s = 1.0 / s                     # one divide; cheap multiplies fuse
+    ah, bh, Lh = a * inv_s, b * inv_s, L * inv_s
+    swap = n1 > n2
+    ratio = jnp.minimum(n1, n2) / jnp.maximum(n1, n2)
+    ar = jnp.where(swap, bh, ah)
+    bd = jnp.where(swap, ah, bh)
+    one = jnp.asarray(1.0, dt)
+    hi0 = one - 8.0 * eps
+    sig = jnp.minimum(
+        Lh / jnp.maximum(jnp.sqrt(Lh * Lh + (ah + bh) ** 2), tiny), hi0)
+    lo = jnp.zeros_like(Lh)
+    hi = hi0 * jnp.ones_like(Lh)
+    # XLA:CPU fuses an expensive op (sqrt/rsqrt/divide/exp/...) into its
+    # consumer only when it has exactly ONE consumer; every shared sqrt or
+    # divide otherwise materialises a (traces, block) float64 temporary. The
+    # iteration below is the same Newton step written so that each expensive
+    # op is used once (rsqrt for F, sqrt + divide for F'; F' = ar c1^-3/2 +
+    # bd ratio c2^-3/2) -- one loop fusion per iteration instead of ~7.
+    # The iterations run as a real loop (fori_loop, carry = sig/lo/hi): an
+    # unrolled chain lets XLA duplicate the cheap ops across iterations
+    # (measured 8x slower) -- the loop body is one fusion, the carry the only
+    # per-iteration materialisation.
+    def newton(_, carry):
+        sig, lo, hi = carry
+        v = ratio * sig
+        c1 = jnp.maximum((one - sig) * (one + sig), tiny)
+        c2 = jnp.maximum((one - v) * (one + v), tiny)
+        F = (ar * sig * jax.lax.rsqrt(c1) + bd * v * jax.lax.rsqrt(c2)
+             - Lh)
+        lo = jnp.where(F <= 0, sig, lo)
+        hi = jnp.where(F <= 0, hi, sig)
+        Fp = (ar / (c1 * jnp.sqrt(c1))
+              + (bd * ratio) / (c2 * jnp.sqrt(c2)))
+        sn = sig - F / jnp.maximum(Fp, tiny)
+        ok = (sn >= lo) & (sn <= hi) & jnp.isfinite(sn)
+        return jnp.where(ok, sn, 0.5 * (lo + hi)), lo, hi
+
+    sig, lo, hi = jax.lax.fori_loop(0, n_iter, newton, (sig, lo, hi))
+    c1 = jnp.maximum((one - sig) * (one + sig), tiny)
+    tr = ar * sig * jax.lax.rsqrt(c1)
+    t = jnp.clip(jnp.where(swap, Lh - tr, tr), 0.0, Lh)
+    d2 = Lh - t
+    r1 = jnp.maximum(jnp.sqrt(ah * ah + t * t), tiny)
+    r2 = jnp.maximum(jnp.sqrt(bh * bh + d2 * d2), tiny)
+    residual = n1 * t / r1 - n2 * d2 / r2
+    s1, s2 = s * r1, s * r2
+    st = s * t
+    x = (fp[0] + st * u[0], fp[1] + st * u[1], fp[2] + st * u[2])
+    theta1 = jnp.arctan2(t, ah)
+    theta2 = jnp.arctan2(d2, bh)
+    valid = (h1 * h2 < 0) & (jnp.abs(residual) <= tol)
+    return x, theta1, theta2, s1, s2, residual, valid
 
 
 def _grid_consts(facets):
@@ -259,51 +350,58 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
     gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
     def path(p, q, consts, n_leg, eps_leg, att, k0, sig_c):
-        """Chained refracted path platform -> facet centers (float64).
+        """Chained refracted path platform -> facet centers (float64),
+        component form (``_snell_c``; p/q/returned points are 3-tuples).
 
         Leg i < j takes the incidence cosine at interface i (its lower end);
         the final leg takes the refraction cosine at interface j-1. For
         parallel planes these equal the per-medium ray angles exactly.
         ``rough_cross`` folds the two-way transmission roughness attenuation
-        exp(-2 sig_c[i]^2 K_t^2) into tau2 (module docstring).
+        exp(-2 sig_c[i]^2 K_t^2) into tau2 (module docstring). ``consts``
+        per crossed interface: (tab (ny, nx, 6) float32 [center, normal],
+        coef, mp, mn) -- one gather per lookup.
         """
-        cur = p + jnp.zeros_like(q)
-        valid = jnp.ones(q.shape[:-1], bool)
-        opl = jnp.zeros(q.shape[:-1], q.dtype)
+        shape = q[0].shape
+        cur = tuple(p[i] + jnp.zeros(shape, q[0].dtype) for i in range(3))
+        valid = jnp.ones(shape, bool)
+        opl = jnp.zeros(shape, q[0].dtype)
         loss_db, sum_par, sum_perp = opl, opl, opl
         tau2 = jnp.ones_like(opl)
         c_first = c_last = x_first = None
-        for i, (gc, gn, coef, mp, mn) in enumerate(consts):
+        for i, (tab, coef, mp, mn) in enumerate(consts):
             # Pass 1 (mean plane) only anchors the facet lookup: sub-facet
             # accuracy is plenty, and Newton is quadratic -- 10 iterations is
             # orders of magnitude better than a facet width here.
-            r1 = snell_crossing(cur, q, mp, mn, n_leg[i], n_leg[i + 1],
-                                n_iter=10)
-            rc = (r1.x[..., 0, None] * coef[0] + r1.x[..., 1, None] * coef[1]
-                  + coef[2])
-            row = jnp.clip(jnp.round(rc[..., 0]), 0, gc.shape[0] - 1)
-            col = jnp.clip(jnp.round(rc[..., 1]), 0, gc.shape[1] - 1)
+            x1 = _snell_c(cur, q, (mp[0], mp[1], mp[2]), (mn[0], mn[1], mn[2]),
+                          n_leg[i], n_leg[i + 1], 10)[0]
+            rc0 = x1[0] * coef[0, 0] + x1[1] * coef[1, 0] + coef[2, 0]
+            rc1 = x1[0] * coef[0, 1] + x1[1] * coef[1, 1] + coef[2, 1]
+            row = jnp.clip(jnp.round(rc0), 0, tab.shape[0] - 1)
+            col = jnp.clip(jnp.round(rc1), 0, tab.shape[1] - 1)
             row, col = row.astype(jnp.int32), col.astype(jnp.int32)
-            pt = gc[row, col].astype(q.dtype)
-            nr = gn[row, col].astype(q.dtype)
-            nr = nr / jnp.linalg.norm(nr, axis=-1, keepdims=True)
-            r2 = snell_crossing(cur, q, pt, nr, n_leg[i], n_leg[i + 1])
-            valid &= r2.valid
-            c_inc = jnp.maximum(jnp.cos(r2.theta1), _C_MIN)
+            g6 = tab[row, col].astype(q[0].dtype)
+            pt = (g6[..., 0], g6[..., 1], g6[..., 2])
+            nr = (g6[..., 3], g6[..., 4], g6[..., 5])
+            inn = jax.lax.rsqrt(_dot3(nr, nr))
+            nr = (nr[0] * inn, nr[1] * inn, nr[2] * inn)
+            x2, th1, th2, s1, _, _, ok = _snell_c(cur, q, pt, nr, n_leg[i],
+                                                 n_leg[i + 1], 25)
+            valid &= ok
+            c_inc = jnp.maximum(jnp.cos(th1), _C_MIN)
             if i == 0:
                 c_first = c_inc
-                x_first = r2.x  # first crossing: departure leg is p -> here
+                x_first = x2  # first crossing: departure leg is p -> here
             g = fresnel_te(eps_leg[i], eps_leg[i + 1], c_inc, xp=jnp).gamma
             tau2 = tau2 * (1.0 - g * g)
             if rough_cross:
-                kt = k0 * (n_leg[i] * c_inc - n_leg[i + 1] * jnp.cos(r2.theta2))
+                kt = k0 * (n_leg[i] * c_inc - n_leg[i + 1] * jnp.cos(th2))
                 tau2 = tau2 * jnp.exp(-2.0 * (sig_c[i] * kt) ** 2)
-            opl = opl + n_leg[i] * r2.s1
-            loss_db = loss_db + r2.s1 * (att[i] / 1000.0)
-            sum_perp = sum_perp + r2.s1 / n_leg[i]
-            sum_par = sum_par + r2.s1 / (n_leg[i] * c_inc * c_inc)
-            c_last = jnp.maximum(jnp.cos(r2.theta2), _C_MIN)
-            cur = r2.x
+            opl = opl + n_leg[i] * s1
+            loss_db = loss_db + s1 * (att[i] / 1000.0)
+            sum_perp = sum_perp + s1 / n_leg[i]
+            sum_par = sum_par + s1 / (n_leg[i] * c_inc * c_inc)
+            c_last = jnp.maximum(jnp.cos(th2), _C_MIN)
+            cur = x2
         return (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c_first,
                 c_last, x_first)
 
@@ -358,13 +456,18 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
         return (r2.x[-1], r2.valid, opl, loss_db, sum_par, sum_perp, tau2,
                 c_surf, c_last, r2.x[0])
 
-    def one_trace(p, u, pv, blocks, consts, n_leg, eps_leg, att, t0, dt, c,
-                  gamma, k0, pa, pb, sig_t, l_t, sig_c, n_exp, tps):
+    def one_trace(p, u, pv, off, n_win, blocks, consts, n_leg, eps_leg, att,
+                  t0, dt, c, gamma, k0, pa, pb, sig_t, l_t, sig_c, n_exp, tps):
         if refraction == "sequential":
             assert len(consts) == n_crossed
 
-        def step(carry, blk):
+        def step(carry, i):
             hist, dropped = carry
+            # this trace's i-th window block (geometry.block_windows): the
+            # per-trace offset makes the block fetch a batched gather
+            j = off + i
+            blk = [jax.lax.dynamic_index_in_dim(x, j, 0, False)
+                   for x in blocks]
             # per-facet gamma rides the blocked scan like the phasors do; the
             # scalar path (gamma_facet=False) traces exactly the old program
             fg = None
@@ -382,15 +485,24 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
             else:
                 fc, fn, fa, f1, f2 = blk_
             gam = fg if gamma_facet else gamma
-            q = fc.astype(jnp.float64)
-            path_fn = path if refraction == "sequential" else path_joint
-            (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c0,
-             c_last, x_first) = path_fn(p, q, consts, n_leg, eps_leg, att,
-                                        k0, sig_c)
-            # Final leg (medium j): crossing -> facet.
-            d = cur - q                       # facet -> last crossing (up-path)
-            s_j = jnp.sqrt(jnp.sum(d * d, axis=-1))
-            rhat = d / jnp.maximum(s_j, 1e-30)[..., None]
+            q64 = fc.astype(jnp.float64)
+            pc = (p[0], p[1], p[2])
+            if refraction == "sequential":
+                q = _c3(q64)
+                (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c0,
+                 c_last, x_first) = path(pc, q, consts, n_leg, eps_leg, att,
+                                         k0, sig_c)
+            else:
+                (cur, valid, opl, loss_db, sum_par, sum_perp, tau2, c0,
+                 c_last, x_first) = path_joint(p, q64, consts, n_leg,
+                                               eps_leg, att, k0, sig_c)
+                q, cur, x_first = _c3(q64), _c3(cur), _c3(x_first)
+            # Final leg (medium j): crossing -> facet (component form).
+            d = (cur[0] - q[0], cur[1] - q[1], cur[2] - q[2])  # facet -> crossing
+            s_j = jnp.sqrt(_dot3(d, d))
+            inv = 1.0 / jnp.maximum(s_j, 1e-30)
+            rhat = (d[0] * inv, d[1] * inv, d[2] * inv)
+            fn64 = _c3(fn.astype(jnp.float64))
             nj = n_leg[-1]
             opl = opl + nj * s_j
             loss_db = loss_db + s_j * (att[-1] / 1000.0)
@@ -400,22 +512,22 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
             l_par = n_leg[0] * c0 * c0 * sum_par
             flux = (n_leg[0] * c0) / (nj * c_last)
             att_f = 10.0 ** (-loss_db / 10.0)  # two-way FIELD = one-way power
-            cos_t = jnp.sum(rhat * fn.astype(jnp.float64), axis=-1)
+            cos_t = _dot3(rhat, fn64)
             spread = tau2 * flux / (l_par * l_perp)
             if gfn is not None:
                 # Antenna gain at the air-leg departure direction; g**2 on the
                 # (squared-in-incoherent) amplitude = field convention.
-                d0 = x_first - p
-                dhat0 = d0 / jnp.maximum(
-                    jnp.sqrt(jnp.sum(d0 * d0, axis=-1)), 1e-30)[..., None]
+                d0 = (x_first[0] - pc[0], x_first[1] - pc[1],
+                      x_first[2] - pc[2])
+                dm = jnp.maximum(jnp.sqrt(_dot3(d0, d0)), 1e-30)
+                dhat0 = jnp.stack([d0[0] / dm, d0[1] / dm, d0[2] / dm], -1)
                 g = gfn(dhat0, pv, pa, pb)
                 spread = spread * (g * g)
             if coherent:
                 kj = k0 * nj
-                s1 = jnp.sinc(jnp.sum(rhat * f1.astype(jnp.float64), -1)
-                              * (kj / np.pi))
-                s2 = jnp.sinc(jnp.sum(rhat * f2.astype(jnp.float64), -1)
-                              * (kj / np.pi))
+                f1d, f2d = _c3(f1.astype(jnp.float64)), _c3(f2.astype(jnp.float64))
+                s1 = jnp.sinc(_dot3(rhat, f1d) * (kj / np.pi))
+                s2 = jnp.sinc(_dot3(rhat, f2d) * (kj / np.pi))
                 amp = ((kj / TWO_PI) * gam * cos_t * fa * s1 * s2 * spread
                        * att_f)
                 if taper:
@@ -426,11 +538,10 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                     amp = amp * jnp.exp(-(1.0 - ct2)
                                         / (ct2 * (2.0 * tps * tps)))
                 if rough_terms:
-                    f1d, f2d = f1.astype(jnp.float64), f2.astype(jnp.float64)
-                    d1 = jnp.sum(rhat * f1d, -1)
-                    d2 = jnp.sum(rhat * f2d, -1)
-                    l1 = jnp.sqrt(jnp.sum(f1d * f1d, -1))
-                    l2 = jnp.sqrt(jnp.sum(f2d * f2d, -1))
+                    d1 = _dot3(rhat, f1d)
+                    d2 = _dot3(rhat, f2d)
+                    l1 = jnp.sqrt(_dot3(f1d, f1d))
+                    l2 = jnp.sqrt(_dot3(f2d, f2d))
                     kk = 2.0 * kj * cos_t
                     dp = d_phi(sig_t, l_t, kk, 2.0 * kj * d1 / l1,
                                2.0 * kj * d2 / l2, l1, l2,
@@ -462,7 +573,8 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
             b = twtt_bin(2.0 * opl / c, t0, dt)
             ok = valid & (b >= 0) & (b < n_samples)
             if split_sides:
-                right = (jnp.sum((q - p) * u, axis=-1) > 0).astype(jnp.int32)
+                right = (_dot3((q[0] - pc[0], q[1] - pc[1], q[2] - pc[2]),
+                               (u[0], u[1], u[2])) > 0).astype(jnp.int32)
                 b = b + right * n_samples
             seg = jnp.where(ok, b, n_seg)
             h = jax.ops.segment_sum(contrib, seg, num_segments=n_seg + 1)
@@ -471,10 +583,11 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
 
         init = (jnp.zeros(n_seg, jnp.complex64 if coherent else jnp.float32),
                 jnp.float32(0.0))
-        (hist, dropped), _ = jax.lax.scan(step, init, blocks)
+        (hist, dropped), _ = jax.lax.scan(step, init, jnp.arange(n_win))
         return hist, dropped
 
-    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0) + (None,) * 17))
+    return jax.jit(jax.vmap(one_trace, in_axes=(0, 0, 0, 0) + (None,) * 18),
+                   static_argnums=(4,))
 
 
 def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
@@ -483,7 +596,8 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                           crossed_sigma=None, diffuse=None, taper_s=None,
                           d_phi_area=False, block_size=None,
                           refraction="sequential", pad_to=None,
-                          joint_newton=6, joint_backtrack=4):
+                          joint_newton=6, joint_backtrack=4,
+                          window_cull=True):
     """Binned refracted-path contributions from one target interface.
 
     positions/u_ct: (T, 3) platform positions / cross-track unit vectors
@@ -519,9 +633,14 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
     ``len(crossed)``) pads the stack with no-op interfaces so calls with
     different layer counts share one executable, and
     ``joint_newton``/``joint_backtrack`` are the pass-2 Newton budgets
-    (compile-time statics). ``block_size`` defaults to 65536 (sequential) /
-    4096 (joint: the damped-Newton candidate buffers scale with
-    block * pad_to * backtrack).
+    (compile-time statics). ``block_size`` defaults to
+    ``geometry.auto_block_size`` (~256k f64 lanes per step; 4096 for the
+    joint path, whose damped-Newton candidate buffers scale with block *
+    pad_to * backtrack) and is also the per-trace window granularity. ``window_cull``: per-trace
+    along-track facet windowing (geometry.py ``block_windows``) -- each trace
+    scans only the facet blocks that can bin inside the fast-time window;
+    exact for ``out`` (skipped facets are silent), ``dropped`` excludes them.
+    False scans every block (regression use).
 
     Returns ``(out, dropped)`` NumPy arrays: out is float32 power (incoherent)
     or complex64 field (coherent), (T, n_samples) or (T, n_samples, 2) with
@@ -555,15 +674,29 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
         if crossed_sigma is not None:
             sig_c = np.concatenate([np.zeros(kp), sig_c])
     else:
-        consts = tuple(tuple(g) for g in map(_grid_consts, crossed))
+        # sequential path: one interleaved (ny, nx, 6) [center, normal]
+        # lookup table per crossed interface (a single gather in ``path``)
+        consts = tuple(
+            (np.concatenate([gc, gn], axis=-1), coef, mp, mn)
+            for gc, gn, coef, mp, mn in map(_grid_consts, crossed))
 
     n = target.centers.shape[0]
-    block_size = min(block_size or (4096 if joint else 65536), n)
+    block_size = min(block_size or (4096 if joint else auto_block_size(
+        len(pos), 1 << 18)), n)
     n_blocks = -(-n // block_size)
     pad = n_blocks * block_size - n
 
+    # Along-track facet order + per-trace block windows (geometry.py): the
+    # per-facet sum is order-dependent only at rounding level; skipped
+    # blocks are provably silent (twtt >= window end), so ``out`` equals the
+    # all-facet sum and only ``dropped`` shrinks.
+    order, s_t, s_sorted = along_track_order(pos, target.centers)
+    reach = (window_reach_m(t0, dt, n_samples, c) if window_cull
+             else np.inf)
+    off, n_win = block_windows(s_sorted, s_t, reach, block_size, n_blocks)
+
     def blocks(a):
-        a = np.asarray(a, dtype=np.float32)
+        a = np.asarray(a, dtype=np.float32)[order]
         a = np.pad(a, ((0, pad),) + ((0, 0),) * (a.ndim - 1))
         return jnp.asarray(a.reshape(n_blocks, block_size, *a.shape[1:]))
 
@@ -571,7 +704,7 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
            blocks(target.areas), blocks(target.e1), blocks(target.e2))
     if roughness is not None:
         sig_t, l_t, phasors, n_terms = roughness
-        ph = np.pad(np.asarray(phasors, np.complex64), (0, pad))
+        ph = np.pad(np.asarray(phasors, np.complex64)[order], (0, pad))
         blk = blk + (jnp.asarray(ph.reshape(n_blocks, block_size)),)
     else:
         sig_t = l_t = 0.0
@@ -592,14 +725,14 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                 f"per-facet gamma shape {gamma_arr.shape} != ({n},)")
         # float64 NumPy, converted under the x64 scope below (like positions)
         # so an array of a constant matches the scalar path bit-exactly
-        blk = blk + (np.pad(gamma_arr, (0, pad)).reshape(
+        blk = blk + (np.pad(gamma_arr[order], (0, pad)).reshape(
             n_blocks, block_size),)
     if diffuse is not None:
         # float64 amplitude + complex64 frozen phasors, appended LAST so the
         # unpacking above stays positional (see one_trace)
         blk = blk + (
-            np.pad(d_amp, (0, pad)).reshape(n_blocks, block_size),
-            jnp.asarray(np.pad(np.asarray(d_ph, np.complex64),
+            np.pad(d_amp[order], (0, pad)).reshape(n_blocks, block_size),
+            jnp.asarray(np.pad(np.asarray(d_ph, np.complex64)[order],
                                (0, pad)).reshape(n_blocks, block_size)))
     # Positions stay float64 NumPy: converted under the x64 scope below, so
     # the platform coordinates (the largest magnitudes) are not truncated.
@@ -617,7 +750,8 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                        diffuse is not None, taper_s is not None,
                        bool(d_phi_area))
     with jax.enable_x64():
-        hist, dropped = fn(pos, uct, pv, blk, consts, n_leg, eps, att,
+        hist, dropped = fn(pos, uct, pv, jnp.asarray(off), n_win, blk, consts,
+                           n_leg, eps, att,
                            np.float64(t0), np.float64(dt), np.float64(c),
                            np.float64(0.0 if gamma_facet else gamma),
                            np.float64(0.0 if k0 is None else k0), pa, pb,

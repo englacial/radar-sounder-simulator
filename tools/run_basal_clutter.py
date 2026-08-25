@@ -89,6 +89,7 @@ import clutter_lines  # noqa: E402  study-line definitions (YAML)
 import run_altitude_comparison as rac  # noqa: E402  shared machinery
 from run_opr_comparison import _db  # noqa: E402
 
+from soundersim.kernels import KERNEL_VERSION
 from soundersim.config import (AntennaConfig, DemInterface, FacetConfig,  # noqa: E402
                                GrazingFixConfig, Medium, RadarConfig,
                                RoughnessConfig, SimConfig, WaveformConfig)
@@ -1961,6 +1962,7 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
                else {"instrument": p["instrument"]}),
             **inst_ant_meta(p, antenna),
             "window": p["window"], "surf_rough": bool(surf_rough),
+            "kernel": KERNEL_VERSION,   # kernel numerics era (2026-08-24)
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
             "t0_us": round(p["rc_sim"].t0 * 1e6, 5),
             "n_samples_sim": p["rc_sim"].n_samples}
