@@ -103,3 +103,14 @@ getz real_low 2.93x, real_9km 2.77x, real_10km 2.49x; david basler195 2.74x
 (see compare_pilot.py output in the handoff). getz pilot metrics identical to
 pilot_fixed (residuals, clutter, alignment, tails) except simulation_wall_s
 515.6 -> 183.0 s.
+
+## All four pilots at the committed kernels (8ab38b7, 2026-08-24 evening)
+
+Driver wall (outputs/sim_runs_2026-08-24/pilots_driver.log): getz 3 min (was
+15), david 5 (23), geikie 11 (56), westcoast 8 (44). Per-chunk kernel wall vs
+the previous records (getz/david: pilot_fixed, same physics; Greenland:
+08-22 pilot_smoke, pre-grazing-fix, same facets/geometry):
+getz 2.5-2.9x, david 2.7-2.8x, geikie high 4.8x / low 4.9x, westcoast 5.6x;
+all pilot kernel time 124 -> 28 min (4.5x). Full-run projection with these
+per-line factors: getz ~2.0 h, david ~3.4 h, geikie ~0.65 h, westcoast
+~1.5 h, + ~0.6 h orchestration => ~8 h (was 30.6 h).
