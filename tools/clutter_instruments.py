@@ -73,6 +73,10 @@ class Simulated(_Base):
     bandwidth_Hz: float | None = None
     pulse_length_s: float | None = None
     window: str | None = None
+    # Compressed-pulse model (soundersim.waveform): "analytic" windowed sinc
+    # (B*T -> inf limit) or the explicit matched-filtered "chirp" with the
+    # real finite-TB sidelobe pedestal. Never read from an OPR frame.
+    construction: Literal["analytic", "chirp"] = "analytic"
     antenna: Antenna = Antenna()
 
 
@@ -169,6 +173,10 @@ class InstrumentSpec(_Base):
               "bandwidth_Hz": out["bandwidth_Hz"],
               "bed_waveform_pulse_length_s": out["pulse_length_s"],
               "pulse_compression_freq_window": out["window"]}
+        # only a non-default construction adds a key, so every analytic
+        # instrument's waveform dict (and chunk cache key) is unchanged
+        if self.simulated.construction != "analytic":
+            wf["pulse_compression_construction"] = self.simulated.construction
         return wf, self.simulated.antenna, deviations
 
     def covers(self, frame_id):
@@ -177,6 +185,8 @@ class InstrumentSpec(_Base):
     def provenance_block(self, deviations=None):
         b = {"instrument": self.name, "source": self.source.kind,
              "antenna": self.simulated.antenna.model_dump()}
+        if self.simulated.construction != "analytic":
+            b["pulse_construction"] = self.simulated.construction
         if self.description:
             b["description"] = self.description
         if self.provenance:

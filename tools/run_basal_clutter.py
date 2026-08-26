@@ -1572,7 +1572,9 @@ def radar_grid(params, surf_tw, bed_tw, dt, t0f, oversample, window,
     wf = params["waveform"]
     wave = WaveformConfig(kind="chirp", bandwidth=wf["bandwidth_Hz"],
                           pulse_length=wf["bed_waveform_pulse_length_s"],
-                          window=window)
+                          window=window,
+                          construction=wf.get("pulse_compression_construction",
+                                              "analytic"))
     ant = (AntennaConfig(kind="array", n_elements=rac.N_ELEMENTS,
                          spacing_lam=rac.SPACING_LAM, roll_source="nav")
            if antenna is None else
@@ -1906,6 +1908,19 @@ def inst_ant_tag(p, antenna):
     return f"_ia{h}"
 
 
+def wave_meta(p):
+    """Chunk cache-key entry for a non-default compressed-pulse construction.
+    The waveform convolution runs INSIDE the cached chunk (simulate.py ->
+    apply_waveform), so the construction and the pulse length it now
+    depends on must fork the key -- but only when construction != analytic,
+    so every pre-existing key string stays byte-identical."""
+    wv = p["rc_sim"].waveform
+    if wv.construction == "analytic":
+        return {}
+    return {"waveform": {"construction": wv.construction,
+                         "pulse_length_us": round(wv.pulse_length * 1e6, 4)}}
+
+
 def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
               spec=None, gfix=None):
     """Cache file name for one chunk. Non-default hypothesis knobs append a
@@ -1927,7 +1942,9 @@ def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
             + ("" if p.get("instrument") in (None,
                                              p.get("instrument_default"))
                else f"_i{p['instrument']}")
-            + inst_ant_tag(p, antenna))
+            + inst_ant_tag(p, antenna)
+            + ("" if not wave_meta(p)
+               else f"_w{p['rc_sim'].waveform.construction}"))
 
 
 def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
@@ -1966,6 +1983,7 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
                                              p.get("instrument_default"))
                else {"instrument": p["instrument"]}),
             **inst_ant_meta(p, antenna),
+            **wave_meta(p),
             "window": p["window"], "surf_rough": bool(surf_rough),
             "kernel": KERNEL_VERSION,   # kernel numerics era (2026-08-24)
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),

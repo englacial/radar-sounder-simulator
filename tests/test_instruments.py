@@ -292,3 +292,30 @@ def test_radar_grid_carries_every_antenna_field():
                                    antenna=ant2)
     assert rc_sim2.antenna.axis == "cross_track"
     assert rc_sim2.antenna.length_lam == pytest.approx(0.4)
+
+
+# ------------------------------------------------- compressed-pulse model
+def test_chirp_construction_plumbs_through_and_forks_the_cache_key():
+    """simulated.construction: chirp -> waveform dict -> rc_sim.waveform ->
+    chunk key. Analytic instruments add NO key (byte-stable caches)."""
+    a = _inst().resolve()[0]
+    assert "pulse_compression_construction" not in a
+    c = _inst(simulated={"frequency_Hz": 60e6, "bandwidth_Hz": 15e6,
+                         "pulse_length_s": 20e-6, "window": "hann",
+                         "construction": "chirp"}).resolve()[0]
+    assert c["pulse_compression_construction"] == "chirp"
+    surf = np.array([9.0e-5]); bed = np.array([1.1e-4])
+    rc_a, _, _ = rbc.radar_grid({"waveform": a}, surf, bed, 2e-8, 0.0, 4,
+                                "hann")
+    rc_c, _, _ = rbc.radar_grid({"waveform": c}, surf, bed, 2e-8, 0.0, 4,
+                                "hann")
+    assert rc_a.waveform.construction == "analytic"
+    assert rc_c.waveform.construction == "chirp"
+    pa, pc = _p(rc_sim=rc_a), _p(rc_sim=rc_c)
+    assert rbc.chunk_rid(pa, 0, 14.0, True) == \
+        "low_full_pbed_proc_c00_srough_att14"
+    assert "waveform" not in rbc.chunk_meta(pa, 0, np.arange(8), 1, 8, 14.0,
+                                            True)
+    assert rbc.chunk_rid(pc, 0, 14.0, True).endswith("_wchirp")
+    m = rbc.chunk_meta(pc, 0, np.arange(8), 1, 8, 14.0, True)
+    assert m["waveform"] == {"construction": "chirp", "pulse_length_us": 20.0}

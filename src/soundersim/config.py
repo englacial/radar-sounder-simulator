@@ -23,6 +23,10 @@ class WaveformConfig(BaseModel):
     bandwidth: Optional[float] = None  # chirp bandwidth B (Hz)
     pulse_length: Optional[float] = None  # uncompressed pulse length T (s)
     window: Literal["none", "hann", "hamming"] = "hann"
+    # "analytic": stationary-phase windowed sinc (B*T -> inf limit, no
+    # pulse-length dependence); "chirp": explicit LFM matched filter with the
+    # real Fresnel-ripple sidelobe pedestal and exact +-T support.
+    construction: Literal["analytic", "chirp"] = "analytic"
     interp_bins: bool = False  # sub-bin linear splitting in the kernel binning
     incoherent_envelope: bool = False  # opt-in power-envelope conv (incoherent)
 

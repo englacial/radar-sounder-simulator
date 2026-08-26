@@ -1,0 +1,54 @@
+schema_version: 1
+
+meta:
+  name:   wc_pilot_haps_chirp
+  status: exploratory
+  role:   study
+  backs: >
+    Pulse-length sensitivity of the 14 km HAPS design point with the
+    EXPLICIT-CHIRP compressed pulse (waveform.construction = chirp, 2026-08-26):
+    haps_60mhz_chirp (20 us) vs haps_60mhz_5us_chirp (5 us), same physics as
+    wc_pilot_haps_pulse. The analytic windowed sinc has no pulse-length
+    dependence (the two fields differed by 6.6e-7); the explicit matched
+    filter carries the ~-53 dB Fresnel pedestal at 8-12 us for the 20 us
+    pulse and nothing past 5 us for the short one. Only the reference real
+    pass (p3_2017) is kept for context.
+
+run:
+  line: greenland_westcoast
+  segment: pilot
+
+  passes: [p3_2017, haps_14km_chirp, haps_14km_5us_chirp]
+
+  bed:
+    source: picked
+
+  extra_passes:
+    haps_14km_chirp:
+      carrier:    reference
+      altitude_m: 14000.0
+      instrument: haps_60mhz_chirp
+    haps_14km_5us_chirp:
+      carrier:    reference
+      altitude_m: 14000.0
+      instrument: haps_60mhz_5us_chirp
+
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse:
+      specular_fraction: 0.5
+      tilt_s0_deg: 3.0
+
+  physics:
+    att_db_per_km:     solve
+    surface_roughness: true
+    bed_roughness:
+      sigma_m: 0.10
+      corr_length_m: 0.886
+
+  processing:
+    chain:      standard
+    proc_cache: true
+    companion:  false
+
+  out_name: wc_pilot_haps_chirp
