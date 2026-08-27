@@ -1,0 +1,12 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+  [only-cache] wide_surface_bed (18.1 s recorded)
+  [only-cache-stale] firn_N10 (312.6 s recorded)
+  [only-cache-stale] firn_N20 (1290.7 s recorded)
+  [only-cache-stale] firn_N40 (5331.1 s recorded)
+  [only-cache-stale] firn_N80 (22251.5 s recorded)
+  [only-cache-stale] firn_N40_s0 (5333.1 s recorded)
+  [only-cache-stale] firn_N40_s1 (5330.0 s recorded)
+  [only-cache-stale] firn_N40_s2 (5335.6 s recorded)
+  [only-cache-stale] firn_N40_rough_mcords (5554.4 s recorded)
+  [only-cache-stale] firn_N40_rough_ar (5488.6 s recorded)
+  [ok] firn_N20_rough_mcords_exp  1840.8 s  chunks 4 facets/iface/chunk ~82086

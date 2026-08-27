@@ -1,0 +1,36 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+spec 'pilot_smoke_exp' [exploratory] <- config/experiments/pilot_smoke_exp.yaml
+calibration [greenland_geikie01_transit]: gamma_surface -10.00 dB (anomaly +1.04), A = 16 dB/km (manual)
+  regression: A 0.7 [-2.05, 3.32] dB/km, r 0.112, n 107
+picked bed: reference pass low (20140421_01_069/20140421_01_070/20140421_01_071), 9996 picks over 149.69 km, line gap frac 0.0000
+bed roughness: sigma 0.1 m, l 0.886 m; nadir coherent attenuation -9.2 dB -> G2 raised 9.2 dB (double-count guard)
+rssnr gamma: 114 samples (cache:/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a80f3fac14b3b6f96/outputs/greenland_geikie/rssnr_anchor.npz), snapshot GEAMAHQ7BRVPG9SQPK20, K -0.09 dB (K - K_phys 10.23 dB), segment G2 [-13.7 .. 2.2] dB (med -2.3), censored 7/114
+== low (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a80f3fac14b3b6f96/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a80f3fac14b3b6f96/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  picked bed: residual rms 25.6 m (mean -9.4, |max| 66.6), gaps 0.0000; along-track bed roughness 13.8 -> 24.2 m rms
+  reach: surface 5607 m, bed 1321 m -> ct ±5607 m; spacing 7.47 m; n_traces 669; n_samples_sim 4261
+  surface roughness: sigma 5.15 cm, l 5.276 m (non-fixture; chunk rid_sr0.0515_5.276_exp)
+  [ok] low_pilot_pbed_rssnr_proc_c00_srough_sr0.0515_5.276_exp_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  184.9 s  facets/iface ~3326874  n_samples 1066
+  [ok] low_pilot_pbed_rssnr_proc_c01_srough_sr0.0515_5.276_exp_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  167.7 s  facets/iface ~3336579  n_samples 1066
+  [ok] low_pilot_pbed_rssnr_proc_c02_srough_sr0.0515_5.276_exp_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  191.2 s  facets/iface ~3326874  n_samples 1066
+  [proc-cache write] low_pilot_pbed_rssnr_proc (11 MB)
+  processed: aperture 251 m (18 traces, half-angle 1.48 deg), 3 looks, mocomp dz rms 0.082 m
+  single-trace decomposition at s = 30.00 km (sim trace 334, measured trace 334): bed-window bed - surface returns +7.0 dB
+== high (pilot_pbed_rssnr_proc) ==
+  picked bed: residual rms 25.5 m (mean -9.3, |max| 66.6), gaps 0.0000; along-track bed roughness 13.8 -> 24.2 m rms
+  reach: surface 7200 m, bed 1905 m -> ct ±7200 m; spacing 11.20 m; n_traces 668; n_samples_sim 4237
+  surface roughness: sigma 5.15 cm, l 5.276 m (non-fixture; chunk rid_sr0.0515_5.276_exp)
+  [ok] high_pilot_pbed_rssnr_proc_c00_srough_sr0.0515_5.276_exp_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  120.2 s  facets/iface ~2248802  n_samples 1060
+  [ok] high_pilot_pbed_rssnr_proc_c01_srough_sr0.0515_5.276_exp_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  113.6 s  facets/iface ~2248802  n_samples 1060
+  [ok] high_pilot_pbed_rssnr_proc_c02_srough_sr0.0515_5.276_exp_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  145.0 s  facets/iface ~2253533  n_samples 1060
+  [proc-cache write] high_pilot_pbed_rssnr_proc (11 MB)
+  processed: aperture 356 m (25 traces, half-angle 1.47 deg), 3 looks, mocomp dz rms 0.058 m
+  single-trace decomposition at s = 29.99 km (sim trace 334, measured trace 334): bed-window bed - surface returns -16.5 dB
+  bed-return tail low: slope dB/us measured -0.37, picked_bed -4.79; excess at +2 us picked_bed +0.7; guard picked_bed FAIL (-0.6 dB)
+  bed-return tail high: slope dB/us measured -1.01, picked_bed -0.78; excess at +2 us picked_bed -6.1; guard picked_bed FAIL (-21.0 dB)
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a80f3fac14b3b6f96/outputs/greenland_geikie/pilot_smoke_exp/report.html
+clutter (midcol rel surf, meas/sim dB): low: -44.5/-68.0 [surface returns] | high: -41.7/-58.9 [surface returns]
+wall 932.33 s, maxrss 48798924 kB

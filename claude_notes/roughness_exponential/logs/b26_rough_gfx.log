@@ -1,0 +1,24 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+  [only-cache] wide_surface_bed (18.1 s recorded)
+  [only-cache-stale] firn_N10 (312.6 s recorded)
+  [only-cache-stale] firn_N20 (1290.7 s recorded)
+  [only-cache-stale] firn_N40 (5331.1 s recorded)
+  [only-cache-stale] firn_N80 (22251.5 s recorded)
+  [only-cache-stale] firn_N40_s0 (5333.1 s recorded)
+  [only-cache-stale] firn_N40_s1 (5330.0 s recorded)
+  [only-cache-stale] firn_N40_s2 (5335.6 s recorded)
+  [only-cache-stale] firn_N40_rough_mcords (5554.4 s recorded)
+  [only-cache-stale] firn_N40_rough_ar (5488.6 s recorded)
+  [skip-exists] firn_N20_rough_mcords_exp (1840.8 s recorded)
+  [ok] firn_N20_rough_mcords_gfx  1761.4 s  chunks 4 facets/iface/chunk ~82086
+  [only-cache] firn_N5_h1eff (78.2 s recorded)
+  [only-cache] firn_N10_h1eff (307.7 s recorded)
+  [only-cache] firn_N20_h1eff (1736.1 s recorded)
+  [only-cache] firn_N40_h1eff (5428.4 s recorded)
+  [only-cache] firn_N10_h1eff_peaks (329.0 s recorded)
+  [only-cache] firn_N20_h1eff_peaks (1308.4 s recorded)
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a80f3fac14b3b6f96/outputs/b26_comparison/report.html
+b26_comparison: wall 1766.9 s | surf med 0.00 bins | bed med 3.9 vs floor 4.0 | seam 0.114 | corr {'surface+bed': 0.677474308890369, 'firn_N10': 0.8900152614142898, 'firn_N20': 0.9455359907910171, 'firn_N40': 0.9491239180272607, 'firn_N80': 0.9325181478359303, 'firn_N40_s0': 0.9432222917349361, 'firn_N40_s1': 0.9482561523686162, 'firn_N40_s2': 0.9240829123120984, 'firn_N40_rough_mcords': 0.9485239771310735, 'firn_N40_rough_ar': 0.9484105879585444, 'firn_N20_rough_mcords_exp': 0.9231827699950882, 'firn_N20_rough_mcords_gfx': 0.9358226978564744, 'firn_N5_h1eff': 0.7583668612843356, 'firn_N10_h1eff': 0.9069014880578457, 'firn_N20_h1eff': 0.9627306030737014, 'firn_N40_h1eff': 0.9595004692344038, 'firn_N10_h1eff_peaks': 0.8994297720716797, 'firn_N20_h1eff_peaks': 0.9563742749345686, 'measured_qlook': 0.9951476402814101}
+  corr_qlook {'surface+bed': 0.6548207963839126, 'firn_N10': 0.8873576772009892, 'firn_N20': 0.9433751111245525, 'firn_N40': 0.945450404722142, 'firn_N80': 0.9339238648971054, 'firn_N40_s0': 0.9461204101046825, 'firn_N40_s1': 0.9502617963515705, 'firn_N40_s2': 0.9280242765828342, 'firn_N40_rough_mcords': 0.945012187503303, 'firn_N40_rough_ar': 0.9450244049226704, 'firn_N20_rough_mcords_exp': 0.9205503198500145, 'firn_N20_rough_mcords_gfx': 0.9319078623382667, 'firn_N5_h1eff': 0.7728911540511868, 'firn_N10_h1eff': 0.9095703624074226, 'firn_N20_h1eff': 0.9652455134529586, 'firn_N40_h1eff': 0.9602585880935922, 'firn_N10_h1eff_peaks': 0.9028264772747797, 'firn_N20_h1eff_peaks': 0.9590079783538424, 'measured': 0.9951476402814101}
+  band delta (20-70m) {'standard': {'surface+bed': -40.88, 'firn_N10': -12.65, 'firn_N20': -13.95, 'firn_N40': -17.13, 'firn_N80': -12.89, 'firn_N40_s0': -13.54, 'firn_N40_s1': -13.88, 'firn_N40_s2': -14.04, 'firn_N40_rough_mcords': -16.4, 'firn_N40_rough_ar': -16.36, 'firn_N20_rough_mcords_exp': -16.22, 'firn_N20_rough_mcords_gfx': -15.53, 'firn_N5_h1eff': -16.57, 'firn_N10_h1eff': -10.38, 'firn_N20_h1eff': -7.38, 'firn_N40_h1eff': -5.06, 'firn_N10_h1eff_peaks': -6.98, 'firn_N20_h1eff_peaks': -6.44, 'measured_qlook': -0.34}, 'qlook': {'surface+bed': -40.54, 'firn_N10': -12.31, 'firn_N20': -13.61, 'firn_N40': -16.79, 'firn_N80': -12.55, 'firn_N40_s0': -13.2, 'firn_N40_s1': -13.54, 'firn_N40_s2': -13.7, 'firn_N40_rough_mcords': -16.06, 'firn_N40_rough_ar': -16.02, 'firn_N20_rough_mcords_exp': -15.88, 'firn_N20_rough_mcords_gfx': -15.19, 'firn_N5_h1eff': -16.24, 'firn_N10_h1eff': -10.04, 'firn_N20_h1eff': -7.04, 'firn_N40_h1eff': -4.72, 'firn_N10_h1eff_peaks': -6.64, 'firn_N20_h1eff_peaks': -6.1, 'measured': 0.34}}
+wall 1773.43 s, maxrss 3530984 kB
