@@ -1336,6 +1336,26 @@ def proc_rid(p):
             + ("_hyb" if p.get("hybrid") else ""))
 
 
+def surface_roughness_record(surf_rough, preps):
+    """run_config.json entry: the fixture and, per pass, the RESOLVED
+    Gaussian pair the surface interface was simulated with."""
+    rec = {"model": "Gerekos 2023 Gaussian-ACF sub-facet roughness on the "
+                    "surface interface",
+           "fixture": {"sigma_m": SURF_ROUGH_FIXTURE[0],
+                       "corr_length_m": SURF_ROUGH_FIXTURE[1],
+                       "why": "C&S 2020 Fig. 11 mcords 0 m firn-layer "
+                              "inversion (representative, not a site "
+                              "measurement)"},
+           "passes": {}}
+    for key, p in preps.items():
+        pair, inf = resolve_surf_rough(surf_rough, p, info=True)
+        rec["passes"][key] = (None if pair is None else
+                              {"sigma_m": pair[0], "corr_length_m": pair[1],
+                               "fixture": surf_rough_is_fixture(pair),
+                               **({} if inf is None else inf)})
+    return rec
+
+
 def chunk_digests(p, runs_dir, n_chunks, att, surf_rough,
                   antenna=None, bed_rough=None, spec=None, gfix=None):
     """{chunk rid: sha256(meta_key)[:16]} over the pass's chunk caches.
@@ -1389,6 +1409,7 @@ def process_standard_cached(p, sim, out_dir, att, surf_rough,
     replay."""
     cdir = Path(out_dir) / PROC_CACHE_DIRNAME
     cdir.mkdir(parents=True, exist_ok=True)
+    surf_rough = resolve_surf_rough(surf_rough, p)
     rid = proc_rid(p)
     jp, npz_p = cdir / f"{rid}.json", cdir / f"{rid}.npz"
     meta = {"version": PROC_CACHE_VERSION, "pass": p["key"],
@@ -1812,6 +1833,48 @@ def chunk_scene(base, rows, ct, gamma=False):
     return sc
 
 
+SURF_ROUGH_FIXTURE = (rac.SURF_ROUGH_SIGMA_M, rac.SURF_ROUGH_CL_M)
+
+
+def surf_rough_pair(surf_rough):
+    """Normalise a surface-roughness setting to None (smooth) or a
+    (sigma_m, corr_length_m) pair. True = the C&S fixture."""
+    if not surf_rough:
+        return None
+    if surf_rough is True:
+        return SURF_ROUGH_FIXTURE
+    if isinstance(surf_rough, dict):
+        raise ValueError("surface roughness source not resolved for this "
+                         "pass (call resolve_surf_rough first)")
+    return (float(surf_rough[0]), float(surf_rough[1]))
+
+
+def surf_rough_is_fixture(pair):
+    return pair is not None and all(abs(a - b) < 1e-9 for a, b in
+                                    zip(pair, SURF_ROUGH_FIXTURE))
+
+
+def resolve_surf_rough(surf_rough, p, info=False):
+    """Per-pass surface roughness: bool / pair pass through; a
+    {source: atm_b1} dict resolves from config/roughness/atm_b1.yaml for
+    the line, the pass and its carrier (tools/surface_roughness_b1.py).
+    ``info`` also returns the provenance dict."""
+    if isinstance(surf_rough, dict):
+        if surf_rough.get("source") != "atm_b1":
+            raise ValueError(f"unknown surface roughness source "
+                             f"{surf_rough.get('source')!r}")
+        import surface_roughness_b1 as b1
+        theta = surf_rough.get("theta_c_deg")
+        tab = b1.load_table()
+        sig, l, inf = b1.resolve(LINE, p["key"], p["rc_sim"].f0,
+                                 tab["theta_c_deg"] if theta is None
+                                 else theta, tab)
+        pair = (round(sig, 6), round(l, 4))
+        return (pair, inf) if info else pair
+    pair = surf_rough_pair(surf_rough)
+    return (pair, None) if info else pair
+
+
 def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
             bed_rough=None, diffuse_exponent=1.0, gfix=None):
     """``antenna``: 'array' (the MCoRDS-like default) or 'isotropic' (the
@@ -1819,9 +1882,9 @@ def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
     attaches Gerekos sub-facet roughness to the BED interface (T1).
     ``gfix``: None (legacy) or the grazing-fix taper s_eff
     (GrazingFixConfig)."""
-    rcg = (RoughnessConfig(sigma_m=rac.SURF_ROUGH_SIGMA_M,
-                           corr_length_m=rac.SURF_ROUGH_CL_M)
-           if surf_rough else None)
+    srp = surf_rough_pair(surf_rough)
+    rcg = (RoughnessConfig(sigma_m=srp[0], corr_length_m=srp[1])
+           if srp else None)
     rcb = (RoughnessConfig(sigma_m=bed_rough[0], corr_length_m=bed_rough[1])
            if bed_rough else None)
     ant = rc_sim.antenna
@@ -1921,6 +1984,15 @@ def wave_meta(p):
                          "pulse_length_us": round(wv.pulse_length * 1e6, 4)}}
 
 
+def surf_rough_tag(surf_rough):
+    """Rid suffix for a NON-fixture surface roughness pair; the fixture
+    (and the boolean) keep the pre-existing ``_srough`` names."""
+    pair = surf_rough_pair(surf_rough)
+    if pair is None or surf_rough_is_fixture(pair):
+        return ""
+    return f"_sr{pair[0]:.4g}_{pair[1]:.4g}"
+
+
 def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
               spec=None, gfix=None):
     """Cache file name for one chunk. Non-default hypothesis knobs append a
@@ -1930,6 +2002,7 @@ def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
             f"_c{ci:02d}"
             + ("_hyb" if p.get("hybrid") else "")
             + ("_srough" if surf_rough else "")
+            + surf_rough_tag(surf_rough)
             + (f"_att{att:g}" if att != rac.ATT_DB_PER_KM else "")
             + ("" if antenna == ANT_DEFAULT else f"_ant{antenna}")
             + ("" if not bed_rough
@@ -1985,6 +2058,8 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
             **inst_ant_meta(p, antenna),
             **wave_meta(p),
             "window": p["window"], "surf_rough": bool(surf_rough),
+            **({} if not surf_rough_tag(surf_rough)
+               else {"surf_rough_sigma_l": list(surf_rough_pair(surf_rough))}),
             "kernel": KERNEL_VERSION,   # kernel numerics era (2026-08-24)
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
             "t0_us": round(p["rc_sim"].t0 * 1e6, 5),
@@ -1996,6 +2071,11 @@ def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
     """Chunked cached coherent surface+bed runs; assembled per-layer fields.
     Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...)."""
     chunks = chunk_rows(p)
+    surf_rough = resolve_surf_rough(surf_rough, p)
+    if surf_rough_tag(surf_rough):
+        print(f"  surface roughness: sigma {surf_rough[0] * 100:.2f} cm, "
+              f"l {surf_rough[1]:.3f} m (non-fixture; chunk rid"
+              f"{surf_rough_tag(surf_rough)})", flush=True)
     cfg = sim_cfg(p["rc_sim"], p["spacing"], att, surf_rough, antenna,
                   bed_rough, diffuse_exponent=spec[2] if spec else 1.0,
                   gfix=gfix)
@@ -3833,7 +3913,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     config = {
         "case": case, "line": LINE, "segment": segment,
         "n_traces": n_traces,
-        "att_db_per_km": att, "surf_rough": bool(surf_rough),
+        "att_db_per_km": att, "surf_rough": surf_rough,
+        "surface_roughness": surface_roughness_record(surf_rough, preps),
         "margin_us": MARGIN_US, "post_bed_window_us": POST_BED_US,
         "chunk_m": CHUNK_M, "picked_bed": bool(picked_bed),
         "gamma_rssnr": bool(gamma_rssnr),

@@ -1,0 +1,15 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+spec 'pilot_smoke_b1' [exploratory] <- config/experiments/pilot_smoke_b1.yaml
+calibration [greenland_geikie01_transit]: gamma_surface -10.00 dB (anomaly +1.04), A = 16 dB/km (manual)
+  regression: A 0.7 [-2.05, 3.32] dB/km, r 0.112, n 107
+picked bed: reference pass low (20140421_01_069/20140421_01_070/20140421_01_071), 9996 picks over 149.69 km, line gap frac 0.0000
+bed roughness: sigma 0.1 m, l 0.886 m; nadir coherent attenuation -9.2 dB -> G2 raised 9.2 dB (double-count guard)
+rssnr gamma: 114 samples (cache:/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/outputs/greenland_geikie/rssnr_anchor.npz), snapshot GEAMAHQ7BRVPG9SQPK20, K -0.09 dB (K - K_phys 10.23 dB), segment G2 [-13.7 .. 2.2] dB (med -2.3), censored 7/114
+== low (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  picked bed: residual rms 25.6 m (mean -9.4, |max| 66.6), gaps 0.0000; along-track bed roughness 13.8 -> 24.2 m rms
+  reach: surface 5607 m, bed 1321 m -> ct ±5607 m; spacing 7.47 m; n_traces 669; n_samples_sim 4261
+  surface roughness: sigma 1.35 cm, l 0.599 m (non-fixture; chunk rid_sr0.01353_0.5987)

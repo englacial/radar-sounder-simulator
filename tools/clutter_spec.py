@@ -96,6 +96,21 @@ class BedRoughness(_Base):
     extra_db: float = 0.0             # pilot-measured incoherent residual
 
 
+class SurfaceRoughnessPair(_Base):
+    """Explicit Gaussian pair on the surface interface (the fixture is
+    sigma 0.049474 m, l 2.982179 m)."""
+    sigma_m: float
+    corr_length_m: float
+
+
+class SurfaceRoughnessSource(_Base):
+    """Path B1: per line and per pass carrier, the effective Gaussian pair
+    tangent to the measured (OIB ATM) surface PSD at the Bragg wavenumber of
+    theta_c (config/roughness/atm_b1.yaml; tools/surface_roughness_b1.py)."""
+    source: Literal["atm_b1"]
+    theta_c_deg: float | None = None      # None -> the table's default (30)
+
+
 class SpecularDiffuse(_Base):
     specular_fraction: float
     tilt_s0_deg: float = 1.0
@@ -126,7 +141,10 @@ class Physics(_Base):
     # (manual value with provenance, or the RSSNR-vs-2H regression). No
     # attenuation rate lives in any spec or in code.
     att_db_per_km: float | Literal["solve"]
-    surface_roughness: bool = True
+    # bool (fixture on/off), an explicit {sigma_m, corr_length_m}, or
+    # {source: atm_b1[, theta_c_deg]} resolved per pass at run time
+    surface_roughness: (bool | SurfaceRoughnessPair
+                        | SurfaceRoughnessSource) = True
     antenna: Literal["array", "isotropic", "array8"] = "array"
     bed_roughness: BedRoughness | None = None
     # grazing-angle facet-lattice fix (coherent off-specular taper +
@@ -309,7 +327,13 @@ class RunSpec(_Base):
                       ref.specular_diffuse.tilt_s0_deg,
                       ref.specular_diffuse.diffuse_exponent)),
             "att": phy.att_db_per_km,
-            "surf_rough": phy.surface_roughness,
+            "surf_rough": (
+                phy.surface_roughness
+                if isinstance(phy.surface_roughness, bool)
+                else [phy.surface_roughness.sigma_m,
+                      phy.surface_roughness.corr_length_m]
+                if isinstance(phy.surface_roughness, SurfaceRoughnessPair)
+                else phy.surface_roughness.model_dump(exclude_none=True)),
             "antenna": phy.antenna,
             "bed_rough": (None if phy.bed_roughness is None else
                           (phy.bed_roughness.sigma_m,

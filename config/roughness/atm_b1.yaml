@@ -1,0 +1,58 @@
+schema_version: 1
+description: 'Path B1 effective-Gaussian surface roughness: measured 2-D surface PSDs per line (OIB ATM
+  L1B, claude_notes/atm_roughness), matched by tools/surface_roughness_b1.py at the Bragg wavenumber of
+  the clutter angle. PSD convention: int S d2k = sigma^2; Gaussian S = sigma^2 l^2/(4 pi) exp(-k^2 l^2/4);
+  power law S = A k^-beta; exponential S = sigma^2 l^2/(2 pi)(1+k^2 l^2)^-1.5.'
+theta_c_deg: 30.0
+rule: tangent
+spectra:
+  westcoast_2016:
+    family: powerlaw
+    A_m4: 2.9364e-05
+    beta: 3.2949
+    provenance: ILATM1B 2016-05-11, line-median per-block best-family S(k_B) at 5/1.5/1.0/0.75 m, power
+      law through the medians; pooled fit H=0.61
+  westcoast_2017:
+    family: powerlaw
+    A_m4: 3.3374e-05
+    beta: 2.5333
+    provenance: ILATM1B 2017-05-10, line-median per-block best-family S(k_B) at 5/1.5/1.0/0.75 m, power
+      law through the medians; pooled fit H=0.37
+  westcoast_2019:
+    family: powerlaw
+    A_m4: 4.8174e-05
+    beta: 3.0235
+    provenance: ILATM1B 2019-05-14, line-median per-block best-family S(k_B) at 5/1.5/1.0/0.75 m, power
+      law through the medians; pooled fit H=0.44
+  geikie_2014:
+    family: exponential
+    sigma_m: 0.0515
+    l_m: 5.276
+    provenance: ILATM1B 2014-04-21, exponential ACF best in 83 % of 1 km blocks (white residuals 79 %);
+      block-median sigma, l
+  getz_2016:
+    family: powerlaw
+    A_m4: 3.4148e-05
+    beta: 2.9928
+    provenance: ILATM1B 2016-11-05 (low pass), LINE-median per-block S(k_B); pooled fit is 3-5 dB higher
+      (H=0.37); 3 regimes along s, see note
+  getz_2016_pilot_window:
+    family: powerlaw
+    provenance: blocks s 30-40 km only (10 blocks; straddles the 32 km regime boundary) -- sensitivity,
+      not used by default
+    A_m4: 0.00030041
+    beta: 2.6688
+lines:
+  greenland_westcoast:
+    default: westcoast_2017
+    passes:
+      p3_2016: westcoast_2016
+      p3_2017: westcoast_2017
+      p3_2019: westcoast_2019
+  greenland_geikie01_transit:
+    default: geikie_2014
+  antarctica_getz:
+    default: getz_2016
+  antarctica_david:
+    default: getz_2016
+    note: no ATM on the line; Getz transferred (same season/ice type argument, plan caveat)

@@ -1,0 +1,53 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+spec 'pilot_smoke' [adopted] <- config/experiments/pilot_smoke.yaml
+calibration [greenland_westcoast]: gamma_surface -10.00 dB (anomaly +1.04), A = 34.26 dB/km (solved (RSSNR-vs-2H Theil-Sen regression))
+  regression: A 34.26 [29.62, 38.4] dB/km, r 0.845, n 74
+picked bed: reference pass p3_2017 (20170510_03_013/20170510_03_014), 6667 picks over 99.68 km, line gap frac 0.0000
+bed roughness: sigma 0.1 m, l 0.886 m; nadir coherent attenuation -9.2 dB -> G2 raised 9.2 dB (double-count guard)
+rssnr gamma: 84 samples (cache:/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/outputs/greenland_westcoast/rssnr_anchor.npz), snapshot GEAMAHQ7BRVPG9SQPK20, K -0.09 dB (K - K_phys 10.23 dB), segment G2 [6.2 .. 16.7] dB (med 12.5), censored 10/84
+== p3_2016 (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  picked bed: residual rms 66.6 m (mean -24.4, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 3297 m, bed 1068 m -> ct ±3297 m; spacing 7.47 m; n_traces 669; n_samples_sim 7989
+  [skip-exists] p3_2016_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (50.1 s recorded)
+  [skip-exists] p3_2016_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (49.1 s recorded)
+  [skip-exists] p3_2016_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (50.4 s recorded)
+  [proc-cache hit] p3_2016_pilot_pbed_rssnr_proc
+  processed: aperture 128 m (10 traces, half-angle 1.44 deg), 3 looks, mocomp dz rms 0.058 m
+  single-trace decomposition at s = 44.99 km (sim trace 334, measured trace 334): bed-window bed - surface returns +208.1 dB
+== p3_2017 (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 3623 m, bed 1081 m -> ct ±3623 m; spacing 7.47 m; n_traces 668; n_samples_sim 2649
+  [skip-exists] p3_2017_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (55.3 s recorded)
+  [skip-exists] p3_2017_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (55.3 s recorded)
+  [skip-exists] p3_2017_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (55.5 s recorded)
+  [proc-cache hit] p3_2017_pilot_pbed_rssnr_proc
+  processed: aperture 138 m (10 traces, half-angle 1.47 deg), 3 looks, mocomp dz rms 0.176 m
+  single-trace decomposition at s = 45.01 km (sim trace 335, measured trace 335): bed-window bed - surface returns +207.2 dB
+== p3_2019 (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  picked bed: residual rms 66.6 m (mean -24.4, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 3525 m, bed 1041 m -> ct ±3525 m; spacing 7.47 m; n_traces 669; n_samples_sim 5181
+  [skip-exists] p3_2019_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (54.1 s recorded)
+  [skip-exists] p3_2019_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (54.2 s recorded)
+  [skip-exists] p3_2019_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (54.2 s recorded)
+  [proc-cache hit] p3_2019_pilot_pbed_rssnr_proc
+  processed: aperture 134 m (10 traces, half-angle 1.47 deg), 3 looks, mocomp dz rms 0.171 m
+  single-trace decomposition at s = 45.01 km (sim trace 335, measured trace 335): bed-window bed - surface returns +208.5 dB
+  bed-return tail p3_2016: slope dB/us measured -2.75, picked_bed -6.05; excess at +2 us picked_bed -26.5; guard picked_bed ok (+185.3 dB)
+  bed-return tail p3_2017: slope dB/us measured -4.44, picked_bed -7.04; excess at +2 us picked_bed -4.7; guard picked_bed ok (+186.5 dB)
+  bed-return tail p3_2019: slope dB/us measured -7.69, picked_bed -6.78; excess at +2 us picked_bed -10.7; guard picked_bed ok (+186.5 dB)
+  [metrics] merged into 12 entries (had 12)
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/outputs/greenland_westcoast/pilot_smoke/report.html
+clutter (midcol rel surf, meas/sim dB): p3_2016: -48.9/-149.6 [surface returns] | p3_2017: -59.4/-117.5 [surface returns] | p3_2019: -59.0/-118.5 [surface returns]
+wall 8.65 s, maxrss 827656 kB
