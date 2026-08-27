@@ -1,0 +1,54 @@
+schema_version: 1
+
+meta:
+  name:   gk_pilot_b1
+  status: exploratory
+  role:   study
+  backs: >
+    Geikie pilot window, pilot_smoke physics, FOUR passes: the two real P-3
+    passes (2014 low, 2017 high), the std_benchmark design point haps_14km
+    (haps_60mhz: 60/15 MHz, 20 us, 8-el 0.5-lambda array, analytic pulse) at
+    14 km, and the HAPS design study's recommended hd_f300_n8_hann (300/100 MHz,
+    8-el Hann on 10 m, chirp T = 8 us) at 14 km. This is the path-B1
+    surface-roughness arm ({source: atm_b1}, resolved per pass carrier); gk_pilot_fixture is
+    the fixture arm, identical otherwise (claude_notes/roughness_b1_2026-08-26.md).
+
+run:
+  line:    greenland_geikie01_transit
+  segment: pilot
+  passes:  [low, high, haps_14km, hd_f300_n8_hann]
+
+  extra_passes:
+    haps_14km:
+      carrier:    reference
+      altitude_m: 14000.0
+      instrument: haps_60mhz
+    hd_f300_n8_hann:
+      carrier:    reference
+      altitude_m: 14000.0
+      instrument: hd_f300_n8_hann
+      facet_spacing_scale: 0.7      # as in the design-study ladder (wc_hd_*)
+
+  bed:
+    source: picked
+
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse:
+      specular_fraction: 0.5
+      tilt_s0_deg: 3.0
+
+  physics:
+    att_db_per_km:     solve
+    surface_roughness:
+      source: atm_b1
+    bed_roughness:
+      sigma_m: 0.10
+      corr_length_m: 0.886
+
+  processing:
+    chain:      standard
+    proc_cache: true
+    companion:  false
+
+  out_name: gk_pilot_b1

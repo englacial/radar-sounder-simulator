@@ -1,5 +1,5 @@
 warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
-spec 'pilot_smoke_b1' [exploratory] <- config/experiments/pilot_smoke_b1.yaml
+spec 'pilot_smoke_b1_th40' [exploratory] <- config/experiments/pilot_smoke_b1_th40.yaml
 calibration [greenland_geikie01_transit]: gamma_surface -10.00 dB (anomaly +1.04), A = 16 dB/km (manual)
   regression: A 0.7 [-2.05, 3.32] dB/km, r 0.112, n 107
 picked bed: reference pass low (20140421_01_069/20140421_01_070/20140421_01_071), 9996 picks over 149.69 km, line gap frac 0.0000
@@ -12,25 +12,25 @@ rssnr gamma: 114 samples (cache:/home/thomasteisberg/Documents/coherent-radar-si
   20.0 * np.log10(np.abs(
   picked bed: residual rms 25.6 m (mean -9.4, |max| 66.6), gaps 0.0000; along-track bed roughness 13.8 -> 24.2 m rms
   reach: surface 5607 m, bed 1321 m -> ct ±5607 m; spacing 7.47 m; n_traces 669; n_samples_sim 4261
-  surface roughness: sigma 1.35 cm, l 0.599 m (non-fixture; chunk rid_sr0.01353_0.5987)
-  [ok] low_pilot_pbed_rssnr_proc_c00_srough_sr0.01353_0.5987_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  247.7 s  facets/iface ~3326874  n_samples 1066
-  [ok] low_pilot_pbed_rssnr_proc_c01_srough_sr0.01353_0.5987_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  242.4 s  facets/iface ~3336579  n_samples 1066
-  [ok] low_pilot_pbed_rssnr_proc_c02_srough_sr0.01353_0.5987_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  223.0 s  facets/iface ~3326874  n_samples 1066
+  surface roughness: sigma 1.19 cm, l 0.466 m (non-fixture; chunk rid_sr0.01194_0.4659)
+  [ok] low_pilot_pbed_rssnr_proc_c00_srough_sr0.01194_0.4659_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  227.9 s  facets/iface ~3326874  n_samples 1066
+  [ok] low_pilot_pbed_rssnr_proc_c01_srough_sr0.01194_0.4659_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  228.3 s  facets/iface ~3336579  n_samples 1066
+  [ok] low_pilot_pbed_rssnr_proc_c02_srough_sr0.01194_0.4659_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  227.4 s  facets/iface ~3326874  n_samples 1066
   [proc-cache write] low_pilot_pbed_rssnr_proc (11 MB)
   processed: aperture 251 m (18 traces, half-angle 1.48 deg), 3 looks, mocomp dz rms 0.082 m
-  single-trace decomposition at s = 30.00 km (sim trace 334, measured trace 334): bed-window bed - surface returns +17.7 dB
+  single-trace decomposition at s = 30.00 km (sim trace 334, measured trace 334): bed-window bed - surface returns +10.9 dB
 == high (pilot_pbed_rssnr_proc) ==
   picked bed: residual rms 25.5 m (mean -9.3, |max| 66.6), gaps 0.0000; along-track bed roughness 13.8 -> 24.2 m rms
   reach: surface 7200 m, bed 1905 m -> ct ±7200 m; spacing 11.20 m; n_traces 668; n_samples_sim 4237
-  surface roughness: sigma 1.35 cm, l 0.599 m (non-fixture; chunk rid_sr0.01353_0.5987)
-  [ok] high_pilot_pbed_rssnr_proc_c00_srough_sr0.01353_0.5987_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  166.6 s  facets/iface ~2248802  n_samples 1060
-  [ok] high_pilot_pbed_rssnr_proc_c01_srough_sr0.01353_0.5987_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  165.4 s  facets/iface ~2248802  n_samples 1060
-  [ok] high_pilot_pbed_rssnr_proc_c02_srough_sr0.01353_0.5987_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  171.1 s  facets/iface ~2253533  n_samples 1060
+  surface roughness: sigma 1.19 cm, l 0.466 m (non-fixture; chunk rid_sr0.01194_0.4659)
+  [ok] high_pilot_pbed_rssnr_proc_c00_srough_sr0.01194_0.4659_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  150.7 s  facets/iface ~2248802  n_samples 1060
+  [ok] high_pilot_pbed_rssnr_proc_c01_srough_sr0.01194_0.4659_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  151.4 s  facets/iface ~2248802  n_samples 1060
+  [ok] high_pilot_pbed_rssnr_proc_c02_srough_sr0.01194_0.4659_att16_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  155.0 s  facets/iface ~2253533  n_samples 1060
   [proc-cache write] high_pilot_pbed_rssnr_proc (11 MB)
   processed: aperture 356 m (25 traces, half-angle 1.47 deg), 3 looks, mocomp dz rms 0.058 m
-  single-trace decomposition at s = 29.99 km (sim trace 334, measured trace 334): bed-window bed - surface returns -8.0 dB
-  bed-return tail low: slope dB/us measured -0.37, picked_bed -5.48; excess at +2 us picked_bed +2.5; guard picked_bed FAIL (+9.6 dB)
-  bed-return tail high: slope dB/us measured -1.01, picked_bed -1.23; excess at +2 us picked_bed -14.5; guard picked_bed FAIL (-12.1 dB)
-wrote /home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/outputs/greenland_geikie/pilot_smoke_b1/report.html
-clutter (midcol rel surf, meas/sim dB): low: -44.5/-69.6 [surface returns] | high: -41.7/-60.3 [surface returns]
-wall 1227.62 s, maxrss 48769252 kB
+  single-trace decomposition at s = 29.99 km (sim trace 334, measured trace 334): bed-window bed - surface returns -13.7 dB
+  bed-return tail low: slope dB/us measured -0.37, picked_bed -5.04; excess at +2 us picked_bed +2.9; guard picked_bed FAIL (+2.6 dB)
+  bed-return tail high: slope dB/us measured -1.01, picked_bed -0.86; excess at +2 us picked_bed -9.1; guard picked_bed FAIL (-17.9 dB)
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a546a4adcd12397d0/outputs/greenland_geikie/pilot_smoke_b1_th40/report.html
+clutter (midcol rel surf, meas/sim dB): low: -44.5/-67.6 [surface returns] | high: -41.7/-61.5 [surface returns]
+wall 1150.00 s, maxrss 48692904 kB

@@ -1,11 +1,3 @@
-== pilot_smoke greenland_westcoast 2026-08-27T05:32:56Z
-   exit 0 wall 8.65 s, maxrss 827656 kB
-== pilot_smoke_b1 greenland_westcoast 2026-08-27T05:33:05Z
-   exit 0 wall 863.65 s, maxrss 23567568 kB
-== pilot_smoke_b1 greenland_geikie01_transit 2026-08-27T05:47:28Z
-   exit 0 wall 1227.62 s, maxrss 48769252 kB
-== pilot_smoke_b1 antarctica_getz 2026-08-27T06:07:56Z
-   exit 0 wall 334.67 s, maxrss 15826636 kB
 == wc_hd_b1 greenland_westcoast 2026-08-27T06:13:58Z
    exit 0 wall 696.76 s, maxrss 23272308 kB
 == pilot_smoke_b1_th20 greenland_westcoast 2026-08-27T06:25:34Z
@@ -18,4 +10,3 @@
    exit 0 wall 1165.25 s, maxrss 48769028 kB
 == pilot_smoke_b1_th40 greenland_geikie01_transit 2026-08-27T07:24:34Z
    exit 0 wall 1150.00 s, maxrss 48692904 kB
-== gk_pilot_fixture greenland_geikie01_transit 2026-08-27T17:38:32Z

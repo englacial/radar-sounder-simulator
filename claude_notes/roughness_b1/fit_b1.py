@@ -169,6 +169,16 @@ def main():
             lines.append(f"| {sid} | {f / 1e6:.0f} | " + " | ".join(f"{v:+.1f}" for v in res) + " |")
         res = db(b1.gaussian_psd(2 * np.pi / lam, *FIX)) - db(S(2 * np.pi / lam))
         lines.append(f"| {sid} | fixture | " + " | ".join(f"{v:+.0f}" for v in res) + " |")
+    # band RMS of the measured spectra: sub-facet band (0.5-30 m) vs the wider 0.5-100 m
+    lines += ["", "# Measured band RMS height (cm): the sub-facet band 0.5-30 m (used by the variance rule) vs 0.5-100 m (includes DEM-carried facet tilt; NOT used)\n",
+              "| spectrum | sigma 0.5-30 m | sigma 0.5-100 m | ratio dB |", "|---|---|---|---|"]
+    for sid, sp in spectra.items():
+        S = b1.spectrum(sp)
+        v = {}
+        for lo in (30.0, 100.0):
+            kg = np.geomspace(2 * np.pi / lo, 2 * np.pi / 0.5, 4000)
+            v[lo] = float(np.trapezoid(S(kg) * 2 * np.pi * kg, kg))
+        lines.append(f"| {sid} | {100 * np.sqrt(v[30.0]):.2f} | {100 * np.sqrt(v[100.0]):.2f} | {db(v[100.0] / v[30.0]):+.1f} |")
     (OUT / "b1_table.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 
