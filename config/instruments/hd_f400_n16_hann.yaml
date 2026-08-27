@@ -1,0 +1,52 @@
+schema_version: 1
+name: hd_f400_n16_hann
+description: 'HAPS design study f400_n16_hann: 400 MHz / 200 MHz, 8 us, 16 el over
+  10.0 m (0.89 lam), taper hann'
+source:
+  kind: stated
+simulated:
+  frequency_Hz: 400000000.0
+  bandwidth_Hz: 200000000.0
+  pulse_length_s: 8.0e-06
+  window: hann
+  construction: chirp
+  antenna:
+    kind: array_tapered
+    n_elements: 16
+    spacing_lam: 0.8895
+    tx_weights:
+    - 0.0338
+    - 0.1305
+    - 0.2771
+    - 0.4539
+    - 0.6368
+    - 0.8013
+    - 0.9251
+    - 0.9915
+    - 0.9915
+    - 0.9251
+    - 0.8013
+    - 0.6368
+    - 0.4539
+    - 0.2771
+    - 0.1305
+    - 0.0338
+    rx_weights:
+    - 0.0338
+    - 0.1305
+    - 0.2771
+    - 0.4539
+    - 0.6368
+    - 0.8013
+    - 0.9251
+    - 0.9915
+    - 0.9915
+    - 0.9251
+    - 0.8013
+    - 0.6368
+    - 0.4539
+    - 0.2771
+    - 0.1305
+    - 0.0338
+    roll_source: none
+provenance: design study 2026-08-26, see claude_notes/haps_design_study/

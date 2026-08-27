@@ -1,0 +1,7 @@
+[
+  {"name": "f60_n5_uni",   "f0_MHz": 60,  "bw_MHz": 30,  "T_us": 8, "n_el": 5,  "taper": "uniform"},
+  {"name": "f60_n5_hann",  "f0_MHz": 60,  "bw_MHz": 30,  "T_us": 8, "n_el": 5,  "taper": "hann"},
+  {"name": "f150_n11_hann","f0_MHz": 150, "bw_MHz": 75,  "T_us": 8, "n_el": 11, "taper": "hann"},
+  {"name": "f225_n16_hann","f0_MHz": 225, "bw_MHz": 112, "T_us": 8, "n_el": 16, "taper": "hann"},
+  {"name": "f400_n16_hann","f0_MHz": 400, "bw_MHz": 200, "T_us": 8, "n_el": 16, "taper": "hann"}
+]

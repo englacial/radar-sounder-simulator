@@ -1,0 +1,103 @@
+schema_version: 1
+meta:
+  name: wc_hd_r2
+  status: exploratory
+  role: study
+  backs: HAPS 14 km design study round r2
+run:
+  line: greenland_westcoast
+  segment: pilot
+  passes:
+  - p3_2017
+  - hd_f225_n16_hann_err10
+  - hd_f225_n16_uni
+  - hd_f225_n16_hamm
+  - hd_f225_n11_hann
+  - hd_f225_n8_hann
+  - hd_f225_n5_hann
+  - hd_f150_n16_hann
+  - hd_f300_n16_hann
+  - hd_f225_n16_T10
+  - hd_f225_n16_T20
+  - hd_f225_n16_bw50
+  - hd_f225_n16_whamm
+  bed:
+    source: picked
+  extra_passes:
+    hd_f225_n16_hann_err10:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n16_hann_err10
+      facet_spacing_scale: 0.7
+    hd_f225_n16_uni:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n16_uni
+      facet_spacing_scale: 0.7
+    hd_f225_n16_hamm:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n16_hamm
+      facet_spacing_scale: 0.7
+    hd_f225_n11_hann:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n11_hann
+      facet_spacing_scale: 0.7
+    hd_f225_n8_hann:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n8_hann
+      facet_spacing_scale: 0.7
+    hd_f225_n5_hann:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n5_hann
+      facet_spacing_scale: 0.7
+    hd_f150_n16_hann:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f150_n16_hann
+      facet_spacing_scale: 0.7
+    hd_f300_n16_hann:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f300_n16_hann
+      facet_spacing_scale: 0.7
+    hd_f225_n16_T10:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n16_T10
+      facet_spacing_scale: 0.7
+    hd_f225_n16_T20:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n16_T20
+      facet_spacing_scale: 0.7
+    hd_f225_n16_bw50:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n16_bw50
+      facet_spacing_scale: 0.7
+    hd_f225_n16_whamm:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f225_n16_whamm
+      facet_spacing_scale: 0.7
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse:
+      specular_fraction: 0.5
+      tilt_s0_deg: 3.0
+  physics:
+    att_db_per_km: solve
+    surface_roughness: true
+    bed_roughness:
+      sigma_m: 0.1
+      corr_length_m: 0.886
+  processing:
+    chain: standard
+    proc_cache: true
+    companion: false
+    posting_div: 1
+  out_name: wc_hd_r2

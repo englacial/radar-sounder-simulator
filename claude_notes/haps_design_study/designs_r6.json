@@ -1,0 +1,10 @@
+[
+ {
+  "name": "f300_n8_hann",
+  "f0_MHz": 300,
+  "bw_MHz": 100,
+  "T_us": 8,
+  "n_el": 8,
+  "taper": "hann"
+ }
+]

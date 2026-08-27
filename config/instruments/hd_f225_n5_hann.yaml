@@ -1,0 +1,30 @@
+schema_version: 1
+name: hd_f225_n5_hann
+description: 'HAPS design study f225_n5_hann: 225 MHz / 112 MHz, 8 us, 5 el over 10.0
+  m (1.88 lam), taper hann'
+source:
+  kind: stated
+simulated:
+  frequency_Hz: 225000000.0
+  bandwidth_Hz: 112000000.0
+  pulse_length_s: 8.0e-06
+  window: hann
+  construction: chirp
+  antenna:
+    kind: array_tapered
+    n_elements: 5
+    spacing_lam: 1.8763
+    tx_weights:
+    - 0.25
+    - 0.75
+    - 1.0
+    - 0.75
+    - 0.25
+    rx_weights:
+    - 0.25
+    - 0.75
+    - 1.0
+    - 0.75
+    - 0.25
+    roll_source: none
+provenance: design study 2026-08-26, see claude_notes/haps_design_study/

@@ -1,0 +1,202 @@
+spec 'wc_hd_r2' [exploratory] <- config/experiments/wc_hd_r2.yaml
+calibration [greenland_westcoast]: gamma_surface -10.00 dB (anomaly +1.04), A = 34.26 dB/km (solved (RSSNR-vs-2H Theil-Sen regression))
+  regression: A 34.26 [29.62, 38.4] dB/km, r 0.845, n 74
+picked bed: reference pass p3_2017 (20170510_03_013/20170510_03_014), 6667 picks over 99.68 km, line gap frac 0.0000
+bed roughness: sigma 0.1 m, l 0.886 m; nadir coherent attenuation -9.2 dB -> G2 raised 9.2 dB (double-count guard)
+rssnr gamma: 84 samples (cache:/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/outputs/greenland_westcoast/rssnr_anchor.npz), snapshot GEAMAHQ7BRVPG9SQPK20, K -0.09 dB (K - K_phys 10.23 dB), segment G2 [6.2 .. 16.7] dB (med 12.5), censored 10/84
+== p3_2017 (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 3623 m, bed 1081 m -> ct ±3623 m; spacing 7.47 m; n_traces 668; n_samples_sim 2649
+  [skip-exists] p3_2017_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (55.7 s recorded)
+  [skip-exists] p3_2017_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (54.7 s recorded)
+  [skip-exists] p3_2017_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (56.0 s recorded)
+  [proc-cache hit] p3_2017_pilot_pbed_rssnr_proc
+  processed: aperture 138 m (10 traces, half-angle 1.47 deg), 3 looks, mocomp dz rms 0.176 m
+  single-trace decomposition at s = 45.01 km (sim trace 335, measured trace 335): bed-window bed - surface returns +207.2 dB
+== hd_f225_n16_hann_err10 (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [skip-exists] hd_f225_n16_hann_err10_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iacc125dcc_wchirp (26.5 s recorded)
+  [skip-exists] hd_f225_n16_hann_err10_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iacc125dcc_wchirp (26.0 s recorded)
+  [skip-exists] hd_f225_n16_hann_err10_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iacc125dcc_wchirp (26.2 s recorded)
+  [proc-cache hit] hd_f225_n16_hann_err10_pilot_pbed_rssnr_proc
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +50.5 dB
+== hd_f225_n16_uni (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [skip-exists] hd_f225_n16_uni_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia1e4c2110_wchirp (19.4 s recorded)
+  [skip-exists] hd_f225_n16_uni_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia1e4c2110_wchirp (19.4 s recorded)
+  [skip-exists] hd_f225_n16_uni_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia1e4c2110_wchirp (19.6 s recorded)
+  [proc-cache hit] hd_f225_n16_uni_pilot_pbed_rssnr_proc
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +50.6 dB
+== hd_f225_n16_hamm (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [skip-exists] hd_f225_n16_hamm_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaca452fbb_wchirp (25.6 s recorded)
+  [skip-exists] hd_f225_n16_hamm_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaca452fbb_wchirp (25.8 s recorded)
+  [skip-exists] hd_f225_n16_hamm_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaca452fbb_wchirp (25.5 s recorded)
+  [proc-cache hit] hd_f225_n16_hamm_pilot_pbed_rssnr_proc
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +50.5 dB
+== hd_f225_n11_hann (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [skip-exists] hd_f225_n11_hann_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia24cc226e_wchirp (24.7 s recorded)
+  [skip-exists] hd_f225_n11_hann_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia24cc226e_wchirp (24.5 s recorded)
+  [skip-exists] hd_f225_n11_hann_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia24cc226e_wchirp (24.7 s recorded)
+  [proc-cache hit] hd_f225_n11_hann_pilot_pbed_rssnr_proc
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +50.6 dB
+== hd_f225_n8_hann (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [skip-exists] hd_f225_n8_hann_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaea20520a_wchirp (22.2 s recorded)
+  [skip-exists] hd_f225_n8_hann_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaea20520a_wchirp (22.1 s recorded)
+  [skip-exists] hd_f225_n8_hann_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaea20520a_wchirp (22.2 s recorded)
+  [proc-cache hit] hd_f225_n8_hann_pilot_pbed_rssnr_proc
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +50.6 dB
+== hd_f225_n5_hann (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [skip-exists] hd_f225_n5_hann_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaacbf690b_wchirp (21.4 s recorded)
+  [skip-exists] hd_f225_n5_hann_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaacbf690b_wchirp (21.0 s recorded)
+  [skip-exists] hd_f225_n5_hann_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaacbf690b_wchirp (21.4 s recorded)
+  [proc-cache hit] hd_f225_n5_hann_pilot_pbed_rssnr_proc
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +37.0 dB
+== hd_f150_n16_hann (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 43.43 m; n_traces 668; n_samples_sim 5321
+  [skip-exists] hd_f150_n16_hann_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaa7af7774_wchirp (26.6 s recorded)
+  [skip-exists] hd_f150_n16_hann_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaa7af7774_wchirp (26.2 s recorded)
+  [skip-exists] hd_f150_n16_hann_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaa7af7774_wchirp (26.2 s recorded)
+  [proc-cache hit] hd_f150_n16_hann_pilot_pbed_rssnr_proc
+  processed: aperture 984 m (67 traces, half-angle 1.92 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +21.1 dB
+== hd_f300_n16_hann (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 30.71 m; n_traces 668; n_samples_sim 2661
+  [ok] hd_f300_n16_hann_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia31a350a6_wchirp  28.9 s  facets/iface ~457748  n_samples 666
+  [ok] hd_f300_n16_hann_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia31a350a6_wchirp  28.7 s  facets/iface ~457114  n_samples 666
+  [ok] hd_f300_n16_hann_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia31a350a6_wchirp  28.6 s  facets/iface ~458470  n_samples 666
+  [proc-cache write] hd_f300_n16_hann_pilot_pbed_rssnr_proc (7 MB)
+  processed: aperture 492 m (34 traces, half-angle 0.96 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +76.2 dB
+== hd_f225_n16_T10 (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [ok] hd_f225_n16_T10_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  26.3 s  facets/iface ~343125  n_samples 666
+  [ok] hd_f225_n16_T10_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  26.2 s  facets/iface ~342576  n_samples 666
+  [ok] hd_f225_n16_T10_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  26.2 s  facets/iface ~343750  n_samples 666
+  [proc-cache write] hd_f225_n16_T10_pilot_pbed_rssnr_proc (7 MB)
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +50.5 dB
+== hd_f225_n16_T20 (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [ok] hd_f225_n16_T20_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  25.8 s  facets/iface ~343125  n_samples 666
+  [ok] hd_f225_n16_T20_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  26.0 s  facets/iface ~342576  n_samples 666
+  [ok] hd_f225_n16_T20_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  25.9 s  facets/iface ~343750  n_samples 666
+  [proc-cache write] hd_f225_n16_T20_pilot_pbed_rssnr_proc (7 MB)
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns -8.0 dB
+== hd_f225_n16_bw50 (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [ok] hd_f225_n16_bw50_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  25.7 s  facets/iface ~343125  n_samples 666
+  [ok] hd_f225_n16_bw50_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  25.9 s  facets/iface ~342576  n_samples 666
+  [ok] hd_f225_n16_bw50_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  25.6 s  facets/iface ~343750  n_samples 666
+  [proc-cache write] hd_f225_n16_bw50_pilot_pbed_rssnr_proc (7 MB)
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +49.2 dB
+== hd_f225_n16_whamm (pilot_pbed_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 35.46 m; n_traces 668; n_samples_sim 3326
+  [ok] hd_f225_n16_whamm_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  25.7 s  facets/iface ~343125  n_samples 666
+  [ok] hd_f225_n16_whamm_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  25.7 s  facets/iface ~342576  n_samples 666
+  [ok] hd_f225_n16_whamm_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia3b2583fc_wchirp  25.6 s  facets/iface ~343750  n_samples 666
+  [proc-cache write] hd_f225_n16_whamm_pilot_pbed_rssnr_proc (7 MB)
+  processed: aperture 656 m (45 traces, half-angle 1.28 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.01 km (sim trace 335): bed-window bed - surface returns +50.5 dB
+  bed-return tail p3_2017: slope dB/us measured -4.44, picked_bed -7.04; excess at +2 us picked_bed -4.7; guard picked_bed ok (+186.5 dB)
+  bed-return tail hd_f225_n16_hann_err10: slope dB/us picked_bed -2.29; guard picked_bed ok (+38.3 dB)
+  bed-return tail hd_f225_n16_uni: slope dB/us picked_bed -2.19; guard picked_bed ok (+38.3 dB)
+  bed-return tail hd_f225_n16_hamm: slope dB/us picked_bed -2.30; guard picked_bed ok (+38.4 dB)
+  bed-return tail hd_f225_n11_hann: slope dB/us picked_bed -2.28; guard picked_bed ok (+38.3 dB)
+  bed-return tail hd_f225_n8_hann: slope dB/us picked_bed -2.28; guard picked_bed ok (+38.4 dB)
+  bed-return tail hd_f225_n5_hann: slope dB/us picked_bed -2.23; guard picked_bed ok (+28.6 dB)
+  bed-return tail hd_f150_n16_hann: slope dB/us picked_bed -5.20; guard picked_bed ok (+11.5 dB)
+  bed-return tail hd_f300_n16_hann: slope dB/us picked_bed -2.10; guard picked_bed ok (+61.3 dB)
+  bed-return tail hd_f225_n16_T10: slope dB/us picked_bed -2.31; guard picked_bed ok (+38.4 dB)
+  bed-return tail hd_f225_n16_T20: slope dB/us picked_bed -3.02; guard picked_bed FAIL (-17.5 dB)
+  bed-return tail hd_f225_n16_bw50: slope dB/us picked_bed -2.23; guard picked_bed ok (+39.2 dB)
+  bed-return tail hd_f225_n16_whamm: slope dB/us picked_bed -2.35; guard picked_bed ok (+37.8 dB)
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/outputs/greenland_westcoast/wc_hd_r2/report.html
+clutter (midcol rel surf, meas/sim dB): p3_2017: -59.4/-117.5 [surface returns] | hd_f225_n16_hann_err10: ----/-48.8 [surface returns] | hd_f225_n16_uni: ----/-50.2 [surface returns] | hd_f225_n16_hamm: ----/-48.7 [surface returns] | hd_f225_n11_hann: ----/-49.0 [surface returns] | hd_f225_n8_hann: ----/-49.2 [surface returns] | hd_f225_n5_hann: ----/-49.8 [surface returns] | hd_f150_n16_hann: ----/-44.5 [surface returns] | hd_f300_n16_hann: ----/-53.4 [surface returns] | hd_f225_n16_T10: ----/-48.8 [surface returns] | hd_f225_n16_T20: ----/-49.1 [surface returns] | hd_f225_n16_bw50: ----/-49.4 [surface returns] | hd_f225_n16_whamm: ----/-48.4 [surface returns]

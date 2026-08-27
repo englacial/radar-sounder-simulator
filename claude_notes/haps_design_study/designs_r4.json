@@ -1,0 +1,41 @@
+[
+ {
+  "name": "f60_n5_hann",
+  "f0_MHz": 60,
+  "bw_MHz": 30,
+  "T_us": 8,
+  "n_el": 5,
+  "taper": "hann"
+ },
+ {
+  "name": "f150_n11_hann",
+  "f0_MHz": 150,
+  "bw_MHz": 75,
+  "T_us": 8,
+  "n_el": 11,
+  "taper": "hann"
+ },
+ {
+  "name": "f225_n8_hann",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 8,
+  "taper": "hann"
+ },
+ {
+  "name": "f225_n1_iso",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 1
+ },
+ {
+  "name": "f300_n8_hann",
+  "f0_MHz": 300,
+  "bw_MHz": 100,
+  "T_us": 8,
+  "n_el": 8,
+  "taper": "hann"
+ }
+]

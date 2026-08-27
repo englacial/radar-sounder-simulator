@@ -1,0 +1,42 @@
+schema_version: 1
+name: hd_f150_n11_hann
+description: 'HAPS design study f150_n11_hann: 150 MHz / 75 MHz, 8 us, 11 el over
+  10.0 m (0.50 lam), taper hann'
+source:
+  kind: stated
+simulated:
+  frequency_Hz: 150000000.0
+  bandwidth_Hz: 75000000.0
+  pulse_length_s: 8.0e-06
+  window: hann
+  construction: chirp
+  antenna:
+    kind: array_tapered
+    n_elements: 11
+    spacing_lam: 0.50035
+    tx_weights:
+    - 0.067
+    - 0.25
+    - 0.5
+    - 0.75
+    - 0.933
+    - 1.0
+    - 0.933
+    - 0.75
+    - 0.5
+    - 0.25
+    - 0.067
+    rx_weights:
+    - 0.067
+    - 0.25
+    - 0.5
+    - 0.75
+    - 0.933
+    - 1.0
+    - 0.933
+    - 0.75
+    - 0.5
+    - 0.25
+    - 0.067
+    roll_source: none
+provenance: design study 2026-08-26, see claude_notes/haps_design_study/

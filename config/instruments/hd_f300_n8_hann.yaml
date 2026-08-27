@@ -1,0 +1,36 @@
+schema_version: 1
+name: hd_f300_n8_hann
+description: 'HAPS design study f300_n8_hann: 300 MHz / 100 MHz, 8 us, 8 el over 10.0
+  m (1.43 lam), taper hann'
+source:
+  kind: stated
+simulated:
+  frequency_Hz: 300000000.0
+  bandwidth_Hz: 100000000.0
+  pulse_length_s: 8.0e-06
+  window: hann
+  construction: chirp
+  antenna:
+    kind: array_tapered
+    n_elements: 8
+    spacing_lam: 1.42956
+    tx_weights:
+    - 0.117
+    - 0.4132
+    - 0.75
+    - 0.9698
+    - 0.9698
+    - 0.75
+    - 0.4132
+    - 0.117
+    rx_weights:
+    - 0.117
+    - 0.4132
+    - 0.75
+    - 0.9698
+    - 0.9698
+    - 0.75
+    - 0.4132
+    - 0.117
+    roll_source: none
+provenance: design study 2026-08-26, see claude_notes/haps_design_study/

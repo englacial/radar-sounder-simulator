@@ -1,0 +1,52 @@
+schema_version: 1
+name: hd_f225_n16_hamm
+description: 'HAPS design study f225_n16_hamm: 225 MHz / 112 MHz, 8 us, 16 el over
+  10.0 m (0.50 lam), taper hamming'
+source:
+  kind: stated
+simulated:
+  frequency_Hz: 225000000.0
+  bandwidth_Hz: 112000000.0
+  pulse_length_s: 8.0e-06
+  window: hann
+  construction: chirp
+  antenna:
+    kind: array_tapered
+    n_elements: 16
+    spacing_lam: 0.50035
+    tx_weights:
+    - 0.08
+    - 0.1198
+    - 0.2322
+    - 0.3979
+    - 0.5881
+    - 0.77
+    - 0.9121
+    - 0.9899
+    - 0.9899
+    - 0.9121
+    - 0.77
+    - 0.5881
+    - 0.3979
+    - 0.2322
+    - 0.1198
+    - 0.08
+    rx_weights:
+    - 0.08
+    - 0.1198
+    - 0.2322
+    - 0.3979
+    - 0.5881
+    - 0.77
+    - 0.9121
+    - 0.9899
+    - 0.9899
+    - 0.9121
+    - 0.77
+    - 0.5881
+    - 0.3979
+    - 0.2322
+    - 0.1198
+    - 0.08
+    roll_source: none
+provenance: design study 2026-08-26, see claude_notes/haps_design_study/

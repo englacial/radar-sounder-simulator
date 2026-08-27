@@ -1,0 +1,137 @@
+[
+ {
+  "name": "f225_n16_hann_err10",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 16,
+  "taper": "hann",
+  "taper_tx": "custom",
+  "taper_rx": "custom",
+  "tx_w": [
+   0.0349,
+   0.1412,
+   0.2863,
+   0.3947,
+   0.6945,
+   0.8371,
+   0.8754,
+   1.0491,
+   1.0276,
+   0.9523,
+   0.8036,
+   0.6716,
+   0.4204,
+   0.2726,
+   0.1242,
+   0.0358
+  ],
+  "rx_w": [
+   0.0339,
+   0.1267,
+   0.2555,
+   0.4422,
+   0.6374,
+   0.7792,
+   1.0448,
+   1.0913,
+   0.7227,
+   0.7504,
+   0.7873,
+   0.6099,
+   0.4636,
+   0.2832,
+   0.1581,
+   0.03
+  ]
+ },
+ {
+  "name": "f225_n16_uni",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 16,
+  "taper": "uniform"
+ },
+ {
+  "name": "f225_n16_hamm",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 16,
+  "taper": "hamming"
+ },
+ {
+  "name": "f225_n11_hann",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 11,
+  "taper": "hann"
+ },
+ {
+  "name": "f225_n8_hann",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 8,
+  "taper": "hann"
+ },
+ {
+  "name": "f225_n5_hann",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 5,
+  "taper": "hann"
+ },
+ {
+  "name": "f150_n16_hann",
+  "f0_MHz": 150,
+  "bw_MHz": 75,
+  "T_us": 8,
+  "n_el": 16,
+  "taper": "hann"
+ },
+ {
+  "name": "f300_n16_hann",
+  "f0_MHz": 300,
+  "bw_MHz": 100,
+  "T_us": 8,
+  "n_el": 16,
+  "taper": "hann"
+ },
+ {
+  "name": "f225_n16_T10",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 10,
+  "n_el": 16,
+  "taper": "hann"
+ },
+ {
+  "name": "f225_n16_T20",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 20,
+  "n_el": 16,
+  "taper": "hann"
+ },
+ {
+  "name": "f225_n16_bw50",
+  "f0_MHz": 225,
+  "bw_MHz": 50,
+  "T_us": 8,
+  "n_el": 16,
+  "taper": "hann"
+ },
+ {
+  "name": "f225_n16_whamm",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 16,
+  "taper": "hann",
+  "window": "hamming"
+ }
+]

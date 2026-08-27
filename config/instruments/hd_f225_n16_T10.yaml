@@ -1,0 +1,52 @@
+schema_version: 1
+name: hd_f225_n16_T10
+description: 'HAPS design study f225_n16_T10: 225 MHz / 112 MHz, 10 us, 16 el over
+  10.0 m (0.50 lam), taper hann'
+source:
+  kind: stated
+simulated:
+  frequency_Hz: 225000000.0
+  bandwidth_Hz: 112000000.0
+  pulse_length_s: 9.999999999999999e-06
+  window: hann
+  construction: chirp
+  antenna:
+    kind: array_tapered
+    n_elements: 16
+    spacing_lam: 0.50035
+    tx_weights:
+    - 0.0338
+    - 0.1305
+    - 0.2771
+    - 0.4539
+    - 0.6368
+    - 0.8013
+    - 0.9251
+    - 0.9915
+    - 0.9915
+    - 0.9251
+    - 0.8013
+    - 0.6368
+    - 0.4539
+    - 0.2771
+    - 0.1305
+    - 0.0338
+    rx_weights:
+    - 0.0338
+    - 0.1305
+    - 0.2771
+    - 0.4539
+    - 0.6368
+    - 0.8013
+    - 0.9251
+    - 0.9915
+    - 0.9915
+    - 0.9251
+    - 0.8013
+    - 0.6368
+    - 0.4539
+    - 0.2771
+    - 0.1305
+    - 0.0338
+    roll_source: none
+provenance: design study 2026-08-26, see claude_notes/haps_design_study/

@@ -1,0 +1,18 @@
+[
+ {
+  "name": "f225_n8_hann",
+  "f0_MHz": 225,
+  "bw_MHz": 112,
+  "T_us": 8,
+  "n_el": 8,
+  "taper": "hann"
+ },
+ {
+  "name": "f300_n11_hann",
+  "f0_MHz": 300,
+  "bw_MHz": 100,
+  "T_us": 8,
+  "n_el": 11,
+  "taper": "hann"
+ }
+]
