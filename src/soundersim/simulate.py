@@ -162,6 +162,8 @@ def _roughness_args(iface, facets, k_local, seed):
             "put it in the DEM (docs/roughness.md)")
     n_terms = n_terms_for((2.0 * k_local * rc.sigma_m) ** 2)
     phasors = speckle_phasors(len(facets.centers), seed)
+    if rc.acf != "gaussian":
+        return (rc.sigma_m, rc.corr_length_m, phasors, n_terms, rc.acf)
     return (rc.sigma_m, rc.corr_length_m, phasors, n_terms)
 
 

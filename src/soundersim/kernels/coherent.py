@@ -130,7 +130,7 @@ def lpa_contributions(position, centers, normals, areas, e1, e2, k, gamma,
 
 def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
                             gamma, sigma, l, phasors, n_terms, r_ref=0.0,
-                            taper_s=None, area_only=False):
+                            taper_s=None, area_only=False, acf="gaussian"):
     """Rough-facet LPA contributions (module docstring): the smooth response
     times exp(-sigma^2 K^2 / 2) plus the incoherent sqrt(D_Phi)*phi_r term
     with the same non-phase factor. Ops shared with ``lpa_contributions`` are
@@ -138,7 +138,9 @@ def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
     ``taper_s`` tapers the SMOOTH (specular) term only
     (``_off_specular_taper``; the D_Phi term is the physical off-specular
     channel and is never tapered); ``area_only`` selects the area-term-only
-    D_Phi (roughness.d_phi). Both default to the exact legacy program."""
+    D_Phi (roughness.d_phi) and ``acf`` its correlation function ("gaussian"
+    / "exponential", the latter area-only). All default to the exact legacy
+    program."""
     d = position - centers
     r = jnp.sqrt(jnp.sum(d * d, axis=-1))
     cos = jnp.sum(d * normals, axis=-1) / r
@@ -156,7 +158,7 @@ def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
     l2 = jnp.sqrt(jnp.sum(e2 * e2, axis=-1))
     kk = 2.0 * k * cos
     dp = d_phi(sigma, l, kk, 2.0 * k * d1 / l1, 2.0 * k * d2 / l2, l1, l2,
-               n_terms=n_terms, area_only=area_only)
+               n_terms=n_terms, area_only=area_only, acf=acf)
     # area-mask: zero-padded block slots have e1 = e2 = 0, so l1 = l2 = 0 and
     # the d_phi args are 0/0 -> NaN; the smooth term is killed by areas = 0
     # but the incoherent term has no area factor, so mask it explicitly
@@ -169,7 +171,7 @@ def rough_lpa_contributions(position, centers, normals, areas, e1, e2, k,
 @functools.lru_cache(maxsize=None)
 def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
                  rough_terms=0, gamma_facet=False, taper=False,
-                 rough_area=False):
+                 rough_area=False, rough_acf="gaussian"):
     """Jitted vmapped kernel for one static configuration; run-varying
     numbers (facet blocks, positions, reference ranges, k/gamma/t0/dt/c,
     pattern vector/params pv/pa/pb) are traced arguments, so value changes
@@ -182,7 +184,9 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
     phasor blocks and sigma/l scalars are then unused). ``taper`` (static:
     it changes the graph) enables the off-specular taper -- the traced
     ``tps`` scalar carries s_eff -- and ``rough_area`` the area-term-only
-    D_Phi; both False trace exactly the pre-grazing-fix program."""
+    D_Phi; both False trace exactly the pre-grazing-fix program.
+    ``rough_acf`` (static) selects the roughness correlation function
+    (roughness.d_phi); "gaussian" traces exactly the pre-option program."""
     n_seg = (2 if split_sides else 1) * n_samples  # +1 overflow slot for drops
     gfn = None if pattern == "isotropic" else gain_fn(pattern)
 
@@ -205,7 +209,7 @@ def _coherent_fn(split_sides, n_samples, interp, pattern="isotropic",
             if rough_terms:
                 contrib, r = rough_lpa_contributions(
                     p, fc, fn, fa, f1, f2, kf, gam, sig, lc, fph, rough_terms,
-                    r_ref=rr, taper_s=ts, area_only=rough_area)
+                    r_ref=rr, taper_s=ts, area_only=rough_area, acf=rough_acf)
             else:
                 contrib, r = lpa_contributions(p, fc, fn, fa, f1, f2, kf, gam,
                                                r_ref=rr, taper_s=ts)
@@ -260,10 +264,12 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     ``pattern``: None (isotropic) or an ``antenna.pattern_args`` tuple --
     per-facet fields then carry the g**2 two-way antenna weighting.
     ``roughness``: None (smooth, the default -- traces the pre-roughness
-    program) or ``(sigma_m, corr_length_m, phasors, n_terms)`` with
+    program) or ``(sigma_m, corr_length_m, phasors, n_terms[, acf])`` with
     ``phasors`` the (n_facets,) complex per-facet speckle phasors
-    (``roughness.speckle_phasors``) and ``n_terms`` the static series length
-    (``roughness.n_terms_for``); see the module docstring.
+    (``roughness.speckle_phasors``), ``n_terms`` the static series length
+    (``roughness.n_terms_for``) and ``acf`` the correlation function
+    ("gaussian" default; "exponential" requires ``d_phi_area``); see the
+    module docstring.
     ``taper_s``/``d_phi_area``: the grazing-fix pair (config.py
     ``GrazingFixConfig``) -- the coherent off-specular taper s_eff (None =
     off) and the area-term-only D_Phi; the defaults trace exactly the
@@ -312,8 +318,13 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
     pv = jnp.asarray(np.asarray(pv, np.float32))
     pa, pb = np.asarray(pa, np.float32), np.asarray(pb, np.float32)
 
+    acf = "gaussian"
     if roughness is not None:
-        sigma, lcorr, phasors, n_terms = roughness
+        sigma, lcorr, phasors, n_terms, *rest = roughness
+        acf = rest[0] if rest else "gaussian"
+        if acf == "exponential" and not d_phi_area:
+            raise ValueError("roughness acf='exponential' requires the "
+                             "area-only D_Phi (d_phi_area / grazing fix)")
         ph = np.pad(np.asarray(phasors, np.complex64)[order], (0, pad))
         phb = jnp.asarray(ph.reshape(n_blocks, block_size))
     else:
@@ -338,7 +349,7 @@ def coherent_cluttergram(positions, u_ct, centers, normals, areas, e1, e2, *,
 
     fn = _coherent_fn(split_sides, int(n_samples), bool(interp_bins), kind,
                       int(n_terms), gamma_facet, taper_s is not None,
-                      bool(d_phi_area))
+                      bool(d_phi_area), acf)
     hist, dropped = fn(pos, uct, pv, r_ref, jnp.asarray(off), n_win,
                        cb, nb, ab, e1b, e2b, phb, gfb,
                        np.float32(sigma), np.float32(lcorr),

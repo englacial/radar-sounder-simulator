@@ -9,7 +9,7 @@ At interface **crossings** (transmission into the firn/ice), the mean-field atte
 
 ## Usage
 
-Roughness is a per-interface property (coherent mode only):
+Roughness is a per-interface property (coherent mode only); `acf` selects the correlation function (`"gaussian"` default, `"exponential"` see below):
 
 ```python
 from soundersim.config import DemInterface, RoughnessConfig, SimConfig
@@ -25,6 +25,19 @@ cfg = SimConfig(
 ```
 
 `roughness=None` (the default) is guaranteed **bit-identical** to the pre-roughness kernels — the rough branch is never traced, so unused it costs nothing. `sigma_m=0` through the rough branch is also bit-identical (regression-gated).
+
+## Exponential correlation function (`acf: exponential`)
+
+The Gaussian ACF `ρ(r) = exp(−r²/l²)` has a spectrum that collapses like `exp(−k²l²/4)` beyond `k ~ 2/l`, so a Gaussian pair fitted to a measured surface at one Bragg wavenumber is tens to hundreds of dB low half an octave away (path B1, `claude_notes/roughness_b1_2026-08-26.md`). Measured ice-sheet surfaces (OIB ATM, `config/roughness/atm_b1.yaml`) and the Culberg & Schroeder 2020 firn-layer inversion (their Fig. 11, an S-IEM inversion with an **exponential** ACF) have `k⁻³`-like tails instead. `RoughnessConfig(acf="exponential")` switches the correlation function to `ρ(r) = exp(−r/l)`.
+
+The ACF enters the Gerekos model only through the incoherent variance (Eq. 21): `D_Φ = e^{−σ²K²} Σ_m (σ²K²)^m/m! · I_m`, with `I_m` the Fourier transform of `ρ^m` over the facet. The coherent term (Eq. 20, `exp(−σ²K²/2)`) and the Poisson weights are ACF-independent, so the nadir coherent power is **unchanged** by the option. In the area-only (grazing-fix) form `I_m ≈ L_x L_y · W_m(k_B)`, `k_B² = A0² + B0²` (the transverse Bragg wavenumber, `2k sinθ` for a horizontal facet), and
+
+- Gaussian: `W_m = π (l²/m) exp(−k_B² l²/(4m))`
+- exponential: `W_m = 2π (l/m)² [1 + (k_B l/m)²]^(−3/2)` (Culberg & Schroeder 2020 Eq. 6 with `n = m`, `L = l`; the m-th term of the infinite-surface Kirchhoff law, `roughness.acf_spectrum`).
+
+The finite-facet edge terms (Eqs. 22–24, `_f_factor`) have no closed form for the exponential ACF, so **`acf: exponential` requires the area-only D_Φ**, i.e. `SimConfig.grazing_fix` (the config validator, `d_phi` and the kernels all refuse otherwise). The same fixed series length (`n_terms_for`) suffices: `W_m` decays only polynomially in `k_B` but the Poisson weight still truncates the series in `m` (measured < 10⁻⁹ dB vs a 1000-term float64 sum for `σ²K²` up to 3 and `k_B l` up to 84, i.e. 400 MHz, `l = 5 m`, 90°).
+
+**Validity / when to use.** The option is the right choice whenever the measured (σ, l) come from an exponential-ACF fit: the geikie ATM line (best family in 83 % of blocks; `{source: atm_exponential}` in an experiment spec hands the table's σ, l straight to the kernel) and the C&S Fig. 11 firn-layer profile (`tools/run_b26_comparison.py --rough-runs N:src:exponential`). Its validity is *narrower* than the Gaussian's at the same (σ/λ, l/λ): an exponential surface has divergent slope variance, so the Kirchhoff tangent-plane assumption behind Eq. 21 is weakest at small `l/λ` and wide angles. Facet-in-isolation Monte Carlo with exponential surfaces (300 realisations/point, `claude_notes/roughness_exponential_2026-08-27.md`): on a 16×28 λ facet (edge remainder negligible) the area-only D_Φ is within 0.5 dB at nadir and at 50° for `l ≤ 2 λ` and all `σ ≤ 0.2 λ` (0.9 dB at `l = 4 λ`, `σ = 0.2 λ`); at 30° it is low by +0.8 (l = 0.5 λ) to +2.5 dB (l = 2 λ) and +6 dB at `l = 4 λ` at small σ, shrinking with σ — a finite-facet spectral-window effect on the steep part of the k⁻³ spectrum, not the tangent-plane failure. On the paper's 4×7 λ facet the dropped O(1) edge remainder adds 2–3 dB more at 30° and up to −5 dB at nadir for `l = 4 λ` (the facet is one correlation length wide); that remainder is what the grazing fix removes on purpose (facet-size dependent), so use the option with facets many λ across, as the campaign runs are (27–70 m facets at 1.5–5 m λ; firn layers ~12 λ_firn). The Kirchhoff degradation for a divergent-slope surface shows up as a σ-dependent +1 dB drift at 50° for `l ≤ λ` on the small facet. For self-affine (power-law) surfaces neither ACF is right; an exponential fit through the Bragg band (`westcoast_*_exp` entries) is within ±0.5 dB of a `β ≈ 2.5–3.3` power law over 0.75–5 m, far better than any Gaussian, but it is a fit, not the family.
 
 ## Validity limits
 

@@ -1339,8 +1339,9 @@ def proc_rid(p):
 def surface_roughness_record(surf_rough, preps):
     """run_config.json entry: the fixture and, per pass, the RESOLVED
     Gaussian pair the surface interface was simulated with."""
-    rec = {"model": "Gerekos 2023 Gaussian-ACF sub-facet roughness on the "
-                    "surface interface",
+    rec = {"model": "Gerekos 2023 sub-facet roughness on the surface "
+                    "interface (acf gaussian: exact finite-facet series; "
+                    "exponential: area-only law, docs/roughness.md)",
            "fixture": {"sigma_m": SURF_ROUGH_FIXTURE[0],
                        "corr_length_m": SURF_ROUGH_FIXTURE[1],
                        "why": "C&S 2020 Fig. 11 mcords 0 m firn-layer "
@@ -1351,6 +1352,7 @@ def surface_roughness_record(surf_rough, preps):
         pair, inf = resolve_surf_rough(surf_rough, p, info=True)
         rec["passes"][key] = (None if pair is None else
                               {"sigma_m": pair[0], "corr_length_m": pair[1],
+                               "acf": surf_rough_acf(pair),
                                "fixture": surf_rough_is_fixture(pair),
                                **({} if inf is None else inf)})
     return rec
@@ -1837,8 +1839,9 @@ SURF_ROUGH_FIXTURE = (rac.SURF_ROUGH_SIGMA_M, rac.SURF_ROUGH_CL_M)
 
 
 def surf_rough_pair(surf_rough):
-    """Normalise a surface-roughness setting to None (smooth) or a
-    (sigma_m, corr_length_m) pair. True = the C&S fixture."""
+    """Normalise a surface-roughness setting to None (smooth), a
+    (sigma_m, corr_length_m) Gaussian pair, or a (sigma_m, corr_length_m,
+    acf) triple for a non-Gaussian ACF. True = the C&S fixture."""
     if not surf_rough:
         return None
     if surf_rough is True:
@@ -1846,26 +1849,39 @@ def surf_rough_pair(surf_rough):
     if isinstance(surf_rough, dict):
         raise ValueError("surface roughness source not resolved for this "
                          "pass (call resolve_surf_rough first)")
-    return (float(surf_rough[0]), float(surf_rough[1]))
+    pair = (float(surf_rough[0]), float(surf_rough[1]))
+    acf = surf_rough[2] if len(surf_rough) > 2 else "gaussian"
+    return pair if acf == "gaussian" else pair + (str(acf),)
+
+
+def surf_rough_acf(pair):
+    return "gaussian" if pair is None or len(pair) == 2 else pair[2]
 
 
 def surf_rough_is_fixture(pair):
-    return pair is not None and all(abs(a - b) < 1e-9 for a, b in
-                                    zip(pair, SURF_ROUGH_FIXTURE))
+    return (pair is not None and surf_rough_acf(pair) == "gaussian"
+            and all(abs(a - b) < 1e-9 for a, b in
+                    zip(pair[:2], SURF_ROUGH_FIXTURE)))
 
 
 def resolve_surf_rough(surf_rough, p, info=False):
-    """Per-pass surface roughness: bool / pair pass through; a
-    {source: atm_b1} dict resolves from config/roughness/atm_b1.yaml for
-    the line, the pass and its carrier (tools/surface_roughness_b1.py).
+    """Per-pass surface roughness: bool / pair / (sigma, l, acf) pass
+    through; a {source: atm_b1} dict resolves the effective Gaussian pair
+    from config/roughness/atm_b1.yaml for the line, the pass and its carrier
+    (tools/surface_roughness_b1.py); {source: atm_exponential} takes the
+    table's exponential-ACF entry directly as (sigma, l, 'exponential').
     ``info`` also returns the provenance dict."""
     if isinstance(surf_rough, dict):
-        if surf_rough.get("source") != "atm_b1":
+        if surf_rough.get("source") not in ("atm_b1", "atm_exponential"):
             raise ValueError(f"unknown surface roughness source "
                              f"{surf_rough.get('source')!r}")
         import surface_roughness_b1 as b1
         theta = surf_rough.get("theta_c_deg")
         tab = b1.load_table()
+        if surf_rough["source"] == "atm_exponential":
+            sig, l, inf = b1.resolve_exponential(LINE, p["key"], tab)
+            pair = (round(sig, 6), round(l, 4), "exponential")
+            return (pair, inf) if info else pair
         sig, l, inf = b1.resolve(LINE, p["key"], p["rc_sim"].f0,
                                  tab["theta_c_deg"] if theta is None
                                  else theta, tab)
@@ -1883,7 +1899,8 @@ def sim_cfg(rc_sim, spacing, att, surf_rough, antenna=ANT_DEFAULT,
     ``gfix``: None (legacy) or the grazing-fix taper s_eff
     (GrazingFixConfig)."""
     srp = surf_rough_pair(surf_rough)
-    rcg = (RoughnessConfig(sigma_m=srp[0], corr_length_m=srp[1])
+    rcg = (RoughnessConfig(sigma_m=srp[0], corr_length_m=srp[1],
+                           acf=surf_rough_acf(srp))
            if srp else None)
     rcb = (RoughnessConfig(sigma_m=bed_rough[0], corr_length_m=bed_rough[1])
            if bed_rough else None)
@@ -1990,7 +2007,9 @@ def surf_rough_tag(surf_rough):
     pair = surf_rough_pair(surf_rough)
     if pair is None or surf_rough_is_fixture(pair):
         return ""
-    return f"_sr{pair[0]:.4g}_{pair[1]:.4g}"
+    return (f"_sr{pair[0]:.4g}_{pair[1]:.4g}"
+            + ("" if surf_rough_acf(pair) == "gaussian"
+               else f"_{surf_rough_acf(pair)[:3]}"))
 
 
 def chunk_rid(p, ci, att, surf_rough, antenna=ANT_DEFAULT, bed_rough=None,
@@ -2059,7 +2078,11 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
             **wave_meta(p),
             "window": p["window"], "surf_rough": bool(surf_rough),
             **({} if not surf_rough_tag(surf_rough)
-               else {"surf_rough_sigma_l": list(surf_rough_pair(surf_rough))}),
+               else {"surf_rough_sigma_l":
+                     list(surf_rough_pair(surf_rough)[:2])}),
+            **({} if surf_rough_acf(surf_rough_pair(surf_rough)) == "gaussian"
+               else {"surf_rough_acf":
+                     surf_rough_acf(surf_rough_pair(surf_rough))}),
             "kernel": KERNEL_VERSION,   # kernel numerics era (2026-08-24)
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
             "t0_us": round(p["rc_sim"].t0 * 1e6, 5),

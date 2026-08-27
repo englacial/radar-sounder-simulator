@@ -119,6 +119,7 @@ from run_opr_comparison import _db  # noqa: E402
 
 from soundersim import firn  # noqa: E402
 from soundersim.config import (AntennaConfig, DemInterface, FacetConfig,  # noqa: E402
+                               GrazingFixConfig,
                                Medium, RadarConfig, SimConfig, WaveformConfig)
 from soundersim.opr import (CACHE_DIR, fetch_bedmachine_window,  # noqa: E402
                             fill_nodata_nearest, frame_scene, load_bottom_pick,
@@ -157,6 +158,13 @@ RANDOM_RUNS = ((40, 0), (40, 1), (40, 2))
 # the remaining hypothesis for the mid-band (20-70 m) deficit: diffuse
 # scattering from sub-wavelength layer roughness.
 ROUGH_RUNS = ((40, "mcords"), (40, "ar"))
+# A rough_runs entry is (n, src) -- Gaussian ACF, legacy kernels, the cached
+# keys above -- or (n, src, acf[, grazing_fix]) with acf "gaussian" /
+# "exponential" (docs/roughness.md: the C&S Fig. 11 profile is an
+# exponential-ACF S-IEM inversion). The exponential ACF exists only in the
+# area-only D_Phi, so it implies the grazing fix (GrazingFixConfig default
+# s_eff); a Gaussian entry with grazing_fix=True runs the same fix for an
+# apples-to-apples comparison. Keys: firn_N{n}_rough_{src}[_exp][_gfx].
 # Effective-contrast runs (hypothesis H1, claude_notes/b26_gap_hypotheses.md):
 # equal-placement N=40 exactly like firn_N40, but the layer permittivities are
 # SYNTHETIC -- built so each interface's plain Fresnel contrast equals the
@@ -494,6 +502,22 @@ def _rough_table(fname):
     return dict(zip(cols, data.T))
 
 
+def _rough_run(r):
+    """(n, src, acf, grazing_fix) of a rough_runs entry."""
+    n, src, *opt = r
+    acf = opt[0] if opt else "gaussian"
+    gfx = bool(opt[1]) if len(opt) > 1 else acf == "exponential"
+    if acf == "exponential" and not gfx:
+        raise ValueError("acf exponential needs the grazing fix (area-only "
+                         "D_Phi)")
+    return int(n), str(src), acf, gfx
+
+
+def _rough_key(n, src, acf, gfx):
+    return (f"firn_N{n}_rough_{src}" + ("" if acf == "gaussian" else "_exp")
+            + ("_gfx" if gfx and acf == "gaussian" else ""))
+
+
 def layer_roughness(depths, source):
     """(sigma_m, corr_length_m) arrays at ``depths`` for inversion ``source``
     ('ar' | 'mcords' | 'joint'), linearly interpolated from the C&S 2020
@@ -539,7 +563,7 @@ def peak_depths(n, lam):
     return B26_CORE.peak_depths(n, lam, rfi.RES_FIRN_M)
 
 
-def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
+def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None, gfix=False):
     """Coherent B26 firn stack config (the investigation's layered_cfg on the
     real surface DEM): offset interfaces at surface - depth_i, point-sampled
     Kovacs permittivities, substrate = eps(deepest + 1 m), every firn medium
@@ -554,9 +578,11 @@ def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
     addendum) puts the optimal uniform value at 8-12 dB/km; 15 dB/km is adopted
     for consistency with the ice medium rather than tuned to the residual.
 
-    ``rough`` = (sigma_m[], corr_length_m[]) per layer attaches Gerekos-2023
-    sub-facet roughness to every INTERNAL layer interface (the air-firn
-    surface stays smooth); None -> the exact smooth path.
+    ``rough`` = (sigma_m[], corr_length_m[][, acf]) per layer attaches
+    Gerekos-2023 sub-facet roughness to every INTERNAL layer interface (the
+    air-firn surface stays smooth); None -> the exact smooth path. ``gfix``
+    enables the grazing fix (GrazingFixConfig default; required by the
+    exponential ACF).
 
     ``eps`` = len(depths)+1 permittivities (firn0..firn_{N-1}, substrate)
     replacing the point-sampled ones (effective_contrast_eps, H1); None -> the
@@ -567,7 +593,8 @@ def firn_cfg(rc_sim, spacing, depths, rough=None, eps=None):
     media, ifaces = firn.firn_stack(depths, e, ATT_DB_PER_KM, roughness=rough)
     return SimConfig(mode="coherent", split_sides=False, radar=rc_sim,
                      facets=FacetConfig(spacing=spacing), media=media,
-                     interfaces=ifaces)
+                     interfaces=ifaces,
+                     grazing_fix=GrazingFixConfig() if gfix else None)
 
 
 def _n_facets(dem_shape, spacing):
@@ -764,9 +791,10 @@ def pilot_and_budget(fsub, cfg_dict, rc_sim, spacing, out):
             proj[f"firn_N{n}"] = rate_firn * work * _padwork(n)
         for n, s in cfg_dict.get("random_runs", ()):
             proj[f"firn_N{n}_s{s}"] = rate_firn * work * _padwork(n)
-        for n, src in cfg_dict.get("rough_runs", ()):
-            proj[f"firn_N{n}_rough_{src}"] = (rate_firn * work * _padwork(n)
-                                              * ROUGH_COST_FACTOR)
+        for r in cfg_dict.get("rough_runs", ()):
+            proj[_rough_key(*_rough_run(r))] = (rate_firn * work
+                                                * _padwork(r[0])
+                                                * ROUGH_COST_FACTOR)
         for n in cfg_dict.get("eff_runs", ()):  # same cost as the smooth run
             proj[f"firn_N{n}_h1eff"] = rate_firn * work * _padwork(n)
         for n in cfg_dict.get("peak_runs", ()):     # placement is free
@@ -904,8 +932,8 @@ def run_keys(cfg_dict):
     return (["wide_surface_bed"]
             + [f"firn_N{n}" for n in sorted(cfg_dict["layer_counts"])]
             + [f"firn_N{n}_s{s}" for n, s in cfg_dict.get("random_runs", ())]
-            + [f"firn_N{n}_rough_{src}"
-               for n, src in cfg_dict.get("rough_runs", ())]
+            + [_rough_key(*_rough_run(r))
+               for r in cfg_dict.get("rough_runs", ())]
             + [f"firn_N{n}_h1eff" for n in cfg_dict.get("eff_runs", ())]
             + [f"firn_N{n}_h1eff_peaks"
                for n in cfg_dict.get("peak_runs", ())])
@@ -985,16 +1013,19 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         bed_cfg(rc_sim, spacing),
         {**meta_common, "ct": cfg_dict["ct_wide"], "kind": "surface+bed"},
         runs_dir, force, allow_sim=only is None or "wide_surface_bed" in only)
+    # (key, depths, rough, eps[, grazing_fix])
     run_list = [(f"firn_N{n}", rfi.equal_depths(n), None, None)
                 for n in sorted(cfg_dict["layer_counts"])]
     run_list += [(f"firn_N{n}_s{s}", rfi.random_depths(n, s), None, None)
                  for n, s in cfg_dict.get("random_runs", ())]
     rough_spec = {}
-    for n, src in cfg_dict.get("rough_runs", ()):
+    for r in cfg_dict.get("rough_runs", ()):
+        n, src, acf, gfx = _rough_run(r)
         d = rfi.equal_depths(n)
         sig, cl = layer_roughness(d, src)
-        rough_spec[f"firn_N{n}_rough_{src}"] = {
-            "source": src, "n_layers": int(n),
+        rough_spec[_rough_key(n, src, acf, gfx)] = {
+            "source": src, "n_layers": int(n), "acf": acf,
+            "grazing_fix": gfx,
             "csv": [f"tests/fixtures/firn/fig11{c}" for c in
                     ("a_rms_height.csv", "b_correlation_length.csv")],
             "columns": [f"rms_height_{src}_m", f"corr_length_{src}_m"],
@@ -1008,7 +1039,9 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
                     "layer depths and clamped beyond the profile's 0-90 m "
                     "range; applied to every INTERNAL layer interface only "
                     "(Gerekos 2023 rough-facet response, docs/roughness.md)"}
-        run_list.append((f"firn_N{n}_rough_{src}", d, (sig, cl), None))
+        run_list.append((_rough_key(n, src, acf, gfx), d,
+                         (sig, cl) if acf == "gaussian" else (sig, cl, acf),
+                         None, gfx))
     eff_spec = {}
     for n in cfg_dict.get("eff_runs", ()):
         d = rfi.equal_depths(n)
@@ -1079,17 +1112,21 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         run_list.append((f"firn_N{n}_h1eff_peaks", d, None, eps_pk))
     assert [k for k, *_ in run_list] == run_keys(cfg_dict)[1:]
     firn_runs = {}
-    for key, depths, rough, eps_eff in run_list:
+    for key, depths, rough, eps_eff, *gfx in run_list:
+        gfx = bool(gfx and gfx[0])
         rmeta = {} if rough is None else {
             "roughness": [key.split("_rough_")[-1],
                           round(float(rough[0].sum()), 6),
                           round(float(rough[1].sum()), 4)]}
+        if gfx:  # non-legacy: fork the cache key
+            rmeta["grazing_fix"] = {"s_eff": GrazingFixConfig().s_eff}
         if eps_eff is not None:
             rmeta["eps"] = [EFF_METHOD, round(float(np.sum(eps_eff)), 6)]
         if key.endswith("_h1eff_peaks"):
             rmeta["placement"] = PEAK_METHOD
         diag, arrs = run_sim(
-            key, chunks, firn_cfg(rc_sim, spacing, depths, rough, eps_eff),
+            key, chunks, firn_cfg(rc_sim, spacing, depths, rough, eps_eff,
+                                  gfix=gfx),
             {**meta_common, "ct": cfg_dict["ct_firn"], "kind": key,
              "n_chunks": len(chunks), "att_db_per_km": ATT_DB_PER_KM,
              "depths_hash": round(float(depths.sum()), 4), **rmeta},
@@ -1477,8 +1514,9 @@ def run_all(out_root=None, n_traces=N_TRACES, ct_wide=CT_WIDE, ct_firn=CT_FIRN,
         rm = metrics["roughness_band_delta"]
         rnote = (
             " ROUGH-LAYER RUNS: every INTERNAL firn layer interface of the "
-            "equal-placement stack carries Gerekos-2023 sub-facet Gaussian "
-            "roughness (docs/roughness.md) with sigma / correlation length "
+            "equal-placement stack carries Gerekos-2023 sub-facet "
+            "roughness (docs/roughness.md; Gaussian ACF, or exponential ACF "
+            "with the grazing fix for the _exp keys) with sigma / correlation length "
             "interpolated at that layer's depth from the Culberg & Schroeder "
             "2020 Fig. 11 inverted layer-roughness profiles (0-90 m, clamped "
             "below; tests/fixtures/firn/fig11a,b), "
@@ -2084,6 +2122,10 @@ def main():
                          "--no-pilot (the pilot itself simulates)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--n-traces", type=int, default=None)
+    ap.add_argument("--rough-runs", default=None,
+                    help="override ROUGH_RUNS: comma list of n:src[:acf[:gfx]] "
+                         "(e.g. 40:mcords,20:mcords:exponential,"
+                         "20:mcords:gaussian:1)")
     args = ap.parse_args()
     only = _parse_only(args.only)
     no_pilot = args.no_pilot or only is not None
@@ -2091,6 +2133,11 @@ def main():
           if (args.report_only or no_pilot) else {})
     if args.n_traces:
         kw["n_traces"] = args.n_traces
+    if args.rough_runs:
+        kw["rough_runs"] = tuple(
+            _rough_run(tuple(int(v) if i in (0, 3) else v
+                             for i, v in enumerate(e.split(":"))))[:4]
+            for e in args.rough_runs.split(","))
     run_all(do_pilot=not (args.report_only or no_pilot), force=args.force,
             only=only, **kw)
 

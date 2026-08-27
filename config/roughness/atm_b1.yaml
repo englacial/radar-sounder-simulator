@@ -2,7 +2,8 @@ schema_version: 1
 description: 'Path B1 effective-Gaussian surface roughness: measured 2-D surface PSDs per line (OIB ATM
   L1B, claude_notes/atm_roughness), matched by tools/surface_roughness_b1.py at the Bragg wavenumber of
   the clutter angle. PSD convention: int S d2k = sigma^2; Gaussian S = sigma^2 l^2/(4 pi) exp(-k^2 l^2/4);
-  power law S = A k^-beta; exponential S = sigma^2 l^2/(2 pi)(1+k^2 l^2)^-1.5.'
+  power law S = A k^-beta; exponential S = sigma^2 l^2/(2 pi)(1+k^2 l^2)^-1.5. Exponential entries
+  are also usable directly by the kernel (source atm_exponential -> RoughnessConfig acf: exponential).'
 theta_c_deg: 30.0
 rule: tangent
 spectra:
@@ -42,6 +43,29 @@ spectra:
       not used by default
     A_m4: 0.00030041
     beta: 2.6688
+  westcoast_2016_exp:
+    family: exponential
+    sigma_m: 0.0478
+    l_m: 10.0
+    provenance: 'NOT the best family (power law, beta 3.29): least-squares exponential PSD through the
+      same line-median per-block S(k_B) at 5/1.5/1.0/0.75 m the power law is fit through, l bounded to
+      <= 10 m (the beta ~ 3 tail is the l -> inf limit of the exponential PSD); residual -0.5..+0.3 dB.
+      Direct block-median exponential fit (l < 500 m, 45 blocks) 7.1 cm / 28 m for reference. For the
+      acf: exponential comparison on a self-affine surface (claude_notes/roughness_exponential_2026-08-27.md)'
+  westcoast_2017_exp:
+    family: exponential
+    sigma_m: 0.0333
+    l_m: 1.038
+    provenance: 'NOT the best family (power law, beta 2.53): least-squares exponential PSD through the
+      line-median per-block S(k_B) at 5/1.5/1.0/0.75 m; residual -0.4..+0.4 dB. Direct block-median
+      exponential fit (l < 500 m, 80 blocks) 10.7 cm / 10.3 m (+3/+1/0/0 dB at the four points)'
+  westcoast_2019_exp:
+    family: exponential
+    sigma_m: 0.0377
+    l_m: 2.59
+    provenance: 'NOT the best family (power law, beta 3.02): least-squares exponential PSD through the
+      line-median per-block S(k_B) at 5/1.5/1.0/0.75 m; residual < 0.1 dB. Direct block-median exponential
+      fit (l < 500 m, 95 blocks) 10.1 cm / 21.8 m'
 lines:
   greenland_westcoast:
     default: westcoast_2017
@@ -49,6 +73,12 @@ lines:
       p3_2016: westcoast_2016
       p3_2017: westcoast_2017
       p3_2019: westcoast_2019
+    exponential:    # alternate mapping for source atm_exponential (acf: exponential)
+      default: westcoast_2017_exp
+      passes:
+        p3_2016: westcoast_2016_exp
+        p3_2017: westcoast_2017_exp
+        p3_2019: westcoast_2019_exp
   greenland_geikie01_transit:
     default: geikie_2014
   antarctica_getz:

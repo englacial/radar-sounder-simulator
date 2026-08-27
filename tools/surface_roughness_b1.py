@@ -16,6 +16,11 @@ is the Gaussian-ACF rho(r) = exp(-r^2/l^2) the kernel assumes, so the
 first-order (m = 1) Gerekos incoherent term equals the measured PSD at k_B
 exactly and follows its slope nearby. Spectra live in
 config/roughness/atm_b1.yaml (provenance there).
+
+``resolve_exponential`` (source ``atm_exponential``) instead hands an
+exponential-ACF table entry (sigma, l) straight to the kernel's
+``acf: exponential`` option (docs/roughness.md) -- no effective pair, no
+carrier or clutter-angle dependence -- and refuses power-law entries.
 """
 from __future__ import annotations
 
@@ -65,15 +70,42 @@ def tangent_pair(S, k_b):
     return float(sigma), float(l)
 
 
-def resolve(line, pass_key, f0_hz, theta_c_deg=30.0, table=None):
-    """Effective (sigma_m, l_m) for one pass of one line at carrier f0.
-    Returns (sigma, l, info) where info records the spectrum used."""
-    tab = table or load_table()
+def _spectrum_id(tab, line, pass_key, alt=None):
     ln = tab["lines"].get(line)
     if ln is None:
         raise KeyError(f"atm_b1: no surface spectrum for line {line!r} "
                        f"(have {sorted(tab['lines'])})")
-    sid = ln.get("passes", {}).get(pass_key, ln["default"])
+    if alt is not None and alt in ln:      # alternate-family mapping
+        ln = {**ln, **ln[alt]}
+    return ln.get("passes", {}).get(pass_key, ln["default"])
+
+
+def resolve_exponential(line, pass_key, table=None):
+    """(sigma_m, l_m, info) of the line's/pass's EXPONENTIAL-ACF entry, for
+    the kernel's acf='exponential' option. Uses the line's ``exponential``
+    alternate mapping when present (surfaces whose best family is a power
+    law but carry an exponential fit for comparison), else the default
+    mapping; a non-exponential entry is an error (use atm_b1 for those)."""
+    tab = table or load_table()
+    sid = _spectrum_id(tab, line, pass_key, alt="exponential")
+    spec = tab["spectra"][sid]
+    if spec["family"] != "exponential":
+        raise ValueError(f"atm_exponential: spectrum {sid!r} for line "
+                         f"{line!r} pass {pass_key!r} is {spec['family']}, "
+                         "not exponential -- no exponential-ACF entry; use "
+                         "source atm_b1 (effective Gaussian) instead")
+    sig, l = float(spec["sigma_m"]), float(spec["l_m"])
+    info = {"spectrum": sid, "family": "exponential", "acf": "exponential",
+            "rule": "direct (sigma, l) of the exponential-ACF fit",
+            "provenance": spec.get("provenance")}
+    return sig, l, info
+
+
+def resolve(line, pass_key, f0_hz, theta_c_deg=30.0, table=None):
+    """Effective (sigma_m, l_m) for one pass of one line at carrier f0.
+    Returns (sigma, l, info) where info records the spectrum used."""
+    tab = table or load_table()
+    sid = _spectrum_id(tab, line, pass_key)
     spec = tab["spectra"][sid]
     k_b = bragg_k(f0_hz, theta_c_deg)
     sigma, l = tangent_pair(spectrum(spec), k_b)

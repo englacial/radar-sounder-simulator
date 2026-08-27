@@ -215,20 +215,22 @@ def firn_stack(depths, eps, att_db_per_km, roughness=None):
     media air + firn0..firn_{N-1} + substrate (firn + substrate attenuating at
     ``att_db_per_km`` one-way), interfaces surface + OffsetInterface L{i} at
     surface - depths[i]. ``eps`` must have len(depths)+1 entries
-    (firn0..firn_{N-1}, substrate); ``roughness`` = (sigma_m[], corr_len_m[])
-    per layer attaches sub-facet roughness to every INTERNAL interface (the
-    air-firn surface stays smooth)."""
+    (firn0..firn_{N-1}, substrate); ``roughness`` = (sigma_m[], corr_len_m[]
+    [, acf]) per layer attaches sub-facet roughness to every INTERNAL
+    interface (the air-firn surface stays smooth); ``acf`` "gaussian"
+    (default) or "exponential" (RoughnessConfig.acf)."""
     e = np.asarray(eps, np.float64)
     if e.shape != (len(depths) + 1,):
         raise ValueError(f"eps must have {len(depths) + 1} entries")
-    sig, cl = (None, None) if roughness is None else roughness
+    sig, cl, *acf = (None, None) if roughness is None else roughness
+    acf = acf[0] if acf else "gaussian"
     media = [Medium(name="air", eps_r=1.0)]
     ifaces = [DemInterface(name="surface")]
     for i, d in enumerate(depths):
         media.append(Medium(name=f"firn{i}", eps_r=float(e[i]),
                             attenuation_db_per_km=att_db_per_km))
         rc = None if roughness is None else RoughnessConfig(
-            sigma_m=float(sig[i]), corr_length_m=float(cl[i]))
+            sigma_m=float(sig[i]), corr_length_m=float(cl[i]), acf=acf)
         ifaces.append(OffsetInterface(name=f"L{i}", reference="surface",
                                       offset=-float(d), roughness=rc))
     media.append(Medium(name="substrate", eps_r=float(e[-1]),

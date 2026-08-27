@@ -35,7 +35,10 @@ tests/test_roughness.py.
 
 Convergence (Appendix B): absolutely convergent; ``n_terms_for`` sizes the
 fixed term count from sigma^2 K^2 (10 terms cover sigma <= lam/20; ~250 at
-sigma ~ lam -- overshooting is cheap, terms decay factorially).
+sigma ~ lam -- overshooting is cheap, terms decay factorially). The same
+count serves the exponential ACF (docs/roughness.md): its W_m decays only
+polynomially in k_B but the Poisson weight still truncates the series in m
+(measured < 1e-6 dB at the campaign's sigma^2 K^2 and k_B l up to 2 k l).
 """
 
 import functools
@@ -104,7 +107,25 @@ def _f_factor(m, a0, edge, l):
     return 1.0 - ey2 * jnp.cos(edge * a0) + _SQRT_PI * (t1 - t2)
 
 
-def d_phi(sigma, l, K, A0, B0, Lx, Ly, *, n_terms, area_only=False):
+ACFS = ("gaussian", "exponential")
+
+
+def acf_spectrum(m, kb, l, acf="gaussian"):
+    """W_m(k_B): 2-D Fourier transform of rho(r)^m at transverse wavenumber
+    ``kb`` (int W_m d2k = (2 pi)^2; the m-th term of the infinite-surface
+    Kirchhoff law, Gerekos 2023 Appendix C / Culberg & Schroeder 2020 Eq 6).
+    gaussian rho = exp(-r^2/l^2): pi (l^2/m) exp(-kb^2 l^2 / (4 m));
+    exponential rho = exp(-r/l): 2 pi (l/m)^2 [1 + (kb l/m)^2]^(-3/2)."""
+    if acf == "gaussian":
+        return np.pi * (l * l) / m * jnp.exp(-(kb * kb) * (l * l) / (4.0 * m))
+    if acf == "exponential":
+        q = (l / m) ** 2
+        return 2.0 * np.pi * q * (1.0 + (kb * kb) * q) ** -1.5
+    raise ValueError(f"unknown roughness acf {acf!r} (want one of {ACFS})")
+
+
+def d_phi(sigma, l, K, A0, B0, Lx, Ly, *, n_terms, area_only=False,
+          acf="gaussian"):
     """Incoherent phase-response variance D_Phi (Eq 21), units of area^2.
 
     Broadcasts over facet arrays (K/A0/B0/Lx/Ly); ``sigma``/``l`` are
@@ -125,7 +146,20 @@ def d_phi(sigma, l, K, A0, B0, Lx, Ly, *, n_terms, area_only=False):
     unphysically dominant at grazing incidence. With area_only,
     sigma0 = (k^2/pi) gamma^2 cos^2 D_Phi/(Lx Ly) is exactly facet-size
     invariant (the grazing-fix option; config.py ``GrazingFixConfig``).
+
+    ``acf`` (static): "gaussian" (Eqs 21-24, the default -- the program is
+    untouched) or "exponential" (rho = exp(-r/l)): each area-only term then
+    carries W_m = 2 pi (l/m)^2 [1 + (k_B l/m)^2]^(-3/2) (``acf_spectrum``;
+    C&S 2020 Eq 6 with n = m) instead of the Gaussian pi (l^2/m)
+    exp(-k_B^2 l^2/(4m)). The exponential ACF has no closed form for the
+    finite-facet edge terms (Eqs 22-24), so it REQUIRES ``area_only``.
     """
+    if acf not in ACFS:
+        raise ValueError(f"unknown roughness acf {acf!r} (want one of {ACFS})")
+    if acf == "exponential" and not area_only:
+        raise ValueError("acf='exponential' needs the area-only D_Phi "
+                         "(grazing fix): the Gerekos finite-facet edge terms "
+                         "exist only for the Gaussian ACF")
     x = (sigma * K) ** 2
     shape = jnp.broadcast_shapes(jnp.shape(x), jnp.shape(A0), jnp.shape(B0),
                                  jnp.shape(Lx), jnp.shape(Ly), jnp.shape(l))
@@ -136,7 +170,10 @@ def d_phi(sigma, l, K, A0, B0, Lx, Ly, *, n_terms, area_only=False):
 
     def body(acc, mf):
         logp = mf * logx - gammaln(mf + 1.0) - x
-        if area_only:
+        if area_only and acf == "exponential":
+            term = jnp.exp(logp) * acf_spectrum(
+                mf, jnp.sqrt(A0 * A0 + B0 * B0), l, "exponential") * Lx * Ly
+        elif area_only:
             term = jnp.exp(logp - (A0 * A0 + B0 * B0) * (l * l) / (4.0 * mf)) \
                 * (np.pi * (l * l) / mf) * Lx * Ly
         else:

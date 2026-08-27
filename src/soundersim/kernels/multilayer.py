@@ -96,7 +96,7 @@ cached repeats (measured numbers: the ``refraction_joint`` report case).
 
 Sub-facet roughness (Gerekos et al. 2023, roughness.py, docs/roughness.md;
 coherent mode only): ``roughness=(sigma_m, corr_length_m, phasors,
-n_terms)`` applies to the TARGET reflection exactly as in coherent.py, but
+n_terms[, acf])`` applies to the TARGET reflection exactly as in coherent.py, but
 with the LOCAL-medium wavenumber and refracted arrival direction: K = 2 k_j
 cos(theta_t), in-plane coefficients A0 = 2 k_j (rhat.e1)/|e1| etc., and the
 incoherent term sqrt(D_Phi)*phi_r carries the full non-phase factor
@@ -335,7 +335,7 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                   pattern="isotropic", refraction="sequential",
                   joint_newton=6, joint_backtrack=4, rough_terms=0,
                   rough_cross=False, gamma_facet=False, diffuse=False,
-                  taper=False, rough_area=False):
+                  taper=False, rough_area=False, rough_acf="gaussian"):
     """Build (once per static configuration) the jitted vmapped kernel.
 
     Everything numeric that can vary between runs is a traced argument:
@@ -545,7 +545,8 @@ def _refracted_fn(coherent, split_sides, n_samples, n_crossed,
                     kk = 2.0 * kj * cos_t
                     dp = d_phi(sig_t, l_t, kk, 2.0 * kj * d1 / l1,
                                2.0 * kj * d2 / l2, l1, l2,
-                               n_terms=rough_terms, area_only=rough_area)
+                               n_terms=rough_terms, area_only=rough_area,
+                               acf=rough_acf)
                     # area-mask: zero-padded block slots (f1 = f2 = 0) make
                     # the d_phi args 0/0 -> NaN; the smooth term is killed by
                     # fa = 0 but the incoherent term has no area factor
@@ -702,8 +703,13 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
 
     blk = (blocks(target.centers), blocks(target.normals),
            blocks(target.areas), blocks(target.e1), blocks(target.e2))
+    acf = "gaussian"
     if roughness is not None:
-        sig_t, l_t, phasors, n_terms = roughness
+        sig_t, l_t, phasors, n_terms, *rest = roughness
+        acf = rest[0] if rest else "gaussian"
+        if acf == "exponential" and not d_phi_area:
+            raise ValueError("roughness acf='exponential' requires the "
+                             "area-only D_Phi (d_phi_area / grazing fix)")
         ph = np.pad(np.asarray(phasors, np.complex64)[order], (0, pad))
         blk = blk + (jnp.asarray(ph.reshape(n_blocks, block_size)),)
     else:
@@ -748,7 +754,7 @@ def refracted_cluttergram(positions, u_ct, target, crossed, eps_leg, att_leg,
                        int(joint_newton), int(joint_backtrack), int(n_terms),
                        crossed_sigma is not None, gamma_facet,
                        diffuse is not None, taper_s is not None,
-                       bool(d_phi_area))
+                       bool(d_phi_area), acf)
     with jax.enable_x64():
         hist, dropped = fn(pos, uct, pv, jnp.asarray(off), n_win, blk, consts,
                            n_leg, eps, att,

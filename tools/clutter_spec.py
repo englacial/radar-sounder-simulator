@@ -97,17 +97,22 @@ class BedRoughness(_Base):
 
 
 class SurfaceRoughnessPair(_Base):
-    """Explicit Gaussian pair on the surface interface (the fixture is
-    sigma 0.049474 m, l 2.982179 m)."""
+    """Explicit (sigma, l) on the surface interface (the fixture is
+    sigma 0.049474 m, l 2.982179 m, Gaussian); ``acf`` selects the
+    correlation function (docs/roughness.md; exponential needs the grazing
+    fix, which is on by default)."""
     sigma_m: float
     corr_length_m: float
+    acf: Literal["gaussian", "exponential"] = "gaussian"
 
 
 class SurfaceRoughnessSource(_Base):
     """Path B1: per line and per pass carrier, the effective Gaussian pair
     tangent to the measured (OIB ATM) surface PSD at the Bragg wavenumber of
-    theta_c (config/roughness/atm_b1.yaml; tools/surface_roughness_b1.py)."""
-    source: Literal["atm_b1"]
+    theta_c (config/roughness/atm_b1.yaml; tools/surface_roughness_b1.py).
+    ``atm_exponential``: the table's exponential-ACF (sigma, l) entry used
+    DIRECTLY with acf: exponential (power-law entries are refused)."""
+    source: Literal["atm_b1", "atm_exponential"]
     theta_c_deg: float | None = None      # None -> the table's default (30)
 
 
@@ -332,6 +337,8 @@ class RunSpec(_Base):
                 if isinstance(phy.surface_roughness, bool)
                 else [phy.surface_roughness.sigma_m,
                       phy.surface_roughness.corr_length_m]
+                + ([] if phy.surface_roughness.acf == "gaussian"
+                   else [phy.surface_roughness.acf])
                 if isinstance(phy.surface_roughness, SurfaceRoughnessPair)
                 else phy.surface_roughness.model_dump(exclude_none=True)),
             "antenna": phy.antenna,

@@ -166,14 +166,18 @@ class FacetConfig(BaseModel):
 
 
 class RoughnessConfig(BaseModel):
-    """Sub-facet Gaussian roughness of an interface (Gerekos et al. 2023;
+    """Sub-facet roughness of an interface (Gerekos et al. 2023;
     docs/roughness.md). ``sigma_m`` is the RMS height along the facet normal,
-    ``corr_length_m`` the isotropic Gaussian correlation length; coherent
+    ``corr_length_m`` the isotropic correlation length of ``acf``; coherent
     mode only. Validity: corr_length_m should not exceed the facet size
     (larger-scale roughness belongs in the DEM as facet tilt)."""
 
     sigma_m: float          # RMS height (m), >= 0
-    corr_length_m: float    # Gaussian correlation length (m), > 0
+    corr_length_m: float    # correlation length (m), > 0
+    # correlation function: "gaussian" rho = exp(-r^2/l^2) (Gerekos 2023,
+    # exact finite-facet series) or "exponential" rho = exp(-r/l) (area-only
+    # infinite-surface law; requires SimConfig.grazing_fix)
+    acf: Literal["gaussian", "exponential"] = "gaussian"
 
     @model_validator(mode="after")
     def _positive(self):
@@ -345,6 +349,12 @@ class SimConfig(BaseModel):
         if self.mode != "coherent" and self.grazing_fix is not None:
             raise ValueError("grazing_fix requires coherent mode (it tapers "
                              "the coherent facet response)")
+        if self.grazing_fix is None and any(
+                i.roughness is not None and i.roughness.acf == "exponential"
+                for i in self.interfaces):
+            raise ValueError("roughness acf='exponential' requires grazing_fix "
+                             "(the exponential ACF exists only in the "
+                             "area-only D_Phi; docs/roughness.md)")
         names = [i.name for i in self.interfaces]
         for i, iface in enumerate(self.interfaces):
             if isinstance(iface, OffsetInterface):
