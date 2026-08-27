@@ -1,9 +1,9 @@
 schema_version: 1
 meta:
-  name: wc_hd_r6p4
+  name: wc_hd_r6p8
   status: exploratory
   role: study
-  backs: HAPS 14 km design study round r6p4
+  backs: HAPS 14 km design study round r6p8
 run:
   line: greenland_westcoast
   segment: pilot
@@ -33,5 +33,5 @@ run:
     chain: standard
     proc_cache: true
     companion: false
-    posting_div: 4
-  out_name: wc_hd_r6p4
+    posting_div: 8
+  out_name: wc_hd_r6p8

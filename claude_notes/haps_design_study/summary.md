@@ -65,7 +65,41 @@ correlation length is far closer to the measured data, so the pessimistic
 scenario is the more credible one for this line.
 
 Round 6 — along-track aperture at 300 MHz / 8 el under l = 1 m:
-posting_div 1 / 2 / 4 / 8 → see ROUND6 below.
+
+| posting_div (posting m, aperture m) | bedvis | surf arm @bed | bed arm | midcol | wall s |
+|---|---|---|---|---|---|
+| 1 (14.9, 492) | −18.7 | −66.2 | −84.9 | −36.7 | 72 |
+| 4 (3.7, 1971) | −20.1 | −68.8 | −88.9 | −40.7 | 308 |
+| 8 (1.9, 3969) | −20.6 | −67.7 | −88.3 | −42.4 | 792 |
+
+Longer apertures buy ~6 dB mid-column and nothing in the bed window: the
+surface arm at the bed delay moves 2.5 dB while the bed arm loses 4 dB. At
+300 MHz even a 1.9 m posting aliases a 29° along-track scatterer (needs
+λ/(4 sin 29°) ≈ 0.5 m), so its energy folds into the processed band
+regardless of aperture length.
+
+Round 7 — the aliasing test, posting_div 8 (1.9 m posting) under l = 1 m:
+
+| design | unaliased to | bedvis (pd1 → pd8) | surf arm @bed (pd1 → pd8) |
+|---|---|---|---|
+| 60 MHz, 5 el | 42° | −29.1 → **−0.2** | −59.7 → −85.9 |
+| 150 MHz, 11 el | 16° | −30.3 → −35.4 | −53.6 → −55.3 |
+
+Where the posting is unaliased at the 29° clutter angle, along-track focusing
+removes ~26 dB of surface clutter at the bed delay; where it is aliased, it
+removes none. The residual bed-delay clutter in every ≥150 MHz run above is
+therefore a sim sampling artefact. A real 20 m/s platform at kHz PRF samples
+at centimetres and never aliases; its along-track rejection is bounded by
+processing aperture and motion errors instead.
+
+Round 8 — the recommended 300 MHz / 8 el design at posting_div 32 (0.47 m,
+unaliased to 32°) under l = 1 m: NOT COMPLETED. The run (21 345 traces per
+pass) was lost to a session restart, and the chain's time-domain
+backprojection cost grows as traces × aperture-traces (~40× the posting_div
+8 run, i.e. many hours) with an alias-limited aperture (17 km) longer than
+the 10 km window. The 60 MHz round-7 result is the demonstration of the
+along-track lever; transferring its ~26 dB to 300 MHz is a physics
+extrapolation, not a simulated number.
 
 ## What sets the clutter at the bed delay
 
@@ -74,10 +108,12 @@ posting_div 1 / 2 / 4 / 8 → see ROUND6 below.
 - Cross-track: any ≥8-element array on 10 m at ≥150 MHz puts 29° in deep
   sidelobes; taper and element count beyond that are irrelevant in the sim.
   Fewer than ~8 elements at ≥225 MHz opens a grating lobe near 29°.
-- Along-track: the cross-track array cannot reject it; the focuser rejects it
-  only in proportion to the aperture, and the sim's 15 m posting aliases the
-  Doppler of a 29° scatterer (a real 20 m/s platform sampling at cm spacing
-  would do far better than posting_div lets the sim show).
+- Along-track: the cross-track array cannot reject it, and the focuser can
+  only reject it if the along-track sampling is unaliased at that angle
+  (posting ≤ λ/(4 sin 29°): 2.6 m at 60 MHz, 1.0 m at 150, 0.5 m at 300).
+  The sim's default 15 m posting aliases it at every frequency; once
+  unaliased (round 7) focusing removes ~26 dB. This is the biggest single
+  lever after frequency, and the one the default sim chain hides.
 - Scattering law: the wide-angle level is the Gerekos sub-facet term,
   ∝ exp(−(k l sinθ)²/m). With l = 3 m it collapses with frequency (−28 dB
   per 75 MHz), with l = 1 m it barely moves. The ~100 dB of headroom in
@@ -102,10 +138,15 @@ posting_div 1 / 2 / 4 / 8 → see ROUND6 below.
 - **Hann taper on both TX and RX** — free in the sim, and the only thing that
   keeps a real array's clutter floor low once pattern errors matter.
 - **T = 8–10 µs, Hann compression window** (< 11.7 µs minimum bed delay).
-- **Along-track: as long as the platform allows** — see ROUND6.
+- **Along-track: unaliased sampling (≤ 0.5 m posting at 300 MHz — trivial
+  at 20 m/s) and a focused aperture of several km.** In the sim this needs
+  posting_div ≥ 32; rounds 6/8 quantify it.
 
-Expected bed visibility: +70 dB (nominal roughness) to −19 dB (l = 1 m). The
-spread IS the finding: the design is settled, the surface is not.
+Expected bed visibility: +70 dB (nominal roughness, aliased chain), −19 dB
+(l = 1 m, aliased chain), and roughly +5 to +10 dB (l = 1 m with the ~26 dB
+unaliased along-track rejection seen at 60 MHz, extrapolated). The design
+is settled; the surface roughness spectrum and the processing chain's
+along-track sampling are what set the number.
 
 ## Practical tradeoffs learned
 
@@ -120,7 +161,12 @@ spread IS the finding: the design is settled, the surface is not.
 4. Bandwidth and window don't move bed-over-clutter.
 5. Along-track focusing does not touch cross-track clutter but is the only
    lever on along-track clutter, which is what remains once the array has
-   done its job.
+   done its job — and it only works with unaliased along-track sampling at
+   the clutter angle (posting ≤ λ/(4 sin θ_clutter)). In the sim that is
+   posting_div ≈ 8 at 60 MHz and ≈ 32 at 300 MHz; on the platform it is free.
+   The bed arm loses a few dB at long apertures because the chain focuses
+   through air only (no in-ice migration, gap g3), so the sim's number is a
+   lower bound on the bed side.
 6. Thermal SNR has ~70 dB of margin on 1 km ice at 14 km; this line's basal
    SNR is set by clutter, so transmit power and pulse energy are not levers.
 7. Everything above 150 MHz depends on the sub-facet roughness spectrum

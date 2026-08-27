@@ -1,22 +1,28 @@
 schema_version: 1
 meta:
-  name: wc_hd_r6p4
+  name: wc_hd_r7p8
   status: exploratory
   role: study
-  backs: HAPS 14 km design study round r6p4
+  backs: HAPS 14 km design study round r7p8
 run:
   line: greenland_westcoast
   segment: pilot
   passes:
   - p3_2017
-  - hd_f300_n8_hann
+  - hd_f60_n5_hann
+  - hd_f150_n11_hann
   bed:
     source: picked
   extra_passes:
-    hd_f300_n8_hann:
+    hd_f60_n5_hann:
       carrier: reference
       altitude_m: 14000.0
-      instrument: hd_f300_n8_hann
+      instrument: hd_f60_n5_hann
+      facet_spacing_scale: 0.7
+    hd_f150_n11_hann:
+      carrier: reference
+      altitude_m: 14000.0
+      instrument: hd_f150_n11_hann
       facet_spacing_scale: 0.7
   reflectivity:
     gamma_from_rssnr: true
@@ -33,5 +39,5 @@ run:
     chain: standard
     proc_cache: true
     companion: false
-    posting_div: 4
-  out_name: wc_hd_r6p4
+    posting_div: 8
+  out_name: wc_hd_r7p8

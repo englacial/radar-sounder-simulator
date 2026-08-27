@@ -1,0 +1,24 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+spec 'wc_hd_r6p8' [exploratory] <- config/experiments/wc_hd_r6p8.yaml
+calibration [greenland_westcoast]: gamma_surface -10.00 dB (anomaly +1.04), A = 34.26 dB/km (solved (RSSNR-vs-2H Theil-Sen regression))
+  regression: A 34.26 [29.62, 38.4] dB/km, r 0.845, n 74
+picked bed: reference pass p3_2017 (20170510_03_013/20170510_03_014), 6667 picks over 99.68 km, line gap frac 0.0000
+bed roughness: sigma 0.1 m, l 0.886 m; nadir coherent attenuation -9.2 dB -> G2 raised 9.2 dB (double-count guard)
+rssnr gamma: 84 samples (cache:/home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/outputs/greenland_westcoast/rssnr_anchor.npz), snapshot GEAMAHQ7BRVPG9SQPK20, K -0.09 dB (K - K_phys 10.23 dB), segment G2 [6.2 .. 16.7] dB (med 12.5), censored 10/84
+== hd_f300_n8_hann (pilot_pbed_rssnr_proc) ==
+tools/run_basal_clutter.py:925: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12549 m
+  picked bed: residual rms 66.6 m (mean -24.3, |max| 164.5), gaps 0.0000; along-track bed roughness 28.3 -> 64.8 m rms
+  reach: surface 9333 m, bed 3466 m -> ct ±9333 m; spacing 30.71 m; n_traces 5337; n_samples_sim 2661
+  [ok] hd_f300_n8_hann_pilot_pbed_rssnr_proc_c00_srough_att34.26_brough0.1_0.886_pdiv8_fs0.5_s03_n1_gfx0.05_ia44ccfabe_wchirp  264.3 s  facets/iface ~457748  n_samples 666
+  [ok] hd_f300_n8_hann_pilot_pbed_rssnr_proc_c01_srough_att34.26_brough0.1_0.886_pdiv8_fs0.5_s03_n1_gfx0.05_ia44ccfabe_wchirp  265.4 s  facets/iface ~457748  n_samples 666
+  [ok] hd_f300_n8_hann_pilot_pbed_rssnr_proc_c02_srough_att34.26_brough0.1_0.886_pdiv8_fs0.5_s03_n1_gfx0.05_ia44ccfabe_wchirp  262.2 s  facets/iface ~458470  n_samples 666
+  [proc-cache write] hd_f300_n8_hann_pilot_pbed_rssnr_proc (57 MB)
+  processed: aperture 3969 m (2125 traces, half-angle 7.68 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 45.00 km (sim trace 2676): bed-window bed - surface returns -24.0 dB
+  bed-return tail hd_f300_n8_hann: slope dB/us picked_bed -1.73; guard picked_bed FAIL (-33.5 dB)
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/.claude/worktrees/agent-a70c6d1cabd5d33f1/outputs/greenland_westcoast/wc_hd_r6p8/report.html
+clutter (midcol rel surf, meas/sim dB): hd_f300_n8_hann: ----/-42.4 [surface returns]

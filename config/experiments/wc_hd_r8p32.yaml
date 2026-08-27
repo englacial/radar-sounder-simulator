@@ -1,14 +1,13 @@
 schema_version: 1
 meta:
-  name: wc_hd_r6p4
+  name: wc_hd_r8p32
   status: exploratory
   role: study
-  backs: HAPS 14 km design study round r6p4
+  backs: HAPS 14 km design study round r8p32
 run:
   line: greenland_westcoast
   segment: pilot
   passes:
-  - p3_2017
   - hd_f300_n8_hann
   bed:
     source: picked
@@ -33,5 +32,5 @@ run:
     chain: standard
     proc_cache: true
     companion: false
-    posting_div: 4
-  out_name: wc_hd_r6p4
+    posting_div: 32
+  out_name: wc_hd_r8p32
