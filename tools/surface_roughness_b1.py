@@ -26,16 +26,31 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import warnings
+
 import numpy as np
 import yaml
 
 C = 299792458.0
 DEFAULT_YAML = Path(__file__).resolve().parents[1] / "config/roughness/atm_b1.yaml"
+STRATA_YAML = DEFAULT_YAML.with_name("atm_tier2_strata.yaml")
 
 
-def load_table(path=DEFAULT_YAML):
+def load_table(path=DEFAULT_YAML, strata=STRATA_YAML):
+    """The site-specific table merged with the Tier 2 per-stratum exponential
+    entries (config/roughness/atm_tier2_strata.yaml): their spectra are added
+    (site entries win on a name clash) and their ``stratum_lines`` mapping is
+    the fallback for lines without an ``exponential`` alternate mapping."""
     with Path(path).open() as fh:
-        return yaml.safe_load(fh)
+        tab = yaml.safe_load(fh)
+    if strata and Path(strata).exists():
+        with Path(strata).open() as fh:
+            st = yaml.safe_load(fh)
+        tab["spectra"] = {**st.get("spectra", {}), **tab["spectra"]}
+        tab["stratum_lines"] = st.get("stratum_lines", {})
+        for line, m in tab["stratum_lines"].items():
+            tab["lines"].setdefault(line, {"default": m["default"]})
+    return tab
 
 
 def spectrum(spec):
@@ -89,15 +104,32 @@ def resolve_exponential(line, pass_key, table=None):
     tab = table or load_table()
     sid = _spectrum_id(tab, line, pass_key, alt="exponential")
     spec = tab["spectra"][sid]
+    if spec["family"] != "exponential" and line in tab.get("stratum_lines", {}):
+        # no site-specific exponential entry: fall back to the Tier 2 stratum
+        sid = tab["stratum_lines"][line]["default"]
+        spec = tab["spectra"][sid]
     if spec["family"] != "exponential":
         raise ValueError(f"atm_exponential: spectrum {sid!r} for line "
                          f"{line!r} pass {pass_key!r} is {spec['family']}, "
                          "not exponential -- no exponential-ACF entry; use "
                          "source atm_b1 (effective Gaussian) instead")
+    use = spec.get("usability", "use")
+    if use == "refuse":
+        raise ValueError(f"atm_exponential: stratum {sid!r} ({spec.get('stratum')}) is "
+                         f"marked refuse -- Matern nu {spec.get('matern_nu_med_p5_p95', ['?'])[0]}, "
+                         f"l at bound in {spec.get('l_capped_frac')} of years; the exponential "
+                         "over-predicts wide-angle scatter there (Tier 2 note). Use a site-specific "
+                         "entry or wait for the Matern option.")
     sig, l = float(spec["sigma_m"]), float(spec["l_m"])
     info = {"spectrum": sid, "family": "exponential", "acf": "exponential",
+            "usability": use, "stratum": spec.get("stratum"),
             "rule": "direct (sigma, l) of the exponential-ACF fit",
             "provenance": spec.get("provenance")}
+    if use == "marginal":
+        info["warning"] = ("marginal stratum: power law fits better; exponential under-predicts "
+                           f"wide-angle scatter by ~{spec.get('misfit_1p5m_dB_med_p5_p95', ['?'])[0]} dB "
+                           "(median at 1.5 m) -- see atm_tier2_strata.yaml")
+        warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
     return sig, l, info
 
 

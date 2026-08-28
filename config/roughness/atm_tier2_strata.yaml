@@ -1,0 +1,591 @@
+schema_version: 1
+description: 'Per-stratum exponential-ACF surface roughness (sigma, l) from the OIB ATM L1B Tier 2 analysis
+  (claude_notes/atm_regional/tier2_results_2026-08-27.md; outputs/atm_regional/tier2/recommendation_by_stratum.csv,
+  726 sites / 2111 site-years, fit band 1-30 m lag, site medians). Same spectra schema as atm_b1.yaml;
+  merged into its table by tools/surface_roughness_b1.py. usability: use = exponential is the best 3-parameter
+  family (Matern nu ~0.35-0.55), l rarely at the bound, sigma <= 10 cm; marginal = power law fits better
+  but the in-band difference is -1..-2 dB (exponential UNDER-predicts wide-angle scatter by that much
+  at 195/300 MHz) or l bound hit in <= 30 % of years; refuse = nu >= 0.59, l at bound in >= 40 % of years,
+  or sigma >> 10 cm (facet tilt, not sub-facet roughness) -- the exponential OVER-predicts by +2..+4 dB
+  median, +10..+25 dB p90-p95; a Matern/power-law law is needed. sigma is the exponential-fit sigma (pair-consistent
+  with l); sigma_bl30 is the non-parametric RMS below 30 m for reference (ratio ~1.15). Strata are elevation
+  bands within facies proxies (elevation/latitude rule; RACMO melt where available). 1.0/0.75 m Bragg
+  points are sub-band extrapolations. East Antarctic plateau unsampled.'
+spectra:
+  aa_grounded_1500_2500:
+    family: exponential
+    sigma_m: 0.113
+    l_m: 12.2
+    usability: marginal
+    stratum: AA grounded 1500-2500
+    hemisphere: aa
+    n_sites: 62
+    n_site_years: 183
+    sigma_m_p5_p95:
+    - 0.049
+    - 0.372
+    sigma_bl30_m: 0.068
+    l_m_p5_p95:
+    - 0.7
+    - 300.0
+    l_capped_frac: 0.17
+    S195_dB_best_exp:
+    - -57.0
+    - -59.2
+    S60_dB_best: -43.1
+    bragg_adequate_frac: 0.64
+    misfit_1p5m_dB_med_p5_p95:
+    - -0.9
+    - -5.8
+    - 6.2
+    misfit_1p0m_dB_med: -1.6
+    matern_nu_med_p5_p95:
+    - 0.35
+    - 0.08
+    - 0.7
+    powerlaw_H_med: 0.31
+    csv_verdict: exponential marginal (Matern nu needed)
+  aa_grounded_500_1500:
+    family: exponential
+    sigma_m: 0.108
+    l_m: 13.5
+    usability: marginal
+    stratum: AA grounded 500-1500
+    hemisphere: aa
+    n_sites: 81
+    n_site_years: 171
+    sigma_m_p5_p95:
+    - 0.053
+    - 0.943
+    sigma_bl30_m: 0.076
+    l_m_p5_p95:
+    - 3.7
+    - 300.0
+    l_capped_frac: 0.12
+    S195_dB_best_exp:
+    - -56.6
+    - -58.4
+    S60_dB_best: -42.2
+    bragg_adequate_frac: 0.64
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.6
+    - -5.7
+    - 4.1
+    misfit_1p0m_dB_med: -2.1
+    matern_nu_med_p5_p95:
+    - 0.38
+    - 0.17
+    - 0.67
+    powerlaw_H_med: 0.31
+    csv_verdict: exponential marginal (Matern nu needed)
+  aa_grounded_lt500_m:
+    family: exponential
+    sigma_m: 0.249
+    l_m: 24.5
+    usability: marginal
+    stratum: AA grounded <500 m
+    hemisphere: aa
+    n_sites: 65
+    n_site_years: 153
+    sigma_m_p5_p95:
+    - 0.069
+    - 3.453
+    sigma_bl30_m: 0.121
+    l_m_p5_p95:
+    - 3.9
+    - 300.0
+    l_capped_frac: 0.26
+    S195_dB_best_exp:
+    - -53.4
+    - -54.6
+    S60_dB_best: -38.7
+    bragg_adequate_frac: 0.7
+    misfit_1p5m_dB_med_p5_p95:
+    - -0.7
+    - -4.0
+    - 5.5
+    misfit_1p0m_dB_med: -1.0
+    matern_nu_med_p5_p95:
+    - 0.45
+    - 0.18
+    - 0.86
+    powerlaw_H_med: 0.38
+    csv_verdict: exponential marginal (Matern nu needed)
+  aa_grounded_gt2500:
+    family: exponential
+    sigma_m: 0.104
+    l_m: 11.2
+    usability: use
+    stratum: AA grounded >2500
+    hemisphere: aa
+    n_sites: 20
+    n_site_years: 20
+    sigma_m_p5_p95:
+    - 0.066
+    - 0.154
+    sigma_bl30_m: 0.091
+    l_m_p5_p95:
+    - 1.9
+    - 16.1
+    l_capped_frac: 0.0
+    S195_dB_best_exp:
+    - -55.5
+    - -56.1
+    S60_dB_best: -41.2
+    bragg_adequate_frac: 0.65
+    misfit_1p5m_dB_med_p5_p95:
+    - 0.0
+    - -2.9
+    - 2.8
+    misfit_1p0m_dB_med: 0.0
+    matern_nu_med_p5_p95:
+    - 0.46
+    - 0.13
+    - 0.74
+    powerlaw_H_med: 0.35
+    csv_verdict: exponential marginal (Matern nu needed)
+  aa_shelf_lt500_m:
+    family: exponential
+    sigma_m: 0.27
+    l_m: 68.1
+    usability: refuse
+    stratum: AA shelf/sea level <500 m
+    hemisphere: aa
+    n_sites: 75
+    n_site_years: 170
+    sigma_m_p5_p95:
+    - 0.042
+    - 8.387
+    sigma_bl30_m: 0.095
+    l_m_p5_p95:
+    - 2.0
+    - 300.0
+    l_capped_frac: 0.41
+    S195_dB_best_exp:
+    - -56.9
+    - -57.0
+    S60_dB_best: -41.8
+    bragg_adequate_frac: 0.52
+    misfit_1p5m_dB_med_p5_p95:
+    - 0.7
+    - -4.4
+    - 20.8
+    misfit_1p0m_dB_med: 0.1
+    matern_nu_med_p5_p95:
+    - 0.59
+    - 0.13
+    - 2.5
+    powerlaw_H_med: 0.46
+    csv_verdict: exponential marginal (Matern nu needed)
+  gl_interior_1500_2500:
+    family: exponential
+    sigma_m: 0.071
+    l_m: 10.5
+    usability: use
+    stratum: GL interior 1500-2500
+    hemisphere: gl
+    n_sites: 51
+    n_site_years: 233
+    sigma_m_p5_p95:
+    - 0.048
+    - 0.231
+    sigma_bl30_m: 0.06
+    l_m_p5_p95:
+    - 3.9
+    - 300.0
+    l_capped_frac: 0.06
+    S195_dB_best_exp:
+    - -59.4
+    - -60.2
+    S60_dB_best: -44.0
+    bragg_adequate_frac: 0.64
+    misfit_1p5m_dB_med_p5_p95:
+    - 0.0
+    - -5.3
+    - 4.5
+    misfit_1p0m_dB_med: 0.0
+    matern_nu_med_p5_p95:
+    - 0.42
+    - 0.14
+    - 0.74
+    powerlaw_H_med: 0.28
+    csv_verdict: exponential marginal (Matern nu needed)
+  gl_interior_500_1500:
+    family: exponential
+    sigma_m: 0.118
+    l_m: 17.2
+    usability: marginal
+    stratum: GL interior 500-1500
+    hemisphere: gl
+    n_sites: 31
+    n_site_years: 137
+    sigma_m_p5_p95:
+    - 0.061
+    - 0.672
+    sigma_bl30_m: 0.084
+    l_m_p5_p95:
+    - 5.9
+    - 300.0
+    l_capped_frac: 0.15
+    S195_dB_best_exp:
+    - -56.6
+    - -58.2
+    S60_dB_best: -42.0
+    bragg_adequate_frac: 0.66
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.5
+    - -4.8
+    - 2.7
+    misfit_1p0m_dB_med: -1.8
+    matern_nu_med_p5_p95:
+    - 0.4
+    - 0.2
+    - 0.67
+    powerlaw_H_med: 0.36
+    csv_verdict: exponential marginal (Matern nu needed)
+  gl_interior_gt2500:
+    family: exponential
+    sigma_m: 0.05
+    l_m: 7.3
+    usability: use
+    stratum: GL interior >2500
+    hemisphere: gl
+    n_sites: 46
+    n_site_years: 168
+    sigma_m_p5_p95:
+    - 0.035
+    - 0.069
+    sigma_bl30_m: 0.045
+    l_m_p5_p95:
+    - 1.5
+    - 19.5
+    l_capped_frac: 0.0
+    S195_dB_best_exp:
+    - -62.4
+    - -62.0
+    S60_dB_best: -46.7
+    bragg_adequate_frac: 0.67
+    misfit_1p5m_dB_med_p5_p95:
+    - 0.0
+    - -3.8
+    - 10.7
+    misfit_1p0m_dB_med: 0.0
+    matern_nu_med_p5_p95:
+    - 0.51
+    - 0.08
+    - 1.29
+    powerlaw_H_med: 0.15
+    csv_verdict: exponential marginal (Matern nu needed)
+  gl_interior_transect:
+    family: exponential
+    sigma_m: 0.056
+    l_m: 8.9
+    usability: use
+    stratum: GL interior transect
+    hemisphere: gl
+    n_sites: 47
+    n_site_years: 93
+    sigma_m_p5_p95:
+    - 0.031
+    - 0.1
+    sigma_bl30_m: 0.049
+    l_m_p5_p95:
+    - 1.2
+    - 18.4
+    l_capped_frac: 0.0
+    S195_dB_best_exp:
+    - -61.6
+    - -61.2
+    S60_dB_best: -46.2
+    bragg_adequate_frac: 0.68
+    misfit_1p5m_dB_med_p5_p95:
+    - 0.0
+    - -2.9
+    - 6.7
+    misfit_1p0m_dB_med: 0.0
+    matern_nu_med_p5_p95:
+    - 0.5
+    - 0.09
+    - 0.84
+    powerlaw_H_med: 0.31
+    csv_verdict: exponential marginal (Matern nu needed)
+  gl_margin_1500_2500:
+    family: exponential
+    sigma_m: 0.251
+    l_m: 19.3
+    usability: marginal
+    stratum: GL margin 1500-2500
+    hemisphere: gl
+    n_sites: 30
+    n_site_years: 95
+    sigma_m_p5_p95:
+    - 0.09
+    - 1.771
+    sigma_bl30_m: 0.134
+    l_m_p5_p95:
+    - 2.5
+    - 300.0
+    l_capped_frac: 0.23
+    S195_dB_best_exp:
+    - -52.9
+    - -52.8
+    S60_dB_best: -38.0
+    bragg_adequate_frac: 0.79
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.2
+    - -2.8
+    - 4.2
+    misfit_1p0m_dB_med: -1.6
+    matern_nu_med_p5_p95:
+    - 0.39
+    - 0.17
+    - 0.94
+    powerlaw_H_med: 0.36
+    csv_verdict: use exponential
+  gl_margin_500_1500:
+    family: exponential
+    sigma_m: 1.093
+    l_m: 63.6
+    usability: refuse
+    stratum: GL margin 500-1500
+    hemisphere: gl
+    n_sites: 34
+    n_site_years: 122
+    sigma_m_p5_p95:
+    - 0.294
+    - 6.101
+    sigma_bl30_m: 0.533
+    l_m_p5_p95:
+    - 7.1
+    - 300.0
+    l_capped_frac: 0.29
+    S195_dB_best_exp:
+    - -46.0
+    - -42.8
+    S60_dB_best: -28.4
+    bragg_adequate_frac: 0.52
+    misfit_1p5m_dB_med_p5_p95:
+    - 2.2
+    - -1.7
+    - 10.1
+    misfit_1p0m_dB_med: 2.8
+    matern_nu_med_p5_p95:
+    - 0.65
+    - 0.29
+    - 1.19
+    powerlaw_H_med: 0.47
+    csv_verdict: exponential marginal (Matern nu needed)
+  gl_margin_lt500_m:
+    family: exponential
+    sigma_m: 4.283
+    l_m: 300.0
+    usability: refuse
+    stratum: GL margin <500 m
+    hemisphere: gl
+    n_sites: 31
+    n_site_years: 119
+    sigma_m_p5_p95:
+    - 0.371
+    - 17.135
+    sigma_bl30_m: 2.07
+    l_m_p5_p95:
+    - 7.8
+    - 300.0
+    l_capped_frac: 0.52
+    S195_dB_best_exp:
+    - -39.7
+    - -32.3
+    S60_dB_best: -19.5
+    bragg_adequate_frac: 0.32
+    misfit_1p5m_dB_med_p5_p95:
+    - 4.1
+    - -0.1
+    - 20.4
+    misfit_1p0m_dB_med: 4.9
+    matern_nu_med_p5_p95:
+    - 0.73
+    - 0.45
+    - 2.23
+    powerlaw_H_med: 0.51
+    csv_verdict: do not use exponential
+  gl_margin_gt2500:
+    family: exponential
+    sigma_m: 0.249
+    l_m: 13.7
+    usability: marginal
+    stratum: GL margin >2500
+    hemisphere: gl
+    n_sites: 21
+    n_site_years: 29
+    sigma_m_p5_p95:
+    - 0.091
+    - 1.185
+    sigma_bl30_m: 0.134
+    l_m_p5_p95:
+    - 2.3
+    - 278.8
+    l_capped_frac: 0.07
+    S195_dB_best_exp:
+    - -50.8
+    - -52.0
+    S60_dB_best: -36.9
+    bragg_adequate_frac: 0.9
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.4
+    - -2.2
+    - 4.1
+    misfit_1p0m_dB_med: -2.1
+    matern_nu_med_p5_p95:
+    - 0.33
+    - 0.23
+    - 0.69
+    powerlaw_H_med: 0.33
+    csv_verdict: use exponential
+  gl_percolation_belt_1500_2500:
+    family: exponential
+    sigma_m: 0.094
+    l_m: 11.3
+    usability: use
+    stratum: GL percolation belt 1500-2500
+    hemisphere: gl
+    n_sites: 39
+    n_site_years: 128
+    sigma_m_p5_p95:
+    - 0.047
+    - 0.451
+    sigma_bl30_m: 0.072
+    l_m_p5_p95:
+    - 2.5
+    - 300.0
+    l_capped_frac: 0.15
+    S195_dB_best_exp:
+    - -57.0
+    - -58.7
+    S60_dB_best: -42.5
+    bragg_adequate_frac: 0.57
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.0
+    - -6.2
+    - 5.1
+    misfit_1p0m_dB_med: -1.4
+    matern_nu_med_p5_p95:
+    - 0.39
+    - 0.08
+    - 0.82
+    powerlaw_H_med: 0.3
+    csv_verdict: exponential marginal (Matern nu needed)
+  gl_percolation_belt_500_1500:
+    family: exponential
+    sigma_m: 0.155
+    l_m: 18.2
+    usability: marginal
+    stratum: GL percolation belt 500-1500
+    hemisphere: gl
+    n_sites: 39
+    n_site_years: 149
+    sigma_m_p5_p95:
+    - 0.066
+    - 0.606
+    sigma_bl30_m: 0.091
+    l_m_p5_p95:
+    - 4.9
+    - 300.0
+    l_capped_frac: 0.26
+    S195_dB_best_exp:
+    - -56.0
+    - -57.3
+    S60_dB_best: -41.6
+    bragg_adequate_frac: 0.72
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.5
+    - -3.8
+    - 5.3
+    misfit_1p0m_dB_med: -2.0
+    matern_nu_med_p5_p95:
+    - 0.38
+    - 0.19
+    - 0.65
+    powerlaw_H_med: 0.36
+    csv_verdict: use exponential
+  gl_percolation_belt_lt500_m:
+    family: exponential
+    sigma_m: 0.227
+    l_m: 22.9
+    usability: marginal
+    stratum: GL percolation belt <500 m
+    hemisphere: gl
+    n_sites: 22
+    n_site_years: 32
+    sigma_m_p5_p95:
+    - 0.1
+    - 2.502
+    sigma_bl30_m: 0.113
+    l_m_p5_p95:
+    - 3.5
+    - 300.0
+    l_capped_frac: 0.19
+    S195_dB_best_exp:
+    - -52.0
+    - -54.5
+    S60_dB_best: -38.1
+    bragg_adequate_frac: 0.75
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.2
+    - -3.0
+    - 2.4
+    misfit_1p0m_dB_med: -1.4
+    matern_nu_med_p5_p95:
+    - 0.4
+    - 0.16
+    - 0.71
+    powerlaw_H_med: 0.39
+    csv_verdict: use exponential
+  gl_percolation_belt_gt2500:
+    family: exponential
+    sigma_m: 0.071
+    l_m: 10.5
+    usability: use
+    stratum: GL percolation belt >2500
+    hemisphere: gl
+    n_sites: 32
+    n_site_years: 118
+    sigma_m_p5_p95:
+    - 0.043
+    - 0.25
+    sigma_bl30_m: 0.054
+    l_m_p5_p95:
+    - 1.2
+    - 300.0
+    l_capped_frac: 0.07
+    S195_dB_best_exp:
+    - -58.6
+    - -61.0
+    S60_dB_best: -44.8
+    bragg_adequate_frac: 0.58
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.3
+    - -6.0
+    - 3.9
+    misfit_1p0m_dB_med: -1.8
+    matern_nu_med_p5_p95:
+    - 0.37
+    - 0.09
+    - 0.68
+    powerlaw_H_med: 0.28
+    csv_verdict: exponential marginal (Matern nu needed)
+stratum_lines:
+  antarctica_david:
+    default: aa_grounded_500_1500
+    note: no ATM on the line; grounded ~900 m -> AA grounded 500-1500 stratum (marginal); Getz-transfer
+      entry kept in atm_b1.yaml
+  antarctica_getz:
+    default: aa_grounded_lt500_m
+    note: line spans grounded coastal ice into the shelf; grounded <500 m stratum (marginal); the shelf
+      stratum is refused
+  greenland_westcoast:
+    default: gl_percolation_belt_1500_2500
+    note: site-specific westcoast_*_exp entries in atm_b1.yaml take precedence; stratum fallback for passes
+      without one
+  greenland_geikie01_transit:
+    default: gl_interior_gt2500
+    note: site-specific geikie_2014 (5.15 cm / 5.28 m) takes precedence; stratum median 5.0 cm / 7.3 m

@@ -57,3 +57,16 @@ Eq. 22's `erfi(A_m)` grows like `exp(Re(A_m)²)` and is never evaluated unscaled
 - **Haynes 2018 rough Fresnel zone** (nadir facet-disk vs the closed forms in `compare/haynes.py`): total power to **0.09 dB**, coherent part vs `exp(−(2kσ)²)` to 0.03 dB.
 - **Kernel wiring**: kernel speckle-ensemble mean power matches the float64 referee to 0.15 dB; ε→1 reduction of a rough bed through the refracted path matches the single-interface rough kernel to 4×10⁻⁴ of peak; buried-facet attenuation verified to use the **local** wavenumber (9×10⁻⁵ relative); transmission attenuation through `simulate()` matches `exp(−2σ²K_t²)` to 8×10⁻⁴.
 - **Smooth limit**: `roughness=None` and `sigma_m=0` both bit-identical to the pre-roughness kernels.
+
+### Per-stratum exponential parameters (OIB ATM Tier 2)
+
+`config/roughness/atm_tier2_strata.yaml` carries site-median exponential (σ, l)
+per facies/elevation stratum on both ice sheets (726 ATM sites), merged into
+the `atm_b1.yaml` table by `tools/surface_roughness_b1.load_table`. Each entry
+has a `usability`: `use` (exponential is the best 3-parameter family, ν ≈ 0.5),
+`marginal` (a power law fits better; the exponential under-predicts wide-angle
+scatter by ~1–2 dB at 195/300 MHz — a warning is emitted), or `refuse`
+(margins < 1500 m and ice shelves: ν ≥ 0.6, `l` at the fit bound; the
+exponential over-predicts by +2…+25 dB — `source: atm_exponential` raises).
+Site-specific entries take precedence over strata; `stratum_lines` supplies
+the fallback mapping for lines without one.

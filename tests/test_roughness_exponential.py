@@ -179,8 +179,18 @@ def test_atm_exponential_resolution():
     _, _, inf17 = b1.resolve_exponential("greenland_westcoast", "p3_2017",
                                          tab)
     assert inf17["spectrum"] == "westcoast_2017_exp"
-    with pytest.raises(ValueError, match="powerlaw"):
-        b1.resolve_exponential("antarctica_getz", "dc8_2016_0km", tab)
+    # Tier 2 strata (config/roughness/atm_tier2_strata.yaml) are merged in:
+    # getz has no site exponential entry and falls back to its stratum (marginal)
+    with pytest.warns(UserWarning, match="marginal"):
+        sg, lg, infg = b1.resolve_exponential("antarctica_getz", "dc8_2016_0km", tab)
+    assert infg["spectrum"] == "aa_grounded_lt500_m" and infg["usability"] == "marginal"
+    assert (sg, lg) == (0.249, 24.5)
+    # refused strata raise; site entries win over strata on a name clash
+    bad = {**tab, "lines": {**tab["lines"], "x": {"default": "gl_margin_lt500_m"}}}
+    with pytest.raises(ValueError, match="refuse"):
+        b1.resolve_exponential("x", "p", bad)
+    assert tab["spectra"]["gl_interior_gt2500"]["usability"] == "use"
+    assert b1.load_table(strata=None)["spectra"].get("gl_interior_gt2500") is None
     p, line0 = _p(), rbc.LINE
     rbc.activate_line("greenland_geikie01_transit")
     try:
