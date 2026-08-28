@@ -1,0 +1,30 @@
+geometry: {'h0_m': 506.97, 'r_pl_m': 71.18, 'theta_max_deg': 8.04, 'Lambda_min_ct_m': 5.48, 'Lambda_min_at_m': 5.0, 'Lambda_max_m': 142.35, 'strip_m': 27.5}
+{'s0': 0.0, 's1': 14.92, 'n': 1000, 'mean_dB': np.float64(-38.15), 'cv': 0.72, 'lag1_corr': 0.87, 'N_free': np.float64(0.98), 'ratio_free_dB': np.float64(-3.25), 'ratio_N11_dB': np.float64(75.8), 'ratio_N55_dB': np.float64(73.14), 'ratio_N1_dB': np.float64(-3.09), 'ratio_hk_dB': np.float64(-3.02), 'hk_mu': np.float64(19.53), 'ratio_rice_dB': np.float64(-3.09), 'dnll_free_vs_N11': np.float64(2336.59), 'dnll_free_vs_N1': np.float64(0.01), 'sigma_free_cm': 7.11, 'sigma_N11_cm': 47.0, 'sigma_N55_cm': 46.08, 'sigma_hk_cm': 7.25}
+{'s0': 7.47, 's1': 22.39, 'n': 1000, 'mean_dB': np.float64(-37.78), 'cv': 0.82, 'lag1_corr': 0.88, 'N_free': np.float64(1.39), 'ratio_free_dB': np.float64(29.22), 'ratio_N11_dB': np.float64(77.28), 'ratio_N55_dB': np.float64(81.68), 'ratio_N1_dB': np.float64(-1.52), 'ratio_hk_dB': np.float64(-1.53), 'hk_mu': np.float64(17.42), 'ratio_rice_dB': np.float64(-1.52), 'dnll_free_vs_N11': np.float64(2767.08), 'dnll_free_vs_N1': np.float64(1.29), 'sigma_free_cm': 27.63, 'sigma_N11_cm': 47.51, 'sigma_N55_cm': 48.99, 'sigma_hk_cm': 8.2}
+{'s0': 14.93, 's1': 29.86, 'n': 1000, 'mean_dB': np.float64(-36.85), 'cv': 0.75, 'lag1_corr': 0.92, 'N_free': np.float64(0.98), 'ratio_free_dB': np.float64(-2.36), 'ratio_N11_dB': np.float64(75.8), 'ratio_N55_dB': np.float64(74.02), 'ratio_N1_dB': np.float64(-2.19), 'ratio_hk_dB': np.float64(-2.13), 'hk_mu': np.float64(19.71), 'ratio_rice_dB': np.float64(-2.19), 'dnll_free_vs_N11': np.float64(2734.27), 'dnll_free_vs_N1': np.float64(0.01), 'sigma_free_cm': 7.67, 'sigma_N11_cm': 47.01, 'sigma_N55_cm': 46.39, 'sigma_hk_cm': 7.81}
+{'s0': 22.4, 's1': 37.33, 'n': 1000, 'mean_dB': np.float64(-36.63), 'cv': 0.71, 'lag1_corr': 0.83, 'N_free': np.float64(2.15), 'ratio_free_dB': np.float64(60.51), 'ratio_N11_dB': np.float64(74.08), 'ratio_N55_dB': np.float64(76.24), 'ratio_N1_dB': np.float64(-4.94), 'ratio_hk_dB': np.float64(-4.67), 'hk_mu': np.float64(2.83), 'ratio_rice_dB': np.float64(-4.94), 'dnll_free_vs_N11': np.float64(1369.23), 'dnll_free_vs_N1': np.float64(10.35), 'sigma_free_cm': 41.47, 'sigma_N11_cm': 46.41, 'sigma_N55_cm': 47.16, 'sigma_hk_cm': 6.26}
+{'s0': 29.87, 's1': 44.8, 'n': 1000, 'mean_dB': np.float64(-37.55), 'cv': 0.74, 'lag1_corr': 0.73, 'N_free': np.float64(2.49), 'ratio_free_dB': np.float64(65.27), 'ratio_N11_dB': np.float64(75.06), 'ratio_N55_dB': np.float64(75.19), 'ratio_N1_dB': np.float64(-5.48), 'ratio_hk_dB': np.float64(-5.22), 'hk_mu': np.float64(1.83), 'ratio_rice_dB': np.float64(-5.48), 'dnll_free_vs_N11': np.float64(1050.54), 'dnll_free_vs_N1': np.float64(36.42), 'sigma_free_cm': 43.26, 'sigma_N11_cm': 46.75, 'sigma_N55_cm': 46.79, 'sigma_hk_cm': 5.96}
+{'s0': 40.01, 's1': 49.8, 'n': 656, 'mean_dB': np.float64(-37.98), 'cv': 0.57, 'lag1_corr': 0.72, 'N_free': np.float64(3.07), 'ratio_free_dB': np.float64(12.29), 'ratio_N11_dB': np.float64(72.26), 'ratio_N55_dB': np.float64(69.53), 'ratio_N1_dB': np.float64(-7.02), 'ratio_hk_dB': np.float64(-6.96), 'hk_mu': np.float64(18.84), 'ratio_rice_dB': np.float64(-7.02), 'dnll_free_vs_N11': np.float64(459.39), 'dnll_free_vs_N1': np.float64(6.61), 'sigma_free_cm': 17.7, 'sigma_N11_cm': 45.78, 'sigma_N55_cm': 44.81, 'sigma_hk_cm': 5.04}
+qlook whole frame: {'n': 286.0, 'N_free': 0.99, 'ratio_N10_dB': 74.97, 'ratio_free_dB': -0.07, 'sigma_N10_cm': 46.72}
+detrend   5 traces (   74 m): residual CV 0.352, std(trend) 3.66 dB, incoherent fraction if N=6: 0.49, N=11: 1.00
+detrend  11 traces (  164 m): residual CV 0.460, std(trend) 3.43 dB, incoherent fraction if N=6: 1.00, N=11: 1.00
+detrend  21 traces (  313 m): residual CV 0.515, std(trend) 3.17 dB, incoherent fraction if N=6: 1.00, N=11: 1.00
+detrend  41 traces (  611 m): residual CV 0.631, std(trend) 2.64 dB, incoherent fraction if N=6: 1.00, N=11: 1.00
+detrend  81 traces ( 1207 m): residual CV 0.732, std(trend) 2.05 dB, incoherent fraction if N=6: 1.00, N=11: 1.00
+total std log-power dB 3.9788272
+corr(|roll|, lp) -0.563322604033677  corr(|pitch|, lp) 0.009437784022404612  roll deg p5/50/95 [-8.87339084 -1.11476409  7.6727718 ]
+acf lags 1..10: [0.87, 0.72, 0.67, 0.63, 0.6, 0.58, 0.55, 0.53, 0.5, 0.46]
+pure-speckle acf from 11-line/6-decim overlap: lag1 0.45454545454545453 lag2 0
+qlook detrend 3 (522 m): residual CV 0.423, incoherent fraction if N=10: 1.00; pure-speckle-all-incoherent CV would be 0.316
+qlook detrend 5 (870 m): residual CV 0.725, incoherent fraction if N=10: 1.00; pure-speckle-all-incoherent CV would be 0.316
+qlook detrend 9 (1566 m): residual CV 1.198, incoherent fraction if N=10: 1.00; pure-speckle-all-incoherent CV would be 0.316
+ATM blocks n 113 s range -14.0 109.0
+  sigma_5_64_cm: median 8.79 p5 4.85 p95 16.89
+  sigma_5_32_cm: median 5.55 p5 3.45 p95 11.98
+  sigma_1_64_cm: median 9.26 p5 5.40 p95 17.39
+  sigma_pl_band_cm: median 7.49 p5 4.36 p95 15.83
+  sigma_gauss_band_cm: median 8.07 p5 4.72 p95 15.29
+  ratio_pred_dB: median -0.21 p5 -7.16 p95 11.59
+  g_sigma_cm: median 8.54 p5 4.99 p95 15.98
+blocks near pilot: [(38.0, 19.3, 17.3, 16.0), (39.0, 20.1, 17.9, 17.2), (40.0, 18.0, 16.6, 13.6), (41.0, 9.1, 9.2, 0.2), (42.0, 8.4, 8.9, -0.9), (53.0, 5.9, 6.2, -4.9), (54.0, 6.1, 6.2, -4.6)]
+2k*sigma for sigma 8, 13, 18 cm: [0.65, 1.06, 1.47]
