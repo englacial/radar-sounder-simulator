@@ -1,0 +1,136 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+spec 'pilot_exponential' <- claude_notes/pilot_exponential/pilot_exponential.yaml
+calibration [antarctica_david]: gamma_surface -10.00 dB (anomaly +1.04), A = 12.8 dB/km (solved (RSSNR-vs-2H Theil-Sen regression))
+  regression: A 12.8 [11.49, 14.13] dB/km, r 0.888, n 112 (62 floating excluded)
+picked bed: reference pass baslermkb_2023 (20231212_02_015/20231212_02_016/20231212_02_017), 5455 picks over 148.32 km, line gap frac 0.0000
+bed roughness: sigma 0.1 m, l 0.886 m; nadir coherent attenuation -0.87 dB -> G2 raised 0.87 dB (double-count guard)
+rssnr gamma: 185 samples (cache:/home/thomasteisberg/Documents/coherent-radar-simulator/outputs/antarctica_david/rssnr_anchor.npz), snapshot 3YH47013745B2T5ZZR50, K -8.42 dB (K - K_phys 1.91 dB), segment G2 [-45.4 .. -25.5] dB (med -34.5), censored 11/185
+== basler_2017 (pilot_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  picked bed: residual rms 8.6 m (mean -3.0, |max| 32.9), gaps 0.0000; along-track bed roughness 21.0 -> 24.6 m rms
+  reach: surface 3714 m, bed 1163 m -> ct ±3714 m; spacing 7.47 m; n_traces 675; n_samples_sim 2797
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] basler_2017_pilot_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac65cbc2f  70.4 s  facets/iface ~1634859  n_samples 700
+  [ok] basler_2017_pilot_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac65cbc2f  68.1 s  facets/iface ~1602338  n_samples 700
+  [ok] basler_2017_pilot_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac65cbc2f  69.5 s  facets/iface ~1621710  n_samples 700
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] basler_2017_pilot_pbed_dgn_rssnr_proc (8 MB)
+  processed: aperture 161 m (12 traces, half-angle 1.49 deg), 3 looks, mocomp dz rms 0.336 m
+  single-trace decomposition at s = 55.00 km (sim trace 337, measured trace 337): bed-window bed - surface returns +14.2 dB
+== baslermkb_2022 (pilot_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  picked bed: residual rms 8.6 m (mean -3.0, |max| 32.9), gaps 0.0000; along-track bed roughness 21.0 -> 24.7 m rms
+  reach: surface 3737 m, bed 1186 m -> ct ±3737 m; spacing 11.20 m; n_traces 368; n_samples_sim 4645
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] baslermkb_2022_pilot_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iafdc3ff08  16.2 s  facets/iface ~710709  n_samples 1162
+  [ok] baslermkb_2022_pilot_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iafdc3ff08  16.1 s  facets/iface ~709302  n_samples 1162
+  [ok] baslermkb_2022_pilot_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iafdc3ff08  15.8 s  facets/iface ~710709  n_samples 1162
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] baslermkb_2022_pilot_pbed_dgn_rssnr_proc (7 MB)
+  processed: aperture 294 m (12 traces, half-angle 2.63 deg), 3 looks, mocomp dz rms 0.508 m
+  single-trace decomposition at s = 55.00 km (sim trace 184, measured trace 184): bed-window bed - surface returns +26.3 dB
+== baslermkb_2023 (pilot_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  picked bed: residual rms 8.5 m (mean -3.0, |max| 32.9), gaps 0.0000; along-track bed roughness 21.0 -> 24.7 m rms
+  reach: surface 3805 m, bed 1206 m -> ct ±3805 m; spacing 11.20 m; n_traces 368; n_samples_sim 4485
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] baslermkb_2023_pilot_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iafdc3ff08  16.6 s  facets/iface ~744241  n_samples 1122
+  [ok] baslermkb_2023_pilot_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iafdc3ff08  16.6 s  facets/iface ~740761  n_samples 1122
+  [ok] baslermkb_2023_pilot_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iafdc3ff08  16.7 s  facets/iface ~747214  n_samples 1122
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] baslermkb_2023_pilot_pbed_dgn_rssnr_proc (7 MB)
+  processed: aperture 297 m (12 traces, half-angle 2.63 deg), 3 looks, mocomp dz rms 0.396 m
+  single-trace decomposition at s = 55.00 km (sim trace 184, measured trace 184): bed-window bed - surface returns +18.3 dB
+== haps_14km (pilot_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 12861 m
+  picked bed: residual rms 8.5 m (mean -3.0, |max| 32.9), gaps 0.0000; along-track bed roughness 21.0 -> 24.7 m rms
+  reach: surface 9576 m, bed 3534 m -> ct ±9576 m; spacing 69.85 m; n_traces 368; n_samples_sim 4541
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] haps_14km_pilot_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  3.5 s  facets/iface ~92340  n_samples 1136
+  [ok] haps_14km_pilot_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  3.4 s  facets/iface ~92340  n_samples 1136
+  [ok] haps_14km_pilot_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  3.3 s  facets/iface ~92664  n_samples 1136
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] haps_14km_pilot_pbed_dgn_rssnr_proc (7 MB)
+  processed: aperture 1418 m (53 traces, half-angle 2.63 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 55.00 km (sim trace 184): bed-window bed - surface returns -9.1 dB
+== haps_20km (pilot_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  SYNTHETIC pass: 20000 m constant ellipsoidal height, roll 0, AGL med 18861 m
+  picked bed: residual rms 8.5 m (mean -3.0, |max| 32.9), gaps 0.0000; along-track bed roughness 21.0 -> 24.7 m rms
+  reach: surface 11387 m, bed 4229 m -> ct ±11387 m; spacing 83.32 m; n_traces 368; n_samples_sim 4545
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] haps_20km_pilot_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  2.4 s  facets/iface ~89145  n_samples 1137
+  [ok] haps_20km_pilot_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  2.3 s  facets/iface ~89145  n_samples 1137
+  [ok] haps_20km_pilot_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att12.8_brough0.1_0.886_fs0.5_s03_n1_gfx0.05  1.8 s  facets/iface ~89145  n_samples 1137
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] haps_20km_pilot_pbed_dgn_rssnr_proc (7 MB)
+  processed: aperture 1970 m (73 traces, half-angle 2.63 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 55.00 km (sim trace 184): bed-window bed - surface returns -9.5 dB
+  bed-return tail basler_2017: slope dB/us measured -7.62, picked_bed -4.54; excess at +2 us picked_bed -18.4; guard picked_bed FAIL (-4.8 dB)
+  bed-return tail baslermkb_2022: slope dB/us measured -5.40, picked_bed -3.28; excess at +2 us picked_bed -12.1; guard picked_bed FAIL (+0.8 dB)
+  bed-return tail baslermkb_2023: slope dB/us measured -5.18, picked_bed -3.17; excess at +2 us picked_bed -7.8; guard picked_bed FAIL (-0.0 dB)
+  bed-return tail haps_14km: slope dB/us picked_bed -2.44; guard picked_bed FAIL (-28.1 dB)
+  bed-return tail haps_20km: slope dB/us picked_bed -1.46; guard picked_bed FAIL (-25.9 dB)
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:132: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/outputs/antarctica_david/pilot_exponential/report.html
+clutter (midcol rel surf, meas/sim dB): basler_2017: -51.4/-61.8 [surface returns] | baslermkb_2022: -44.6/-60.0 [surface returns] | baslermkb_2023: -44.7/-56.1 [surface returns] | haps_14km: ----/-49.0 [surface returns] | haps_20km: ----/-46.6 [surface returns]
+	Command being timed: "uv run python tools/run_basal_clutter.py --config claude_notes/pilot_exponential/pilot_exponential.yaml --line antarctica_david"
+	User time (seconds): 1576.70
+	System time (seconds): 23.62
+	Percent of CPU this job got: 478%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 5:34.42
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 24435200
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 1362600
+	Voluntary context switches: 5421814
+	Involuntary context switches: 119369
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 147848
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

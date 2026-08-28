@@ -1,0 +1,59 @@
+schema_version: 1
+meta:
+  name: pilot_exponential
+  description: >
+    The pilot benchmark (config/experiments/pilot.yaml) with ONE thing
+    changed: the surface interface's sub-facet roughness law. Instead of the
+    C&S firn-layer Gaussian fixture (sigma 4.9 cm, l 2.98 m) the surface
+    carries the ATM-derived EXPONENTIAL-ACF pair resolved per line and pass
+    (physics.surface_roughness: {source: atm_exponential};
+    config/roughness/atm_b1.yaml merged with atm_tier2_strata.yaml,
+    tools/surface_roughness_b1.py, docs/roughness.md):
+      greenland_westcoast  site entries westcoast_{2016,2017,2019}_exp
+                           (4.78 cm / 10.0 m, 3.33 cm / 1.04 m,
+                            3.77 cm / 2.59 m), usability "use"
+      greenland_geikie01_transit  site entry geikie_2014
+                           (5.15 cm / 5.28 m), usability "use"
+      antarctica_david     no ATM on the line -> Tier 2 stratum
+                           aa_grounded_500_1500 (10.8 cm / 13.5 m),
+                           usability "marginal" (warned at run time)
+      antarctica_getz      Tier 2 stratum aa_grounded_lt500_m
+                           (24.9 cm / 24.5 m), usability "marginal" (warned)
+    Everything else -- lines, segment, passes (real + the HAPS 14/20 km
+    design points), bed method, reflectivity, attenuation, bed roughness,
+    processing -- is byte-identical to pilot.yaml, so outputs/<line>/pilot
+    (fixture, 2026-08-27) is the like-for-like control.
+
+    A one-off study, so it lives in claude_notes/ rather than
+    config/experiments/ (config/README.md; tests/test_experiment_specs.py
+    ships exactly full + pilot). Run:
+    uv run python tools/run_basal_clutter.py
+      --config claude_notes/pilot_exponential/pilot_exponential.yaml
+      --line <line>
+
+run:
+  lines: [antarctica_david, antarctica_getz, greenland_geikie01_transit, greenland_westcoast]
+  segment: pilot
+
+  extra_passes:
+    haps_14km: {carrier: reference, altitude_m: 14000.0, instrument: haps_60mhz}
+    haps_20km: {carrier: reference, altitude_m: 20000.0, instrument: haps_60mhz}
+
+  bed:                         # DEM comes from the line (identity.bed_dem)
+    nadir: picked
+    floating: picked
+    demogorgn_seed: 0
+
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse: {specular_fraction: 0.5, tilt_s0_deg: 3.0}
+
+  physics:
+    att_db_per_km: solve       # -> the line's calibration block
+    surface_roughness: {source: atm_exponential}
+    bed_roughness: {sigma_m: 0.10, corr_length_m: 0.886}
+
+  processing:
+    chain: standard
+    proc_cache: true
+    companion: false
