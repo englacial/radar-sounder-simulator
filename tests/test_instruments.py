@@ -70,8 +70,7 @@ def test_real_instrument_defers_to_the_opr_frame():
     wf, ant, dev = inst.resolve(frame)
     assert wf == frame                      # verbatim, no substitution
     assert dev == {}                        # nothing deviates
-    assert (ant.n_elements, ant.spacing_lam) == (rac.N_ELEMENTS,
-                                                 rac.SPACING_LAM)
+    assert (ant.n_elements, ant.spacing_lam) == (3, 0.45)  # OPR readme + lever_arm.m
 
 
 def test_stated_instrument_ignores_the_frame_and_flags_nothing():
@@ -127,8 +126,8 @@ def _p(**over):
          "gamma_rssnr": False, "proc": True, "dgn": False, "rev": False,
          "parts": [("20140421_01_069", (736, 2675))], "spacing": 10.6712,
          "reach": {"ct_m": 5625.0}, "window": "hann",
-         "instrument": "mcords3_p3_greenland",
-         "instrument_default": "mcords3_p3_greenland",
+         "instrument": "mcords3_p3_2014",
+         "instrument_default": "mcords3_p3_2014",
          "rc_sim": rbc.RadarConfig(dt=1e-9, n_samples=64, t0=0.0, f0=195e6),
          "aux": {}}
     p.update(over)
@@ -164,13 +163,14 @@ def test_extra_pass_rides_its_carrier_and_carries_its_own_radar():
     experiment currently exercises it."""
     from clutter_spec import RunSpec
     line = rbc.DEFAULT_LINE
-    seg = next(s for s in rbc.LINES[line]["SEGMENTS"] if s != "full_line")
+    seg = next(s for s in rbc.LINES[line]["SEGMENTS"]
+               if s not in rbc.LINES[line]["SEGMENTS_CROSSING_GL"])
     carrier = rbc.LINES[line]["ORDER"][0]
     synth = next(n for n, i in load_all().items()
                  if i.source.kind == "stated")
     kw = RunSpec.model_validate({
         "schema_version": 1, "meta": {"name": "demo"},
-        "run": {"line": line, "segment": seg, "out_name": "demo",
+        "run": {"line": line, "segment": seg,
                 "passes": [carrier, "swapped"],
                 "extra_passes": {"swapped": {
                     "carrier": carrier, "altitude_m": 14000.0,
@@ -188,7 +188,7 @@ def test_david_instruments_declare_real_antennas():
     """The david-line YAMLs carry the models read from the product's own
     param structs; the placeholders were `isotropic` clutter upper bounds."""
     insts = load_all()
-    a195 = insts["basler195_2017"].simulated.antenna
+    a195 = insts["mcords5_basler_2017"].simulated.antenna
     assert a195.kind == "array_tapered"
     assert a195.spacing_lam == pytest.approx(0.304)
     assert a195.tx_weights == [39.4, 72.6, 125.8, 177.6, 156.0, 120.7,
@@ -196,7 +196,7 @@ def test_david_instruments_declare_real_antennas():
     assert len(a195.rx_weights) == 8               # hanning(8)
     assert a195.rx_weights[3] == pytest.approx(0.9698, abs=1e-4)
     assert a195.roll_source == "nav"
-    a60 = insts["mkb60_basler"].simulated.antenna
+    a60 = insts["marfa_baslermkb_2022"].simulated.antenna
     assert a60.kind == "finite_dipole"
     assert a60.axis == "cross_track"
     assert a60.length_lam == pytest.approx(0.4)

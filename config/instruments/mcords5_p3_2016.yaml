@@ -1,0 +1,19 @@
+schema_version: 1
+name: mcords5_p3_2016
+description: MCoRDS5 on the NOAA P-3, 2016 Greenland (200/100 MHz; read per pass from the OPR frame).
+source: {kind: opr_frame}
+segments: ['20160511_03']
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # OPR readme: two channels with a 0.61 m aperture (0.41 lam at 200 MHz).
+    kind: array
+    n_elements: 2
+    spacing_lam: 0.41
+    roll_source: nav
+recorded:
+  tx_power_W: 600        # OPR readme
+  noise_figure_dB: 3.0

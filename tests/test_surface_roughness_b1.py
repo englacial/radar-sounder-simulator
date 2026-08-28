@@ -71,14 +71,14 @@ def test_atm_table_resolves_per_line_and_pass():
     _, _, inf_h = b1.resolve("greenland_westcoast", "haps_14km", 60e6,
                              30.0, tab)
     assert inf_h["spectrum"] == "westcoast_2017"           # line default
-    _, lg, infg = b1.resolve("greenland_geikie01_transit", "high", 195e6,
+    _, lg, infg = b1.resolve("greenland_geikie01_transit", "p3_2017_high", 195e6,
                              30.0, tab)
     assert infg["family"] == "exponential" and 0.5 < lg < 0.7
     with pytest.raises(KeyError):
         b1.resolve("nowhere", "x", 195e6, 30.0, tab)
     # a smaller clutter angle -> smaller k_B -> longer l
-    _, l20, _ = b1.resolve("antarctica_getz", "real_10km", 190e6, 20.0, tab)
-    _, l40, _ = b1.resolve("antarctica_getz", "real_10km", 190e6, 40.0, tab)
+    _, l20, _ = b1.resolve("antarctica_getz", "dc8_2016_11km", 190e6, 20.0, tab)
+    _, l40, _ = b1.resolve("antarctica_getz", "dc8_2016_11km", 190e6, 40.0, tab)
     assert l20 > l17 > l40
 
 
@@ -103,14 +103,15 @@ def test_resolve_surf_rough_in_runner():
 
 
 def test_spec_surface_roughness_forms():
-    base = load_spec(ROOT / "config/experiments/pilot_smoke_b1.yaml")
-    assert base.to_run_kwargs()["surf_rough"] == {"source": "atm_b1"}
+    base = load_spec(ROOT / "config/experiments/pilot.yaml")
     doc = base.model_dump()
+    doc["run"]["physics"]["surface_roughness"] = {"source": "atm_b1"}
+    assert RunSpec.model_validate(doc).to_run_kwargs()["surf_rough"] == {
+        "source": "atm_b1"}
     doc["run"]["physics"]["surface_roughness"] = {"sigma_m": 0.01,
                                                   "corr_length_m": 0.5}
     kw = RunSpec.model_validate(doc).to_run_kwargs()
     assert kw["surf_rough"] == [0.01, 0.5]
     doc["run"]["physics"]["surface_roughness"] = False
     assert RunSpec.model_validate(doc).to_run_kwargs()["surf_rough"] is False
-    ps = load_spec(ROOT / "config/experiments/pilot_smoke.yaml")
-    assert ps.to_run_kwargs()["surf_rough"] is True
+    assert base.to_run_kwargs()["surf_rough"] is True

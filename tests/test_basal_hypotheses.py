@@ -25,8 +25,30 @@ C = 299792458.0
 LINE = "antarctica_getz"
 rbc.activate_line(LINE)
 ORDER = list(rbc.LINES[LINE]["ORDER"])
-SYNTH = list(rbc.LINES[LINE]["SYNTHETIC_KEYS"])
 SEGS = list(rbc.LINES[LINE]["SEGMENTS"])
+# Shipped lines declare no synthetic passes (experiments add them through
+# extra_passes); the figure/label tests here need one, so it is injected
+# onto the activated line before every test.
+SYNTH = ["syn_14km"]
+CARRIER = rbc.LINES[LINE]["REF_PASS"]
+
+
+def _inject_synthetic():
+    rbc.activate_line(LINE)
+    base = dict(rbc.PASSES[CARRIER])
+    base["agl_med_m"] = None
+    base["synthetic_msl_m"] = 14000.0
+    rbc.PASSES = {**rbc.PASSES, SYNTH[0]: base}
+    rbc.SYNTHETIC_KEYS = tuple(SYNTH)
+
+
+@pytest.fixture(autouse=True)
+def _getz_with_synthetic():
+    _inject_synthetic()
+    yield
+
+
+_inject_synthetic()
 
 # Recorded slow-time lengths of the frames this line's windows take WHOLE
 # (slice omitted in the YAML = the entire frame). Verified against the OPR
@@ -43,9 +65,7 @@ def _resolve(parts):
                    b if b is not None else FRAME_LEN[fid]))
             for fid, (a, b) in parts]
 
-CARRIER = rbc.LINE_SPECS[LINE].synthetic_passes[SYNTH[0]].carrier if SYNTH \
-    else ORDER[0]
-SEG = next(s for s in SEGS if s != "full_line")
+SEG = "pilot"
 
 
 def _rc():
@@ -404,52 +424,38 @@ def test_syn500km_geometry_scales_as_expected():
     assert th == pytest.approx(1.522, abs=0.01)
 
 
-# --------------------------------------------- EXTENDED segment (0-69.7 km)
+# ------------------------------------------------ segment tables
 
-def test_extended_segment_table_is_a_superset_of_the_full_segment():
-    """Every pass gains an 'extended' entry whose parts CONTAIN the full
-    segment's parts of the same frame (the study window only grows), in
-    increasing-s order, with matching trace counts across the triplet."""
-    assert set(("pilot", "full", "extended", "full_line")) <= set(SEGS)
-    counts = {}
+def test_pilot_segment_is_inside_the_full_segment():
+    """The pilot window's parts lie within the full segment's parts of the
+    same frame; every segment is fully parameterised; the synthetic pass
+    re-flies the reference pass on every segment."""
+    assert set(("pilot", "full")) == set(SEGS)
     for key in ORDER:
-        ext = _resolve(rbc.PASSES[key]["extended"])
         full = dict(_resolve(rbc.PASSES[key]["full"]))
-        assert ext, key
-        for fid, (a, b) in ext:
+        for fid, (a, b) in _resolve(rbc.PASSES[key]["pilot"]):
             assert 0 <= a < b, (key, fid)
-            if fid in full:
-                fa, fb = full[fid]
-                assert a <= fa and b >= fb, (key, fid)   # only grows
-        # the extension adds at most one new frame per pass
-        assert len(set(dict(ext)) - set(full)) <= 1
-        counts[key] = sum(b - a for _, (a, b) in ext)
-    n = np.array(list(counts.values()), float)
-    assert (n.max() - n.min()) / n.mean() < 0.002       # 4692/4696/4698
-    # the synthetic passes re-fly the LOW pass line on every segment
+            assert fid in full, (key, fid)
+            fa, fb = full[fid]
+            assert fa <= a and b <= fb, (key, fid)
     for skey in SYNTH:
         for seg in SEGS:
             assert rbc.PASSES[skey][seg] == rbc.PASSES[CARRIER][seg]
-    # every segment is fully parameterised
     for seg in SEGS:
         assert seg in rbc.S0_KM and seg in rbc.DECOMP_S_KM
-    assert rbc.S0_KM["extended"] == 0.0
-    assert rbc.N_TRACES_BY_SEGMENT['extended'] > rbc.N_TRACES_BY_SEGMENT['full']
+    assert rbc.N_TRACES_BY_SEGMENT["full"] > rbc.N_TRACES_BY_SEGMENT["pilot"]
 
 
-def test_extended_cache_names_are_distinct_from_the_full_segment():
-    """The segment is part of the chunk cache name AND key, so the extended
-    run cannot collide with (or silently reuse) the 50 km caches."""
+def test_segment_name_is_part_of_the_cache_key():
     p_full = _p()
-    p_ext = {**_p(), "segment": "extended"}
+    p_pil = {**_p(), "segment": "pilot"}
     n_full = rbc.chunk_rid(p_full, 0, 20.0, True)
-    n_ext = rbc.chunk_rid(p_ext, 0, 20.0, True)
-    assert n_full != n_ext
-    assert "_full_" in n_full and "_extended_" in n_ext
+    n_pil = rbc.chunk_rid(p_pil, 0, 20.0, True)
+    assert n_full != n_pil
+    assert "_full_" in n_full and "_pilot_" in n_pil
     rows = np.arange(10)
-    assert rbc.chunk_meta(p_ext, 0, rows, 1, 10, 20.0, True)["segment"] \
-        == "extended"
-
+    assert rbc.chunk_meta(p_pil, 0, rows, 1, 10, 20.0, True)["segment"] \
+        == "pilot"
 
 
 # ------------------------------------------- single-trace decomposition
@@ -476,7 +482,7 @@ def _synthetic_pass(n_tr=6, n_s=900, t_s_us=3.0, dbs_us=9.0):
                                            spacing_lam=0.5,
                                            roll_source="nav"))
     s = np.linspace(0.0, 5000.0, n_tr)
-    p = {"key": SYNTH[0], "segment": "extended", "rc_frame": rc,
+    p = {"key": SYNTH[0], "segment": "full", "rc_frame": rc,
          "spacing": 10.0, "surf_sim": t_s, "s_sim": s, "s_m": s,
          "surf": t_s, "bot": t_b, "tw_m": tw, "dt": dt,
          "synthetic": {"agl_med_m": 30000.0}, "h_med": 30000.0,
@@ -530,45 +536,37 @@ def test_fig_decomposition_trace_renders_and_names_the_location(tmp_path):
 
 # ---------------------------- FULL_LINE segment + hybrid bed (0-148.45 km)
 
-def test_full_line_segment_table_spans_the_whole_line():
-    """Every pass gains a 'full_line' entry that CONTAINS its 'extended'
-    parts (the window only grows through the GL), in increasing-s order
-    after reversal, with trace counts matching across the triplet."""
+def test_full_segment_table_spans_the_whole_line():
+    """The full segment (0-148.45 km, through the GL) has trace counts
+    matching across the triplet after reversal."""
     counts = {}
     for key in ORDER:
-        line = _resolve(rbc.PASSES[key]["full_line"])
-        ext = dict(_resolve(rbc.PASSES[key]["extended"]))
+        line = _resolve(rbc.PASSES[key]["full"])
         for fid, (a, b) in line:
             assert 0 <= a < b, (key, fid)
-            if fid in ext:
-                ea, eb = ext[fid]
-                assert a <= ea and b >= eb, (key, fid)   # only grows
         counts[key] = sum(b - a for _, (a, b) in line)
     n = np.array(list(counts.values()), float)
     assert 9990 < n.min() and n.max() < 10010          # 9993/10004/10006
     assert (n.max() - n.min()) / n.mean() < 0.002
-    for skey in SYNTH:
-        assert rbc.PASSES[skey]["full_line"] == rbc.PASSES[CARRIER]["full_line"]
-    assert rbc.S0_KM["full_line"] == 0.0
-    assert rbc.N_TRACES_BY_SEGMENT['full_line'] > rbc.N_TRACES_BY_SEGMENT['extended']
+    assert rbc.S0_KM["full"] == 0.0
     # the default single-trace decomposition pair: one grounded, one floating
-    lo, hi = rbc.DECOMP_S_KM["full_line"]
+    lo, hi = rbc.DECOMP_S_KM["full"]
     assert lo < rbc.GL_S_KM < hi
     # blend geometry: the ramp starts AT the GL (grounded side pure DEMOGORGN)
     assert 2.0 <= rbc.GL_RAMP_KM <= 5.0
     assert rbc.GL_S_KM == 69.7
 
 
-def test_full_line_cache_names_and_keys_are_distinct():
-    """Segment name AND the hybrid marker separate the full_line caches from
+def test_full_cache_names_and_keys_are_distinct():
+    """Segment name AND the hybrid marker separate the hybrid caches from
     every earlier run; the baseline names stay byte-identical (p without a
     'hybrid' key -> no suffix, no meta key)."""
     p_base = _p()
-    p_line = {**_p(), "segment": "full_line", "hybrid": True}
+    p_line = {**_p(), "segment": "full", "hybrid": True}
     rid_b = rbc.chunk_rid(p_base, 0, 20.0, True)
     rid_l = rbc.chunk_rid(p_line, 0, 20.0, True)
     assert rid_b != rid_l
-    assert "_full_line_" in rid_l and "_hyb" in rid_l
+    assert "_full_" in rid_l and "_hyb" in rid_l
     assert "_hyb" not in rid_b
     rows = np.arange(10)
     m_b = rbc.chunk_meta(p_base, 0, rows, 1, 10, 20.0, True)
@@ -576,7 +574,7 @@ def test_full_line_cache_names_and_keys_are_distinct():
     assert "hybrid_bed" not in m_b
     assert m_l["hybrid_bed"]["gl_s_km"] == rbc.GL_S_KM
     assert m_l["hybrid_bed"]["ramp_km"] == rbc.GL_RAMP_KM
-    assert m_l["segment"] == "full_line"
+    assert m_l["segment"] == "full"
 
 
 def test_picks_bed_nn_skips_gaps_and_clamps_edges():
@@ -700,11 +698,11 @@ def test_fig_decomposition_trace_fans_out_multi_locations(tmp_path):
     assert fp is not None and fp.exists()
 
 
-def test_run_rejects_full_line_without_the_hybrid_bed():
-    with pytest.raises(ValueError, match="HYBRID"):
-        rbc.run(segment="full_line")
+def test_run_rejects_a_gl_crossing_segment_without_the_hybrid_bed():
+    with pytest.raises(ValueError, match="hybrid"):
+        rbc.run(line=LINE, segment="full", demogorgn_bed=False)
     with pytest.raises(ValueError, match="ablation"):
-        rbc.run(segment="full_line", demogorgn_bed=True, bed_ablation=True)
+        rbc.run(line=LINE, segment="full", bed_ablation=True)
 
 
 # ---------------- altitude-campaign synthetics (syn14km / syn300km) + figs
@@ -739,11 +737,11 @@ def test_frame_span_and_source_label():
                            ("20161028_05_006", (0, 1))]) \
         == "20161105_05_005/20161028_05_006"
     hi_key = ORDER[-1]
-    p_meas = {"parts": rbc.PASSES[hi_key]["full_line"], "h_med": 10763.0}
+    p_meas = {"parts": rbc.PASSES[hi_key]["full"], "h_med": 10763.0}
     lbl = rbc.source_label(hi_key, p_meas)
     assert lbl == ("2016_Antarctica_DC8 - measured 20161031_07_002-005 "
                    "(10.8 km AGL)")
-    p_syn = {"parts": rbc.PASSES[CARRIER]["full_line"],
+    p_syn = {"parts": rbc.PASSES[CARRIER]["full"],
              "synthetic": {"synthetic_msl_m": 14000.0}}
     lbl_s = rbc.source_label(SYNTH[0], p_syn)
     assert "SYNTHETIC 14 km" in lbl_s
@@ -754,10 +752,10 @@ def test_emit_pass_figs_writes_suffixed_labeled_files(tmp_path):
     """The staged-delivery figure set: separate per-pass files, written from
     one pass's analysis alone (no other pass needed)."""
     p, sim = _synthetic_pass()
-    p["parts"] = rbc.PASSES[CARRIER]["full_line"]
+    p["parts"] = rbc.PASSES[CARRIER]["full"]
     p["reach"] = {"ct_m": 2500.0}
     a = rbc.analyze_pass(p, sim, trace_s_km=3.0)
-    figs = rbc.emit_pass_figs(tmp_path, SYNTH[0], p, a, None, "extended",
+    figs = rbc.emit_pass_figs(tmp_path, SYNTH[0], p, a, None, "pilot",
                               None, None, "demogorgn")
     names = sorted(f.name for f in figs)
     k = SYNTH[0]
@@ -767,7 +765,7 @@ def test_emit_pass_figs_writes_suffixed_labeled_files(tmp_path):
     assert all(f.exists() for f in figs)
     # the crop knob is plot-only and accepted end-to-end
     fp = rbc.fig_radargrams(tmp_path, {SYNTH[0]: p}, {SYNTH[0]: a},
-                            "extended", keys=[SYNTH[0]], plot_s_max_km=3.0,
+                            "pilot", keys=[SYNTH[0]], plot_s_max_km=3.0,
                             fname="radargrams_crop.png", src="SRC LINE")
     assert fp.exists() and fp.name == "radargrams_crop.png"
 
@@ -776,8 +774,8 @@ def test_emit_pass_figs_writes_suffixed_labeled_files(tmp_path):
 
 def test_proc_cache_ids_digests_and_staleness(tmp_path):
     import json as _json
-    p = {**_p(), "segment": "full_line", "key": "high", "hybrid": True}
-    assert rbc.proc_rid(p) == "high_full_line_dgn_rssnr_proc_hyb"
+    p = {**_p(), "segment": "full", "key": "high", "hybrid": True}
+    assert rbc.proc_rid(p) == "high_full_dgn_rssnr_proc_hyb"
     p_plain = _p()
     assert rbc.proc_rid(p_plain) == "low_full_dgn_rssnr_proc"
     runs = tmp_path / "runs"

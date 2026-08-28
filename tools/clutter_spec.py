@@ -10,20 +10,17 @@ cost is visually separate: everything under ``figures:`` is cache-replay safe
 and never re-simulates, while ``bed:`` / ``reflectivity:`` / ``physics:`` /
 ``processing:`` edits cost a full run.
 
-Numbers that were DERIVED from another run (the level-anchor deficit D) carry
-their provenance inline as {value, from, how} rather than sitting in a comment
-detached from the run they came from. A bare float is accepted and coerced.
-
-Bed topography is an ENUM, not the historical pair of mutually exclusive
-booleans; ``hybrid`` must be stated explicitly (``run()`` still infers it from
-the segment, so the spec asserts the two agree rather than silently differing).
+The bed is split between data and method: the LINE declares which DEM
+exists for its grounded ice (``identity.bed_dem``), the experiment declares
+what is done on top of it (``bed.nadir``, ``bed.floating``) so one spec
+means the same thing on every line. The hybrid grounded/floating bed is
+inferred by ``run()`` from the segment's ``crosses_gl``.
 
 See config/README.md for the file layout and the meta block.
 """
 
 from __future__ import annotations
 
-from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -31,17 +28,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
 SCHEMA_VERSION = 1
-
-# Naming a synthetic pass in ``passes:`` is the only way to request it: the
-# LINE definition (config/lines/*.yaml) declares which synthetics exist.
-
-class BedSource(StrEnum):
-    """Bed topography source (replaces the picked_bed/demogorgn_bed pair)."""
-
-    BEDMACHINE = "bedmachine"
-    PICKED = "picked"
-    DEMOGORGN = "demogorgn"
-    HYBRID = "hybrid"
 
 
 class _Base(BaseModel):
@@ -67,27 +53,24 @@ class ExtraPass(_Base):
 
 
 class Meta(_Base):
-    """Experiment identity. Only ``name`` travels into the run outputs: the
-    rest describes the EXPERIMENT (which supersedes which, what claim it
-    backs) and is maintained in config/experiments/, not in a stale output dir."""
+    """Experiment identity: ``name`` is the file stem and the output
+    directory under outputs/<line case_prefix>/."""
 
     name: str
-    status: str = "exploratory"       # adopted | superseded-by:<name> | ...
-    # A benchmark is re-run to answer "did a simulator change help or hurt".
-    # Its `expected` block holds the acceptance numbers a fidelity comparison
-    # scores against.
-    role: Literal["study", "benchmark"] = "study"
-    expected: dict = {}
-    requires: list[str] = []
-    backs: str | None = None
-    runtime: str | None = None
-    note: str | None = None
+    description: str | None = None
 
 
 class Bed(_Base):
-    source: BedSource = BedSource.BEDMACHINE
-    demogorgn_seed: int = 0
-    ablation: bool = False            # --bed-ablation (adds bed-source rows)
+    """Bed construction METHOD (the DEM itself is the line's bed_dem).
+
+    nadir: 'picked' pins the grounded bed at nadir to the reference pass's
+    radar picks (DEM + along-track residual); 'dem' uses the DEM as is.
+    floating: on a crosses_gl segment the floating bed is the reference
+    pass's picks (the ice-ocean interface; DEMs report the seafloor)."""
+
+    nadir: Literal["picked", "dem"] = "picked"
+    floating: Literal["picked"] = "picked"
+    demogorgn_seed: int = 0           # used when the line's bed_dem is demogorgn
 
 
 class BedRoughness(_Base):
@@ -211,7 +194,6 @@ class Run(_Base):
     line: str | None = None
     lines: list[str] | None = None
     segment: str
-    out_name: str | None = None
     out_root: str | None = None
     n_traces: int | None = None
     passes: list[str] | None = None
@@ -255,31 +237,6 @@ class Run(_Base):
                                  "run does not simulate")
         return self
 
-    @model_validator(mode="after")
-    def _hybrid_is_explicit(self):
-        """run() infers the hybrid bed from the segment's declared
-        crosses_gl. The spec states it, so the two must agree on every
-        named line -- otherwise a file could read 'demogorgn' while the
-        run silently built a hybrid (or vice versa)."""
-        try:
-            from clutter_lines import load_all
-            specs = load_all()
-        except Exception:
-            return self                    # registry unreadable: run() guards
-        hyb = self.bed.source is BedSource.HYBRID
-        for name in ([self.line] if self.line else self.lines):
-            seg = specs.get(name) and specs[name].segments.get(self.segment)
-            if seg is None:
-                continue                   # unknown segment: run() rejects it
-            if hyb != seg.crosses_gl:
-                raise ValueError(
-                    f"line {name!r} segment {self.segment!r} "
-                    f"{'crosses' if seg.crosses_gl else 'does not cross'} "
-                    "the grounding line, so bed.source "
-                    f"{'must' if seg.crosses_gl else 'must not'} be "
-                    f"'hybrid' (got {self.bed.source!r})")
-        return self
-
 
 class RunSpec(_Base):
     schema_version: int = SCHEMA_VERSION
@@ -291,28 +248,21 @@ class RunSpec(_Base):
         if self.schema_version != SCHEMA_VERSION:
             raise ValueError(f"schema_version {self.schema_version} != "
                              f"{SCHEMA_VERSION} (this loader)")
-        if self.run.out_name and self.run.out_name != self.meta.name:
-            raise ValueError(f"meta.name {self.meta.name!r} must equal "
-                             f"run.out_name {self.run.out_name!r}")
         return self
 
     # ---------------------------------------------------------------- kwargs
     def to_run_kwargs(self):
-        """The EXACT keyword dict run_basal_clutter.run() accepts today.
-
-        Nothing here is new behaviour: the enum is expanded back into the two
-        historical booleans and the synthetic pass keys back into --add-<N>km,
-        so a spec and the equivalent CLI invocation are indistinguishable to
-        run() -- and therefore to the chunk cache."""
+        """The keyword dict run_basal_clutter.run() accepts, so a spec and
+        the equivalent CLI invocation are indistinguishable to run() -- and
+        therefore to the chunk cache."""
         r, ref, phy, proc, fig = (self.run, self.run.reflectivity,
                                   self.run.physics, self.run.processing,
                                   self.run.figures)
-        src = r.bed.source
         kw = {
             "line": r.line,          # None for a multi-line protocol:
                                      # main_config resolves --line into it
             "segment": r.segment,
-            "out_name": r.out_name or self.meta.name,
+            "out_name": self.meta.name,
             "out_root": r.out_root,
             "n_traces": r.n_traces,
             "passes": list(r.passes) if r.passes else None,
@@ -320,12 +270,10 @@ class RunSpec(_Base):
             "extra_passes": ({k: v.model_dump(exclude_none=True)
                               for k, v in r.extra_passes.items()}
                              or None),
-            "picked_bed": src is BedSource.PICKED,
-            # the hybrid bed is a DEMOGORGN grounded side blended into the
-            # floating picks, so it enters run() through the same flag
-            "demogorgn_bed": src in (BedSource.DEMOGORGN, BedSource.HYBRID),
+            "picked_bed": r.bed.nadir == "picked",
+            # None -> the line's bed_dem decides (demogorgn or bedmachine)
+            "demogorgn_bed": None,
             "demogorgn_seed": r.bed.demogorgn_seed,
-            "bed_ablation": r.bed.ablation,
             "gamma_rssnr": ref.gamma_from_rssnr,
             "spec": (None if ref.specular_diffuse is None else
                      (ref.specular_diffuse.specular_fraction,

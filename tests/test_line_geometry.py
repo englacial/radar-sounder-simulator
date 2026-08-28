@@ -75,25 +75,25 @@ def test_geikie_transit_is_one_path_through_all_three_frames():
     the s 40-60 km TURN on different radii, up to 1.3 km apart -- which is
     accepted so that the line is one path."""
     ln = LINES["greenland_geikie01_transit"]
-    assert set(ln.segments) >= {"full", "transit"}
+    assert set(ln.segments) == {"pilot", "full"}
     assert "20140421_01_071" in ln.reference.frames      # axis must reach it
-    tr = {k: [p.frame for p in ps.segments["transit"]]
+    tr = {k: [p.frame for p in ps.segments["full"]]
           for k, ps in ln.passes.items()}
-    assert tr["low"] == ["20140421_01_069", "20140421_01_070",
+    assert tr["p3_2014_low"] == ["20140421_01_069", "20140421_01_070",
                          "20140421_01_071"]
-    assert tr["high"] == ["20170424_01_067", "20170424_01_068",
+    assert tr["p3_2017_high"] == ["20170424_01_067", "20170424_01_068",
                           "20170424_01_069"]
     # whole frames (slice omitted) resolved from recorded lengths
     # (verified against the OPR products 2026-08-21)
     flen = {"20140421_01_070": 3332, "20140421_01_071": 3332,
             "20170424_01_067": 3335, "20170424_01_068": 3335}
     n = {k: sum((p.slice[1] - p.slice[0]) if p.slice is not None
-                else flen[p.frame] for p in ps.segments["transit"])
+                else flen[p.frame] for p in ps.segments["full"])
          for k, ps in ln.passes.items()}
-    assert abs(n["low"] - n["high"]) / max(n.values()) < 0.01
+    assert abs(n["p3_2014_low"] - n["p3_2017_high"]) / max(n.values()) < 0.01
     # the decomposition locations must sit in the WELL-ALIGNED stretches,
     # not in the turn
-    for v in ln.segments["transit"].decomp_s_km:
+    for v in ln.segments["full"].decomp_s_km:
         assert not (40.0 < v < 80.0), v
 
 

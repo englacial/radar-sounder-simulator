@@ -157,9 +157,13 @@ def test_case_tag_with_dgn():
     assert rbc.case_tag(True) == "_pbed"
 
 
-def test_dgn_plus_picked_bed_raises():
-    with pytest.raises(ValueError, match="follow-up"):
-        rbc.run(segment="full", picked_bed=True, demogorgn_bed=True)
+def test_dgn_plus_picked_bed_has_its_own_cache_tag():
+    """DEMOGORGN + pick residual (bed.nadir: picked on a demogorgn line)
+    is a distinct bed from either alone, so its tag must be distinct."""
+    both = rbc.case_tag(True, True, True, True)
+    assert both == "_pbed_dgn_rssnr_proc"
+    assert both not in (rbc.case_tag(True, True, True),
+                        rbc.case_tag(False, True, True, True))
 
 
 def test_nadir_bed_offset_math():

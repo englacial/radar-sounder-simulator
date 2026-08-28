@@ -59,7 +59,7 @@ def load_pass(spec, key, segment):
     syn = spec.synthetic_passes.get(key)
     if ps is None and syn is not None:
         return None                     # synthetic: no measured data exists
-    season = ps.season or spec.identity.season
+    season = ps.season
     parts = ps.segments[segment]
     frames, bots, full_ll = [], [], []
     for part in parts:

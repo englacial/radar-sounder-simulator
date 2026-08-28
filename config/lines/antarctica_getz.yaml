@@ -1,217 +1,100 @@
 schema_version: 1
 name: antarctica_getz
+# Altitude line: one MCoRDS3 DC-8 system flown at 0.4 / 9.2 / 10.7 km AGL
+# over the same Getz transit in 2016. Crosses the grounding line at s 69.7 km.
+
 identity:
   case_prefix: antarctica_getz
-  season: 2016_Antarctica_DC8
   crs: EPSG:3031
   fc_hz: 190000000.0
   grounding_line_s_km: 69.7
+  bed_dem: demogorgn
+
 reference:
-  pass: real_low
-  frames:
-  - '20161105_05_005'
-  - '20161105_05_006'
-  - '20161105_05_007'
-order:
-- real_low
-- real_9km
-- real_10km
+  pass: dc8_2016_0km
+  frames: ['20161105_05_005', '20161105_05_006', '20161105_05_007']
+
+order: [dc8_2016_0km, dc8_2016_9km, dc8_2016_11km]
+
 passes:
-  real_low:
+  dc8_2016_0km:
     agl_med_m: 442.0
+    season: 2016_Antarctica_DC8
     param_frame: '20161105_05_005'
     instrument: mcords3_dc8_2016
     reversed: false
     segments:
       pilot:
-      - frame: '20161105_05_005'
-        slice:
-        - 2020
-        - 2693
+      - {frame: '20161105_05_005', slice: [2020, 2693]}
       full:
-      - frame: '20161105_05_005'
-        slice:
-        - 1212
-        - 3333
-      - frame: '20161105_05_006'
-        slice:
-        - 0
-        - 1244
-      extended:
-      - frame: '20161105_05_005'
-      - frame: '20161105_05_006'
-        slice:
-        - 0
-        - 1359
-      full_line:
-      - frame: '20161105_05_005'
-      - frame: '20161105_05_006'
-      - frame: '20161105_05_007'
-        slice:
-        - 0
-        - 3327
-  real_9km:
+      - {frame: '20161105_05_005'}
+      - {frame: '20161105_05_006'}
+      - {frame: '20161105_05_007', slice: [0, 3327]}
+  dc8_2016_9km:
     agl_med_m: 9150.0
+    season: 2016_Antarctica_DC8
     param_frame: '20161028_05_006'
     instrument: mcords3_dc8_2016
     reversed: true
     segments:
       pilot:
-      - frame: '20161028_05_006'
-        slice:
-        - 858
-        - 1532
+      - {frame: '20161028_05_006', slice: [858, 1532]}
       full:
-      - frame: '20161028_05_006'
-        slice:
-        - 0
-        - 2341
-      - frame: '20161028_05_005'
-        slice:
-        - 2308
-        - 3337
-      extended:
-      - frame: '20161028_05_007'
-        slice:
-        - 0
-        - 216
-      - frame: '20161028_05_006'
-      - frame: '20161028_05_005'
-        slice:
-        - 2194
-        - 3337
-      full_line:
-      - frame: '20161028_05_007'
-        slice:
-        - 0
-        - 216
-      - frame: '20161028_05_006'
-      - frame: '20161028_05_005'
-      - frame: '20161028_05_004'
-        slice:
-        - 223
-        - 3337
-  real_10km:
+      - {frame: '20161028_05_007', slice: [0, 216]}
+      - {frame: '20161028_05_006'}
+      - {frame: '20161028_05_005'}
+      - {frame: '20161028_05_004', slice: [223, 3337]}
+  dc8_2016_11km:
     agl_med_m: 10684.0
+    season: 2016_Antarctica_DC8
     param_frame: '20161031_07_005'
     instrument: mcords3_dc8_2016
     reversed: true
     segments:
       pilot:
-      - frame: '20161031_07_005'
-        slice:
-        - 337
-        - 1011
+      - {frame: '20161031_07_005', slice: [337, 1011]}
       full:
-      - frame: '20161031_07_005'
-        slice:
-        - 0
-        - 1820
-      - frame: '20161031_07_004'
-        slice:
-        - 1786
-        - 3336
-      extended:
-      - frame: '20161031_07_005'
-        slice:
-        - 0
-        - 3033
-      - frame: '20161031_07_004'
-        slice:
-        - 1671
-        - 3336
-      full_line:
-      - frame: '20161031_07_005'
-        slice:
-        - 0
-        - 3033
-      - frame: '20161031_07_004'
-      - frame: '20161031_07_003'
-      - frame: '20161031_07_002'
-        slice:
-        - 3044
-        - 3341
-synthetic_passes:
-  syn_14km:
-    altitude_m: 14000.0
-    carrier: real_low
-  syn_20km:
-    altitude_m: 20000.0
-    carrier: real_low
+      - {frame: '20161031_07_005', slice: [0, 3033]}
+      - {frame: '20161031_07_004'}
+      - {frame: '20161031_07_003'}
+      - {frame: '20161031_07_002', slice: [3044, 3341]}
+
 segments:
-  pilot:
+  pilot:                       # 10 km grounded window, s 30-40 km
     s0_km: 30.0
     n_traces: 48
-    decomp_s_km:
-    - 35.0
-  full:
-    s0_km: 18.0
-    n_traces: 240
-    decomp_s_km:
-    - 31.0
-  extended:
+    decomp_s_km: [35.0]
+  full:                        # whole 148 km overlap, grounded + floating
     s0_km: 0.0
-    n_traces: 335
-    decomp_s_km:
-    - 31.0
-  full_line:
-    s0_km: 0.0
-    crosses_gl: true
     n_traces: 714
-    decomp_s_km:
-    - 31.0
-    - 120.0
+    crosses_gl: true
+    decomp_s_km: [31.0, 120.0]
+
 figures:
-  radargram:
-    y_us:
-    - -1.0
-    - 13.5
-    db:
-    - -90.0
-    - 5.0
-    scale: shared
-    source_color: false   # tint sim panels by source (docs/source_color_radargrams.md)
-  profile:
-    rel_us:
-    - -1.5
-    - 14.5
-    x_us:
-    - -1.0
-    - 13.5
-    db:
-    - -110.0
-    - 5.0
+  radargram: {y_us: [-1.0, 13.5], db: [-90.0, 5.0], scale: shared, source_color: false}
+  profile: {rel_us: [-1.5, 14.5], x_us: [-1.0, 13.5], db: [-110.0, 5.0]}
+
 rssnr:
   snapshot: 3YH47013745B2T5ZZR50
-  store:
-    bucket: opr-radar-metrics
-    prefix: icechunk/antarctica
-    region: us-west-2
+  store: {bucket: opr-radar-metrics, prefix: icechunk/antarctica, region: us-west-2}
+
 provenance:
-  measured_caveats: |-
-    Measured references are CSARP_standard. Scout pitfalls recorded: the low pass composites 1/3/10 us waveforms vs 3/10 us on the high passes (do not compare the first ~3 us below the surface across passes as one instrument); PRF differs (12000 vs 7500 Hz) though the posting does not; BedMachine's 500 m bed reproduces only ~55% of the radar-pick along-track bed roughness rms, so simulated basal clutter is expected systematically smoother and weaker in fine texture than measured.
+  measured_caveats: >
+    CSARP_standard. The low pass composites 1/3/10 us waveforms vs 3/10 us on
+    the high passes (first ~3 us below the surface not comparable across
+    passes); PRF 12000 vs 7500 Hz. BedMachine's 500 m bed reproduces ~55% of
+    the radar-pick along-track roughness rms.
   real_chain:
     product: CSARP_standard
-    sar: |-
-      motion-compensated f-k migration, sigma_x 2.5 m SLC, start_eps 3.15 (2016 param_csarp/param_sar, scout-verified)
-    combine: |-
-      delay-and-sum channels; rline_rng [-5..5] = 11 looks, dline 6 -> 14.85 m posting, ~25 m effective along-track resolution (M24 CReSIS-standard convention; 11/6 not directly read from the 2016 structs -- recorded assumption)
-    window: ft_wind hanning (scout hand-verified)
+    sar: motion-compensated f-k migration, sigma_x 2.5 m SLC (2016 param_csarp, verified)
+    combine: delay-and-sum, 11 looks, dline 6 -> 14.85 m posting (CReSIS-standard convention, assumed)
+    window: hanning (verified)
 
 calibration:
   gamma_surface_db:
     value: -10.0
     why: >
-      user decision 2026-08-20: the in-run solve gave +4.34 dB, which is not
-      a physically plausible surface reflectivity (it absorbs chain/model
-      anomalies into the calibration). Pin the physical ~-10 dB (~1 dB
-      above smooth air->ice Fresnel -11.03) and read the anomaly where it
-      belongs: in the recorded bed-level residuals and the gamma_solve
-      diagnostic of every run. claude_notes/gamma_solve_design_2026-08-20.md
-      has the per-pass numbers.
-  # user decision 2026-08-20: adopt the regression (A=18.61 [5.17,30.44],
-  # r=0.41 -- weak leverage, consistent with the retired manual 20 from the
-  # attenuation family analysis; that era's rationale is in git history).
-  att_db_per_km: solve
-# Line-level overrides of the study-wide measurement conventions
-# (config/analysis.yaml). Recorded in every run config built on this line.
+      Physical air-ice value (~1 dB above smooth Fresnel -11.03). The in-run
+      solve gave +4.34 dB, absorbing model anomalies; kept as a diagnostic
+      (claude_notes/gamma_solve_design_2026-08-20.md).
+  att_db_per_km: solve       # Theil-Sen RSSNR-vs-2H regression, grounded samples

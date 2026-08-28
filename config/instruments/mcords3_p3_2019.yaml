@@ -1,0 +1,21 @@
+schema_version: 1
+name: mcords3_p3_2019
+description: MCoRDS3 on the NASA P-3, 2019 Greenland (195/30 MHz; read per pass from the OPR frame).
+source: {kind: opr_frame}
+segments: ['20190514_01']
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # OPR readme: 7 centre elements, boxcar weights, with +/-18 deg
+    # left/right steered beams formed from 3-element sub-arrays. Only the
+    # nadir 7-element beam is modelled.
+    kind: array
+    n_elements: 7
+    spacing_lam: 0.5
+    roll_source: nav
+recorded:
+  tx_power_W: 1050
+  noise_figure_dB: 3.0

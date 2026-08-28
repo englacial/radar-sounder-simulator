@@ -1,0 +1,19 @@
+schema_version: 1
+name: marfa_baslermkb_2022
+description: UTIG MARFA on the KU ski-Basler (MKB), 2022 and 2023 Antarctica (60/15 MHz; read per pass from the OPR frame). Not covered by the OPR readme.
+source: {kind: opr_frame}
+segments: ['20221212_01', '20231212_02']
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # Product is the right-wing antenna alone (param_array: one wf-adc pair,
+    # no beamforming), so cross-track rejection is the element pattern:
+    # 2.0 m flat-plate dipole under the wing, modelled as a finite thin
+    # dipole of 0.40 lam, axis cross-track. Plate width and wing not modelled.
+    kind: finite_dipole
+    axis: cross_track
+    length_lam: 0.4
+    roll_source: nav

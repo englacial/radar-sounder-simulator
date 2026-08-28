@@ -1,225 +1,100 @@
 schema_version: 1
 name: greenland_westcoast
-
-# A REPEAT-PASS INSTRUMENT LINE, not an altitude line.
-#
-# Three P-3 flights cross the same west-coast transit at essentially the
-# same height (476-500 m median AGL) over ~1.0 km of ice. Two of them --
-# 2017 and 2019 -- fly the SAME 195/30 MHz system two years apart, and the
-# third flies the 200/100 MHz system: so the line carries both an
-# instrument swap AND a same-instrument repeat. The 2017 vs 2019 spread is
-# the product-to-product noise floor with NO instrument change, which is
-# the bar any 200/100-vs-195/30 difference must clear before it means
-# anything.
-#
-# REPLACED 2026-08-19. The previous line on this coast (2019 reference,
-# frames 20190514_01_045-046, ~15 km west) is retired: this corridor
-# strictly dominates it -- longer (96.9 vs 49.8 km after the C-130
-# removal... vs 97.4 two-way), better aligned (2016 flies 47 m median here
-# vs 109 m there), and it adds the same-instrument repeat pair. History
-# holds the old definition.
-#
-# EXCLUDED: both 2015 C-130 passes over this corridor (20150417_02_042-043
-# here; 20150425_02_039 on the old corridor). The 2015 C-130 season's
-# CSARP_standard products have the transmitted-waveform IMAGES (separate
-# waveforms combined to extend dynamic range) incorrectly combined, so the
-# surface and bed sit on DIFFERENT radiometric scales within one trace --
-# observed directly on the old corridor as a brightness step at the ~10 us
-# img_comb boundary, a -115 dB measured bed (31 dB below the P-3 products
-# over the same bed) and an 87 m rms thickness disagreement. Also not
-# carried: 20110423_01_020-021 (2011 P-3, 195/30), which only enters the
-# corridor at s 22.1 km and flies 124 m off -- dropping it buys 25 km of
-# window; it remains the natural extension if a third epoch of the 195/30
-# repeat is ever worth more than the length.
+# Instrument line: three P-3 flights over the same west-coast transit at
+# ~0.5 km AGL. 2017 and 2019 fly the 195/30 MHz MCoRDS3 (a same-instrument
+# repeat, the product-to-product noise floor); 2016 flies the 200/100 MHz
+# 2-element MCoRDS5 (the instrument swap). Excluded: both 2015 C-130 passes
+# (mis-combined waveform images put surface and bed on different radiometric
+# scales) and 20110423_01_020-021 (enters the corridor only at s 22 km).
 
 identity:
   case_prefix: greenland_westcoast
-  season: 2017_Greenland_P3
   crs: EPSG:3413
   fc_hz: 195000000.0
   grounding_line_s_km: null
+  bed_dem: bedmachine
 
 reference:
   pass: p3_2017
-  frames:
-  - '20170510_03_013'
-  - '20170510_03_014'
+  frames: ['20170510_03_013', '20170510_03_014']
 
-# Chronological -- no altitude ordering is possible at one flying height.
-order:
-- p3_2016
-- p3_2017
-- p3_2019
+order: [p3_2016, p3_2017, p3_2019]
 
 passes:
   p3_2016:
     agl_med_m: 484.0
     season: 2016_Greenland_P3
     param_frame: '20160511_03_034'
-    instrument: mcords_p3_2016_200mhz
+    instrument: mcords5_p3_2016
     reversed: false
     segments:
-      full:
-      - frame: '20160511_03_033'
-        slice:
-        - 3207
-        - 3332
-      - frame: '20160511_03_034'
-      - frame: '20160511_03_035'
-        slice:
-        - 0
-        - 3023
       pilot:
-      - frame: '20160511_03_034'
-        slice:
-        - 2365
-        - 3034
+      - {frame: '20160511_03_034', slice: [2365, 3034]}
+      full:
+      - {frame: '20160511_03_033', slice: [3207, 3332]}
+      - {frame: '20160511_03_034'}
+      - {frame: '20160511_03_035', slice: [0, 3023]}
   p3_2017:
     agl_med_m: 500.0
     season: 2017_Greenland_P3
     param_frame: '20170510_03_013'
-    instrument: mcords3_p3_greenland
+    instrument: mcords3_p3_2014
     reversed: false
     segments:
-      full:
-      - frame: '20170510_03_013'
-        slice:
-        - 186
-        - 3334
-      - frame: '20170510_03_014'
       pilot:
-      - frame: '20170510_03_013'
-        slice:
-        - 2678
-        - 3334
-      - frame: '20170510_03_014'
-        slice:
-        - 0
-        - 12
+      - {frame: '20170510_03_013', slice: [2678, 3334]}
+      - {frame: '20170510_03_014', slice: [0, 12]}
+      full:
+      - {frame: '20170510_03_013', slice: [186, 3334]}
+      - {frame: '20170510_03_014'}
   p3_2019:
     agl_med_m: 476.0
     season: 2019_Greenland_P3
     param_frame: '20190514_01_039'
-    instrument: mcords_p3_2019
+    instrument: mcords3_p3_2019
     reversed: false
     segments:
-      full:
-      - frame: '20190514_01_039'
-      - frame: '20190514_01_040'
-        slice:
-        - 0
-        - 3146
       pilot:
-      - frame: '20190514_01_039'
-        slice:
-        - 2491
-        - 3160
-
-synthetic_passes:
-  # Constant-ellipsoidal-height passes riding the reference pass's geometry,
-  # picks and system params (the 195/30 MHz 2017 P-3): the design-study
-  # altitudes. Not benchmark members -- the std_benchmark protocol runs the
-  # real passes only; request these explicitly via passes: in an experiment.
-  syn14km:
-    altitude_m: 14000.0
-    carrier: p3_2017
-    facet_spacing_scale: 0.7
-    why: >
-      Inherited from the geikie syn14km gate (2026-08-11), the
-      syn500km/syn300km failure class: at 14 km the beta = 0.5 facet spacing
-      builds facets that trip the Fresnel-zone LPA check on the anisotropic
-      wide-reach EPSG:3413 scene window, and 0.7x snaps the DEM stride down
-      one notch to clear it. Same DEM, similar latitude and reach here, so
-      the same scale is carried -- RE-GATE with a 2-trace pilot on this
-      line's first synthetic run rather than trusting the transfer.
-  syn20km:
-    altitude_m: 20000.0
-    carrier: p3_2017
-    facet_spacing_scale: 0.7
-    why: >
-      Same class as syn14km, larger reach. Re-gate on first run.
+      - {frame: '20190514_01_039', slice: [2491, 3160]}
+      full:
+      - {frame: '20190514_01_039'}
+      - {frame: '20190514_01_040', slice: [0, 3146]}
 
 segments:
-  # 10 km smoke window, mid-line (s 40-50 on the 2017 axis).
-  pilot:
+  pilot:                       # 10 km window, s 40-50 km on the 2017 axis
     s0_km: 40.0
     n_traces: 48
-    decomp_s_km:
-    - 45.0
-  # s 2.77 -> 99.68 km on the 2017 axis: the three-way overlap, from nav.
-  full:
+    decomp_s_km: [45.0]
+  full:                        # s 2.8-99.7 km, the three-way overlap
     s0_km: 2.8
     n_traces: 470
-    decomp_s_km:
-    - 50.0
+    decomp_s_km: [50.0]
 
 figures:
-  # ~1.0 km of ice, so the bed sits ~12 us below the surface.
-  radargram:
-    y_us: [-1.0, 18.0]
-    db: [-110.0, 5.0]
-    scale: shared
-    source_color: false   # tint sim panels by source (docs/source_color_radargrams.md)
-  profile:
-    rel_us: [-1.5, 18.5]
-    x_us: [-1.0, 18.0]
-    db: [-130.0, 5.0]
+  radargram: {y_us: [-1.0, 18.0], db: [-110.0, 5.0], scale: shared, source_color: false}
+  profile: {rel_us: [-1.5, 18.5], x_us: [-1.0, 18.0], db: [-130.0, 5.0]}
 
 rssnr:
-  # Verified 2026-08-19 directly against the pinned snapshot: both reference
-  # frames are present -- _013 with 32/42 usable traces (76%), _014 with
-  # 42/42 -- at ~1.4 km sampling, the same store and snapshot the geikie
-  # line uses. (An earlier revision of this file claimed no store covered
-  # these segments; that was asserted, not checked.)
-  # NOTE: what is verified is that the DATA EXISTS; the line's calibration
-  # block supplies gamma_surface and A for the mapping.
   snapshot: GEAMAHQ7BRVPG9SQPK20
-  store:
-    bucket: opr-radar-metrics
-    prefix: icechunk/greenland
-    region: us-west-2
-
-# This line has no grounding line and no Antarctic bed ensemble.
-unsupported:
-- demogorgn_bed
-- hybrid
+  store: {bucket: opr-radar-metrics, prefix: icechunk/greenland, region: us-west-2}
 
 provenance:
   measured_caveats: >
-    Measured references are CSARP_standard. THREE PRODUCTS, TWO SYSTEMS: the
-    fast-time bin is 9.99 ns (2016), 16.67 ns (2019) and 33.33 ns (2017), so
-    no depth or delay comparison may be made by bin index -- only in metres
-    or microseconds on each pass's own lattice. Note the same-instrument
-    pair (2017/2019, identical 195/30 MHz) still differs 2x in product
-    fast-time bin: lattice is a PRODUCT property, not an instrument one.
-    Bandwidth differs 100 vs 30 MHz across the swap (~3x range resolution).
-    TRACK CAVEAT: p3_2016 flies ~47 m off the reference track (median, max
-    264 m); p3_2019 ~13 m (max 99 m).
+    CSARP_standard. Three products, two systems: fast-time bin 9.99 ns (2016),
+    33.33 ns (2017), 16.67 ns (2019), so compare in metres/microseconds only.
+    Bandwidth 100 vs 30 MHz across the swap. Track offsets vs reference:
+    p3_2016 ~47 m median (max 264 m), p3_2019 ~13 m (max 99 m).
   real_chain:
     product: CSARP_standard
-    sar: >
-      Per-season CReSIS processing; NOT read from these seasons' param
-      structs. Recorded as an assumption, not a measurement.
-    combine: >
-      Look/decimation convention ASSUMED to be the CReSIS standard. Three
-      seasons across four years are unlikely to share one convention exactly.
-    window: >
-      Assumed hanning, following the other Greenland lines. Not verified per
-      season on this line.
-    caveat: >
-      This line exists for INSTRUMENT comparison, so its processing
-      provenance is the weakest part of it and the part most worth verifying
-      before any quantitative cross-instrument claim.
+    sar: per-season CReSIS processing (assumed, not read from the param structs)
+    combine: CReSIS-standard look/decimation convention (assumed)
+    window: hanning (assumed)
 
 calibration:
   gamma_surface_db:
     value: -10.0
     why: >
-      user decision 2026-08-20: the in-run solve gave -3.73 dB, which is not
-      a physically plausible surface reflectivity (it absorbs chain/model
-      anomalies into the calibration). Pin the physical ~-10 dB (~1 dB
-      above smooth air->ice Fresnel -11.03) and read the anomaly where it
-      belongs: in the recorded bed-level residuals and the gamma_solve
-      diagnostic of every run. claude_notes/gamma_solve_design_2026-08-20.md
-      has the per-pass numbers.
+      Physical air-ice value (~1 dB above smooth Fresnel -11.03). The in-run
+      solve gave -3.73 dB, absorbing model anomalies; kept as a diagnostic
+      (claude_notes/gamma_solve_design_2026-08-20.md).
   att_db_per_km: solve

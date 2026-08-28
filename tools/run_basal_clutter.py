@@ -45,7 +45,7 @@ the hemisphere), has no grounding line, and mixes two seasons (one per
 pass, hence the per-pass "season" key).
 
 Run:  uv run python tools/run_basal_clutter.py \
-          --config config/experiments/ant_att20_klevel.yaml   # PREFERRED: a named,
+          --config config/experiments/pilot.yaml --line <line>   # PREFERRED: a named,
       # committed experiment spec (config/README.md). The flag front door
       # below is unchanged and builds the same RunSpec, so both produce
       # identical chunk cache keys.
@@ -188,7 +188,7 @@ def derive_reach(h_max, dbs_max, d_min):
 
 PBED_TAG = "_pbed"          # output/cache suffix; BedMachine runs stay cached
 PICKED_BED_NOTE = (
-    "bed = BedMachine + resid(s), resid(s) = picked_bed(s) - BedMachine at "
+    "bed = DEM + resid(s), resid(s) = picked_bed(s) - DEM at "
     "nadir(s) on the anchor along-track axis, picks from the LOW pass only "
     "(20161105_05_005-007) and applied IDENTICALLY to all three passes. The "
     "nadir bed therefore matches the radar picks exactly while BedMachine's "
@@ -200,7 +200,8 @@ PICKED_BED_NOTE = (
     "cross-track ridges out to +-ct (an unavoidable consequence of "
     "correcting a 2-D DEM with a 1-D profile); the fast-time grid, reaches "
     "and facet spacings are left at their BedMachine-run values so the two "
-    "runs are directly comparable.")
+    "runs are directly comparable. The DEM is the line's bed_dem (BedMachine "
+    "or a DEMOGORGN realization; on a crosses_gl segment the hybrid grid).")
 
 
 # ========================================================================
@@ -283,7 +284,8 @@ for _n, _s in LINE_SPECS.items():
 # are declared explicitly so the set is visible in one place to readers,
 # editors and static analysis, which cannot see through globals().update().
 LINE: str = ""                         # line key
-SEASON: str = ""                       # default season; passes may override
+SEASON: str = ""                       # reference pass season
+BED_DEM: str = ""                      # grounded-ice DEM: bedmachine|demogorgn
 CRS: str = ""                          # anchor along-track / pick-axis CRS
 CASE_PREFIX: str = ""                  # output + verification case prefix
 OUT_DEFAULT: Path = ROOT               # outputs/<case_prefix>
@@ -471,7 +473,7 @@ def apply_picked_bed(base, ref):
             "residual_mean_m": round(float(r_seg.mean()), 1),
             "residual_absmax_m": round(float(np.abs(r_seg).max()), 1),
             "bed_roughness_rms_m": {
-                "bedmachine": round(roughness_rms(s_ref[seg], bm[seg]), 1),
+                "dem": round(roughness_rms(s_ref[seg], bm[seg]), 1),
                 "picked": round(roughness_rms(s_ref[seg], pick[seg]), 1),
                 "scout_reference": {"bedmachine": 33.3, "radar_picks": 60.5}},
             "bed_clamp_frac_after": round(clamp, 6),
@@ -951,9 +953,8 @@ DGN_NOTE = (
     "onto the 32 m scene grid; pinned snapshot, seed recorded. Conditioned "
     "on this line (ensemble sd 0.5 m at nadir) with isotropic 2-D texture; "
     "its nadir bed differs from our picks by ~43.7 m rms (+44 m median raw; "
-    "thickness-convention disagreement, scout-documented) -- reported, not "
-    "corrected. Plain DEMOGORGN; the picked-bed hybrid is a recorded "
-    "follow-up.")
+    "thickness-convention disagreement, scout-documented); with the picked "
+    "bed (bed.nadir: picked) the along-track pick residual is applied on top.")
 
 
 def bed_tilt_rad(bed, transform):
@@ -1008,8 +1009,8 @@ def apply_demogorgn_bed(base, fsub, ct_m, seed):
 # GL crop this scene-level hybrid, so their facets are built from the
 # blended grid.
 HYBRID_BED_NOTE = (
-    "HYBRID bed (full_line): s < GL (69.7 km) = DEMOGORGN realization "
-    "(seed recorded; identical source/snapshot to the extended run), "
+    "HYBRID bed (crosses_gl segment): s < GL = the line's grounded DEM "
+    "(DEMOGORGN realization, seed recorded), "
     "s > GL + ramp = LOW-pass radar basal picks (ice-ocean interface), "
     "nearest-neighbour in anchor s and constant cross-track (flat-ish "
     "shelf-base approximation, recorded); linear blend over the ramp. "
@@ -1726,14 +1727,11 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
     # Picked bed: the fast-time grid, reach and facet spacing above stay at
     # their BedMachine values (derived from each pass's OWN picks) so the two
     # runs share one lattice and are directly comparable.
-    if dgn_seed is not None and ref is not None:
-        raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
-                         "follow-up, not wired (clean three-way ablation)")
     if hybrid:
         if dgn_seed is None or axis is None:
             raise ValueError("the hybrid bed needs a DEMOGORGN seed AND the "
-                             "anchor pick axis (--demogorgn-bed on the "
-                             "full_line segment)")
+                             "anchor pick axis (--demogorgn-bed on a "
+                             "crosses_gl segment)")
         aux["demogorgn"] = apply_hybrid_bed(base, fsub_sim, reach["ct_m"],
                                             dgn_seed, axis)
     else:
@@ -3282,7 +3280,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         surf_rough=True, out_root=None, force=False, make_report=True,
         picked_bed=False, gamma_rssnr=False, processing="none",
         bed_ablation=False,
-        demogorgn_bed=False,
+        demogorgn_bed=None,     # None -> the line's bed_dem decides
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
         bed_rough_extra_db=0.0, passes=None, spec=None,
@@ -3296,6 +3294,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     # Always re-activate: this resets PASSES to the line definition, so
     # extra_passes added below cannot leak into a later run in-process.
     activate_line(line or LINE)
+    if demogorgn_bed is None:
+        demogorgn_bed = BED_DEM == "demogorgn"
     # The grazing-angle facet-lattice fix is a BUG FIX and is ON by default
     # (analysis.yaml grazing_fix.s_eff); False (--no-grazing-fix) is the
     # legacy path, kept only for artifact demonstrations and A/B regression.
@@ -3343,13 +3343,11 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     hybrid = segment in SEGMENTS_CROSSING_GL
     if hybrid and not demogorgn_bed:
         raise ValueError(
-            f"segment {segment!r} spans the grounding line (the line "
-            "declares crosses_gl) and uses the HYBRID bed -- grounded "
-            "DEMOGORGN blended into the floating reference-pass picks -- "
-            "so it must run with the DEMOGORGN bed enabled: "
-            "BedMachine/plain beds would model the SEAFLOOR beyond the GL")
+            f"segment {segment!r} crosses the grounding line: the hybrid "
+            "bed (grounded DEM blended into the floating reference-pass "
+            "picks) is wired for bed_dem demogorgn only")
     if hybrid and bed_ablation:
-        raise ValueError("--bed-ablation is not wired for the full_line "
+        raise ValueError("--bed-ablation is not wired for a crosses_gl "
                          "hybrid segment")
     if out_name and bed_ablation:
         raise ValueError("--out-name relocates the case directory; the "
@@ -3365,9 +3363,6 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     if bed_ablation and not picked_bed:
         raise ValueError("--bed-ablation adds bed-source rows to the "
                          "picked-bed case: run it WITH --picked-bed")
-    if demogorgn_bed and picked_bed:
-        raise ValueError("DEMOGORGN + picked-bed hybrid is a recorded "
-                         "follow-up, not wired (clean three-way ablation)")
     # Naming a synthetic in ``passes`` is the only way to request it: the
     # line definition declares which synthetics exist, so the old
     # --add-14km/--add-30km/--add-300km/--add-500km flags carried no
@@ -3487,7 +3482,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                   f"(mean {pb['residual_mean_m']}, |max| "
                   f"{pb['residual_absmax_m']}), gaps "
                   f"{pb['gap_frac_segment']:.4f}; along-track bed roughness "
-                  f"{pb['bed_roughness_rms_m']['bedmachine']} -> "
+                  f"{pb['bed_roughness_rms_m']['dem']} -> "
                   f"{pb['bed_roughness_rms_m']['picked']} m rms", flush=True)
         print(f"  reach: surface {p['reach']['surface_reach_m']:.0f} m, bed "
               f"{p['reach']['bed_reach_m']:.0f} m -> ct "
@@ -4067,14 +4062,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             5.0 * sum(s["wall_s"] for s in sims.values()), 1)
 
     notes = (
-        "Basal-clutter altitude triplet (claude_notes/basal_clutter_scout"
-        ".md): three 2016_Antarctica_DC8 flights of the same grounded 148.5 "
-        "km line at 442/9150/10684 m AGL, identical 190 MHz/50 MHz/hann/"
-        "20.202 ns systems; measured mid-column clutter is ~20 dB stronger "
-        "at altitude. COHERENT SURFACE+BED ONLY (no firn/internal layers by "
-        "design): the study asks whether surface+bed geometric clutter "
-        "reproduces the altitude trend, and the per-interface field "
-        "decomposition identifies which interface supplies it. Cross-track "
+        f"Basal clutter on line {LINE} ({segment}): passes "
+        f"{', '.join(order)}. COHERENT SURFACE+BED ONLY (no firn/internal "
+        "layers by design); the per-interface field decomposition "
+        "identifies which interface supplies the clutter. Cross-track "
         "reach derived per pass out to nadir-bed delay + "
         f"{MARGIN_US:.0f} us for both interfaces (bed reach includes Snell "
         "refraction); reversed high passes' roll negated; per-pass surface "
@@ -4330,7 +4321,7 @@ def _report(out, case, config, metrics, notes, figs):
         f"<h3>{html.escape(Path(f).stem)}</h3>"
         f"<img src='data:image/png;base64,{b64(f)}'>" for f in figs)
     body = f"""
-<h1>Basal-clutter altitude triplet ({html.escape(config['segment'])})</h1>
+<h1>Basal clutter: {html.escape(LINE)} / {html.escape(config['segment'])}</h1>
 <p class="note">{html.escape(notes)}</p>
 {figs_html}
 <h2>Metrics</h2>
@@ -4449,10 +4440,7 @@ def main_config():
     global FIG_WIDTH_SCALE, BED_OVERLAY
     FIG_WIDTH_SCALE = spec.run.figures.width_scale
     BED_OVERLAY = spec.run.figures.bed_overlay
-    print(f"spec {spec.meta.name!r} [{spec.meta.status}] <- {args.config}",
-          flush=True)
-    if spec.meta.requires:
-        print(f"  requires: {', '.join(spec.meta.requires)}", flush=True)
+    print(f"spec {spec.meta.name!r} <- {args.config}", flush=True)
     gamma, att, cal_rec = resolve_calibration(kw["line"])
     gtxt = ("solve" if gamma == "solve" else
             f"{gamma:+.2f} dB (anomaly {cal_rec['surface_anomaly_db']:+.2f})")
@@ -4564,14 +4552,10 @@ def main():
     activate_line(known.line)
     ap = argparse.ArgumentParser(description=__doc__, parents=[pre])
     ap.add_argument("--segment", choices=list(SEGMENTS), default="pilot",
-                    help="study segment: 'pilot' 10 km, 'full' 50 km "
-                    "(s 18-68), 'extended' 69.7 km (s 0 -> the grounding "
-                    "line; the RSSNR K stays anchored on the 'full' segment "
-                    "so the established mapping is reused verbatim), "
-                    "'full_line' 148.45 km (the whole overlapping line, GL "
-                    "included: HYBRID grounded-DEMOGORGN + floating-picks "
-                    "bed, requires --demogorgn-bed; K likewise pinned to "
-                    "'full')")
+                    help="study segment: 'pilot' (10 km) or 'full' (the "
+                    "line's whole overlap window; where it crosses the "
+                    "grounding line the bed is the hybrid grounded-DEM / "
+                    "floating-picks construction)")
     ap.add_argument("--n-traces", type=int, default=None,
                     help="sim traces (default: this line's per-segment value, "
                     f"{ {k: N_TRACES_BY_SEGMENT[k] for k in SEGMENTS} })")
@@ -4642,7 +4626,8 @@ def main():
                     "the BEDMACHINE and DEMOGORGN beds (identical "
                     "gamma/processing; own cache suffixes) and add them as "
                     "radargram rows -- the clean bed-source ablation")
-    ap.add_argument("--demogorgn-bed", action="store_true",
+    ap.add_argument("--demogorgn-bed", action="store_const", const=True,
+                    default=None,
                     help="use a DEMOGORGN realization as the bed "
                     f"(pinned snapshot, {DGN_TAG} suffix); PLAIN -- the "
                     "picked-bed hybrid is a recorded follow-up. Nadir bed "
@@ -4729,10 +4714,7 @@ def main():
                     "SINGLE-TRACE decomposition figure, one panel each "
                     "(default "
                     f"{'/'.join(f'{v:g}' for v in np.atleast_1d(DECOMP_S_KM['full']))}"
-                    " km on full/extended "
-                    "-- the scout's deep trough with the brightest "
-                    "structured bed clutter; full_line adds a floating "
-                    "location at 120 km). The nearest trace of every pass "
+                    " km on full). The nearest trace of every pass "
                     "is used and recorded per pass in the config; changing "
                     "it only re-does the analysis, never the simulations")
     ap.add_argument("--no-bed-overlay", action="store_true",

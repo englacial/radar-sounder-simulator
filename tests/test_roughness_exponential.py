@@ -173,28 +173,30 @@ def test_runner_keys_fork_only_for_exponential():
 
 def test_atm_exponential_resolution():
     tab = b1.load_table()
-    s, l, inf = b1.resolve_exponential("greenland_geikie01_transit", "low",
+    s, l, inf = b1.resolve_exponential("greenland_geikie01_transit", "p3_2014_low",
                                        tab)
     assert (s, l) == (0.0515, 5.276) and inf["acf"] == "exponential"
     _, _, inf17 = b1.resolve_exponential("greenland_westcoast", "p3_2017",
                                          tab)
     assert inf17["spectrum"] == "westcoast_2017_exp"
     with pytest.raises(ValueError, match="powerlaw"):
-        b1.resolve_exponential("antarctica_getz", "real_low", tab)
+        b1.resolve_exponential("antarctica_getz", "dc8_2016_0km", tab)
     p, line0 = _p(), rbc.LINE
     rbc.activate_line("greenland_geikie01_transit")
     try:
         pair, inf = rbc.resolve_surf_rough({"source": "atm_exponential"},
-                                           {**p, "key": "high"}, info=True)
+                                           {**p, "key": "p3_2017_high"}, info=True)
     finally:
         rbc.activate_line(line0)
     assert pair == (0.0515, 5.276, "exponential")
     assert rbc.surf_rough_pair([0.01, 0.5, "exponential"]) == (0.01, 0.5,
                                                                "exponential")
     assert rbc.surf_rough_pair([0.01, 0.5, "gaussian"]) == (0.01, 0.5)
-    spec = load_spec(ROOT / "config/experiments/pilot_smoke_exp.yaml")
-    assert spec.to_run_kwargs()["surf_rough"] == {"source": "atm_exponential"}
+    spec = load_spec(ROOT / "config/experiments/pilot.yaml")
     doc = spec.model_dump()
+    doc["run"]["physics"]["surface_roughness"] = {"source": "atm_exponential"}
+    assert RunSpec.model_validate(doc).to_run_kwargs()["surf_rough"] == {
+        "source": "atm_exponential"}
     doc["run"]["physics"]["surface_roughness"] = {
         "sigma_m": 0.01, "corr_length_m": 0.5, "acf": "exponential"}
     kw = RunSpec.model_validate(doc).to_run_kwargs()

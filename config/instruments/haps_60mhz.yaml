@@ -1,11 +1,7 @@
 schema_version: 1
 name: haps_60mhz
-description: >
-  Stratospheric-platform sounder, 60 MHz / 15 MHz. Mirrors the 'haps' preset
-  of the mission design tool. SYNTHETIC: no OPR frame is consulted.
-
+description: Stratospheric-platform design point, 60/15 MHz, 20 us, 8-element 0.5 lam array (mirrors the mission design tool's 'haps' preset). Synthetic; fly it at an altitude chosen by the experiment.
 source: {kind: stated}
-
 simulated:
   frequency_Hz:   60.0e6
   bandwidth_Hz:   15.0e6
@@ -15,14 +11,7 @@ simulated:
     kind: array
     n_elements: 8
     spacing_lam: 0.5
-    roll_source: none     # a synthetic smooth trajectory has no roll
-
-provenance: >
-  Design point, not a built system. Pair it with a synthetic observation
-  altitude (14 km is the design tool's assumption) rather than assuming one:
-  altitude belongs to the observation here, so the same box can be flown at
-  several heights over the same line.
-
+    roll_source: none
 recorded:
   altitude_m_design: 14000
   velocity_ms: 20

@@ -1,0 +1,35 @@
+schema_version: 1
+meta:
+  name: pilot
+  description: >
+    Every study line over its 10 km pilot window (the cheap end of the fidelity loop, otherwise identical to full): the real passes as flown
+    plus the cross-line HAPS design point (haps_60mhz at 14 and 20 km riding
+    the reference pass). Run: tools/run_basal_clutter.py --config
+    config/experiments/pilot.yaml --line <line>.
+
+run:
+  lines: [antarctica_david, antarctica_getz, greenland_geikie01_transit, greenland_westcoast]
+  segment: pilot
+
+  extra_passes:
+    haps_14km: {carrier: reference, altitude_m: 14000.0, instrument: haps_60mhz}
+    haps_20km: {carrier: reference, altitude_m: 20000.0, instrument: haps_60mhz}
+
+  bed:                         # DEM comes from the line (identity.bed_dem)
+    nadir: picked
+    floating: picked
+    demogorgn_seed: 0
+
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse: {specular_fraction: 0.5, tilt_s0_deg: 3.0}
+
+  physics:
+    att_db_per_km: solve       # -> the line's calibration block
+    surface_roughness: true    # C&S firn-layer fixture (sigma 4.9 cm, l 2.98 m)
+    bed_roughness: {sigma_m: 0.10, corr_length_m: 0.886}
+
+  processing:
+    chain: standard
+    proc_cache: true
+    companion: false

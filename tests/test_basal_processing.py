@@ -120,18 +120,18 @@ def test_synthetic_pass_spec_and_tags():
     """A synthetic pass rides its carrier's frames; the proc tag composes
     into the coordinator's output-dir name. Names come from the line
     definition rather than literals -- the passes get renamed."""
-    # a line WITH synthetics is the subject; the default line need not have
-    # any (antarctica_david does not)
-    line = next(n for n in sorted(rbc.LINES)
-                if rbc.LINES[n]["SYNTHETIC_KEYS"])
-    rbc.activate_line(line)
-    key = rbc.LINES[line]["SYNTHETIC_KEYS"][0]
-    carrier = rbc.LINE_SPECS[line].synthetic_passes[key].carrier
-    spec = rbc.PASSES[key]
+    # shipped lines declare no synthetics (experiments add them via
+    # extra_passes), so build one on a copy of the default line
+    line = rbc.DEFAULT_LINE
+    carrier = rbc.LINE_SPECS[line].reference.pass_key
+    ls = rbc.LINE_SPECS[line].model_copy(update={"synthetic_passes": {
+        "syn_14km": rbc.clutter_lines.SyntheticPass(
+            altitude_m=14000.0, carrier=carrier)}})
+    table = ls._pass_table()
+    spec = table["syn_14km"]
     seg = next(s for s in rbc.LINES[line]["SEGMENTS"])
-    assert spec[seg] == rbc.PASSES[carrier][seg]
-    assert spec["synthetic_msl_m"] == \
-        rbc.LINE_SPECS[line].synthetic_passes[key].altitude_m
+    assert spec[seg] == table[carrier][seg]
+    assert spec["synthetic_msl_m"] == 14000.0
     assert rbc.case_tag(True, True, True) == "_pbed_rssnr_proc"
     assert rbc.case_tag(True, True, False) == "_pbed_rssnr"  # existing runs
 

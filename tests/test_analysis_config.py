@@ -77,7 +77,7 @@ def test_an_experiment_cannot_set_measurement_conventions():
     the bed window until the residual looked right."""
     doc = {"schema_version": 1, "meta": {"name": "demo"},
            "run": {"line": "antarctica_getz", "segment": "full",
-                   "out_name": "demo", "analysis": {"bed_tail": {}},
+                   "analysis": {"bed_tail": {}},
                    "physics": {"att_db_per_km": 20.0}}}
     with pytest.raises(ValueError, match="[Ee]xtra"):
         RunSpec.model_validate(doc)
@@ -152,7 +152,7 @@ def test_grazing_fix_is_declared_once_and_on_by_default():
     from clutter_spec import RunSpec
     doc = {"schema_version": 1, "meta": {"name": "demo"},
            "run": {"line": "antarctica_getz", "segment": "pilot",
-                   "out_name": "demo", "physics": {"att_db_per_km": 20.0}}}
+                   "physics": {"att_db_per_km": 20.0}}}
     assert RunSpec.model_validate(doc).to_run_kwargs()["grazing_fix"] is None
     doc["run"]["physics"]["grazing_fix"] = False        # debug opt-out
     sp = RunSpec.model_validate(doc)
@@ -186,7 +186,7 @@ def test_every_line_declares_its_calibration():
     assert lines["antarctica_getz"].calibration.att_db_per_km == "solve"
     geikie = lines["greenland_geikie01_transit"].calibration
     assert geikie.att_db_per_km.value == 16.0
-    assert "REJECTED" in geikie.att_db_per_km.why
+    assert "rejected" in geikie.att_db_per_km.why.lower()
 
 
 def test_manual_value_requires_a_why():
@@ -197,7 +197,7 @@ def test_manual_value_requires_a_why():
 
 def test_benchmark_and_pilot_specs_carry_no_numbers():
     from clutter_spec import load_spec
-    for name in ("gl_std_benchmark", "pilot_smoke"):
+    for name in ("full", "pilot"):
         sp = load_spec(ROOT / "config" / "experiments" / f"{name}.yaml")
         assert sp.run.physics.att_db_per_km == "solve", name
         assert sp.run.reflectivity.gamma_from_rssnr is True

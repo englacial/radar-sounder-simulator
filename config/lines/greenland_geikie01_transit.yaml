@@ -1,167 +1,95 @@
 schema_version: 1
 name: greenland_geikie01_transit
+# Altitude line: one MCoRDS3 P-3 system flown at 0.5 km (2014) and 2.5 km
+# (2017) AGL over the same 139 km central-west interior transit. The full
+# segment contains a turn (s 40-80 km) the two aircraft flew on different
+# radii, up to 1.3 km apart; the decomposition traces sit in the aligned
+# stretches.
+
 identity:
   case_prefix: greenland_geikie
-  season: 2014_Greenland_P3
   crs: EPSG:3413
   fc_hz: 195000000.0
   grounding_line_s_km: null
+  bed_dem: bedmachine
+
 reference:
-  pass: low
-  frames:
-  - '20140421_01_069'
-  - '20140421_01_070'
-  - '20140421_01_071'
-order:
-- low
-- high
+  pass: p3_2014_low
+  frames: ['20140421_01_069', '20140421_01_070', '20140421_01_071']
+
+order: [p3_2014_low, p3_2017_high]
+
 passes:
-  low:
+  p3_2014_low:
     agl_med_m: 465.0
     season: 2014_Greenland_P3
     param_frame: '20140421_01_069'
-    instrument: mcords3_p3_greenland
+    instrument: mcords3_p3_2014
     reversed: false
     segments:
       pilot:
-      - frame: '20140421_01_069'
-        slice:
-        - 1672
-        - 2341
+      - {frame: '20140421_01_069', slice: [1672, 2341]}
       full:
-      - frame: '20140421_01_069'
-        slice:
-        - 736
-        - 2675
-      transit:
-      - frame: '20140421_01_069'
-        slice:
-        - 700
-        - 3332
-      - frame: '20140421_01_070'
-      - frame: '20140421_01_071'
-  high:
+      - {frame: '20140421_01_069', slice: [700, 3332]}
+      - {frame: '20140421_01_070'}
+      - {frame: '20140421_01_071'}
+  p3_2017_high:
     agl_med_m: 2483.0
     season: 2017_Greenland_P3
     param_frame: '20170424_01_067'
-    instrument: mcords3_p3_greenland
+    instrument: mcords3_p3_2014
     reversed: false
     segments:
       pilot:
-      - frame: '20170424_01_067'
-        slice:
-        - 973
-        - 1641
+      - {frame: '20170424_01_067', slice: [973, 1641]}
       full:
-      - frame: '20170424_01_067'
-        slice:
-        - 36
-        - 1976
-      transit:
-      - frame: '20170424_01_067'
-      - frame: '20170424_01_068'
-      - frame: '20170424_01_069'
-        slice:
-        - 0
-        - 2586
-synthetic_passes:
-  syn14km:
-    altitude_m: 14000.0
-    carrier: low
-    facet_spacing_scale: 0.7
-    why: |-
-      2-trace geometry/phase gate (2026-08-11), the syn500km/syn300km failure class: the beta = 0.5 spacing (54.97 m) builds 79.2 m facets on the anisotropic +-12.05 km window and trips the Fresnel-zone LPA check (limit 54.4 m, ratio 1.46). 0.7x snaps the DEM stride down one notch, clears the check with no warnings, and leaves the field finite with nadir surface/bed delays matching the picks to <= 15 ns.
-  syn20km:
-    altitude_m: 20000.0
-    carrier: low
-    facet_spacing_scale: 0.7
+      - {frame: '20170424_01_067'}
+      - {frame: '20170424_01_068'}
+      - {frame: '20170424_01_069', slice: [0, 2586]}
+
 segments:
-  pilot:
+  pilot:                       # 10 km window, s 25-35 km
     s0_km: 25.0
     n_traces: 48
-    decomp_s_km:
-    - 30.0
-  full:
-    s0_km: 11.0
-    n_traces: 140
-    decomp_s_km:
-    - 30.0
-  # TRANSIT segment (2026-08-18): ONE continuous path through all three
-  # frames of each pass, s 10.46 -> 149.69 km on the anchor axis.
-  #
-  # It deliberately CONTAINS a misalignment. The two flights run 5-45 m apart
-  # over s 10-40, up to 1299 m apart over s 40-80, and 14-63 m apart over
-  # s 120-150. That middle excursion is a TURN, not a different route: the
-  # reference track swings from heading -156 to -114 deg between s 40 and
-  # s 60 (measured, 1.7-2.9 deg/km), and the two aircraft flew the turn on
-  # different radii. Accepted rather than excised, so the line is one path;
-  # any metric taken across it must read the offset profile first, and the
-  # decomposition locations below sit in the two well-aligned stretches.
-  transit:
+    decomp_s_km: [30.0]
+  full:                        # s 10.5-149.7 km, all three frames of each pass
     s0_km: 10.5
     n_traces: 672
-    decomp_s_km:
-    - 30.0
-    - 135.0
+    decomp_s_km: [30.0, 135.0]
+
 figures:
-  radargram:
-    y_us:
-    - -1.0
-    - 34.0
-    db:
-    - -120.0
-    - 5.0
-    scale: shared
-    source_color: false   # tint sim panels by source (docs/source_color_radargrams.md)
-  profile:
-    rel_us:
-    - -1.5
-    - 34.5
-    x_us:
-    - -1.0
-    - 34.0
-    db:
-    - -140.0
-    - 5.0
+  radargram: {y_us: [-1.0, 34.0], db: [-120.0, 5.0], scale: shared, source_color: false}
+  profile: {rel_us: [-1.5, 34.5], x_us: [-1.0, 34.0], db: [-140.0, 5.0]}
+
 rssnr:
   snapshot: GEAMAHQ7BRVPG9SQPK20
-  store:
-    bucket: opr-radar-metrics
-    prefix: icechunk/greenland
-    region: us-west-2
-unsupported:
-- demogorgn_bed
-- hybrid
+  store: {bucket: opr-radar-metrics, prefix: icechunk/greenland, region: us-west-2}
+
 provenance:
-  measured_caveats: |-
-    Measured references are CSARP_standard. Scout quirks recorded: the two passes share fc/B/waveforms/PRF/SAR params exactly, but the product fast-time bin differs 0.16% (33.3859 vs 33.3333 ns) and t0 by 167 ns (5 bins), so every depth/delay comparison is made in METRES or MICROSECONDS on each pass's OWN lattice and never by bin index; img_comb blend lengths differ (low [3 us, -inf, 2.64 us; 10 us, -inf, 3.5 us] vs high [3, -inf, 1; 10, -inf, 3]) so the first ~3 us below the surface is NOT one instrument across passes; the ft_wind decode falls back on both passes and the scout hand-verified the true value IS hanning; param_csarp.combine.method reads 'mvdr' on the 2017 frames while param_combine reads 'standard' (param_combine is the one that describes CSARP_standard). The 2017 surface pick sits ~25 m (5 range bins) below the 2014 one against ArcticDEM while the picked ice thicknesses agree to 7 m -- a common-mode twtt/elevation reference offset, removed per frame by the surface registration gate, never shared between passes. BedMachine Greenland v5 (150 m) reproduces only 23-46% of the radar-pick along-track bed roughness rms, so simulated basal clutter is expected systematically smoother in fine texture than measured (the --picked-bed residual corrects the NADIR bed onto the low pass's picks). The high pass records only ~7.9 us of post-bed tail (vs ~21.1 us for the low pass): bed-tail metrics beyond +3 us are coverage-limited at altitude and tail_coverage records it.
+  measured_caveats: >
+    CSARP_standard. Same fc/B/waveforms/PRF on both passes; product fast-time
+    bin differs 0.16% (33.386 vs 33.333 ns) and t0 by 167 ns, so compare in
+    metres/microseconds, never bin index. img_comb blend lengths differ, so
+    the first ~3 us below the surface is not one instrument across passes.
+    The high pass records ~7.9 us of post-bed tail (low: ~21 us). BedMachine
+    Greenland v5 reproduces 23-46% of the radar-pick along-track bed roughness.
   real_chain:
     product: CSARP_standard
-    sar: |-
-      motion-compensated f-k migration (2014/2017 P-3 param_csarp/param_sar; the pair shares fc/B/waveforms/PRF/SAR params exactly per the scout table)
-    combine: |-
-      delay-and-sum channels; the CReSIS-standard look/decimation convention is ASSUMED here -- not read from the 2014/2017 structs. param_csarp.combine.method reads 'mvdr' on the 2017 frames while param_combine reads 'standard' (param_combine is the one describing CSARP_standard)
-    window: |-
-      ft_wind hanning (decode falls back on both passes; scout hand-verified the true value IS hanning)
-    caveat: |-
-      product fast-time bin differs 0.16% between the passes (33.3859 vs 33.3333 ns) and t0 by 167 ns, so every depth/delay comparison is made in metres or microseconds on each pass's OWN lattice
+    sar: motion-compensated f-k migration (2014/2017 param_csarp/param_sar)
+    combine: delay-and-sum; CReSIS-standard look/decimation convention (assumed)
+    window: hanning (verified)
 
 calibration:
   gamma_surface_db:
     value: -10.0
     why: >
-      user decision 2026-08-20: the in-run solve gave -2.04 (21.8 dB pass disagreement) dB, which is not
-      a physically plausible surface reflectivity (it absorbs chain/model
-      anomalies into the calibration). Pin the physical ~-10 dB (~1 dB
-      above smooth air->ice Fresnel -11.03) and read the anomaly where it
-      belongs: in the recorded bed-level residuals and the gamma_solve
-      diagnostic of every run. claude_notes/gamma_solve_design_2026-08-20.md
-      has the per-pass numbers.
+      Physical air-ice value (~1 dB above smooth Fresnel -11.03). The in-run
+      solve gave -2.04 dB with 21.8 dB pass disagreement; kept as a
+      diagnostic (claude_notes/gamma_solve_design_2026-08-20.md).
   att_db_per_km:
     value: 16.0
     why: >
-      MacGregor arbitration, adopted by user decision 2026-08-20: three
-      routes converge on 16 +/- 2 dB/km full-column (see
-      claude_notes/macgregor_attenuation_scout.md). Slope regression is
-      REJECTED on this line (thawed-bed Gamma-H confounder gives A~0.7,
-      r=0.11 -- the gamma_bed-thickness independence assumption fails).
+      MacGregor arbitration, 16 +/- 2 dB/km full column
+      (claude_notes/macgregor_attenuation_scout.md). The RSSNR-vs-2H
+      regression is rejected here: a thawed-bed Gamma-H confounder gives
+      A ~ 0.7, r = 0.11.

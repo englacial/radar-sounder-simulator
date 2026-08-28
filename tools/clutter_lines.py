@@ -15,11 +15,9 @@ how they drift:
   * ``OUT_DEFAULT`` / ``RSSNR_CACHE``  from ``identity.case_prefix``
   * ``REF_SEASON``  from the reference pass's own season
 
-And one thing is deliberately ABSENT: the level-anchor deficit D. It is not
-a property of a line -- it is solved against a particular run at a particular
-attenuation -- so it lives in the experiment spec that uses it, with its
-provenance attached. A line-level default is exactly how the Antarctic 14.8
-went stale.
+A line carries DATA only: geometry, frames, the DEM available for its bed
+(``identity.bed_dem``), the RSSNR store pin and its calibration. Method
+choices (bed construction, roughness, processing) live in the experiment.
 """
 
 from __future__ import annotations
@@ -58,7 +56,7 @@ class FramePart(_Base):
 
 class PassSpec(_Base):
     agl_med_m: float | None = None
-    season: str | None = None          # falls back to identity.season
+    season: str                        # OPR season id, e.g. 2016_Antarctica_DC8
     param_frame: str                   # OPR frame whose params were read
     # The radar that actually flew this pass. A DEFAULT: an experiment may
     # swap it (that is the point of the line/instrument split) while keeping
@@ -69,7 +67,9 @@ class PassSpec(_Base):
 
 
 class SyntheticPass(_Base):
-    """A constant-altitude pass flown over a real pass's line geometry."""
+    """A constant-altitude pass flown over a real pass's line geometry.
+    Experiments declare these via ``extra_passes``; the line-level form is
+    kept for tests and ad-hoc use."""
 
     altitude_m: float
     carrier: str                       # real pass whose geometry it rides
@@ -122,10 +122,13 @@ class Calibration(_Base):
 
 class Identity(_Base):
     case_prefix: str                   # -> outputs/<case_prefix>, cache paths
-    season: str                        # line default; passes may override
     crs: str
-    fc_hz: float
+    fc_hz: float                       # reference pass carrier (lam_ice)
     grounding_line_s_km: float | None = None
+    # Bed DEM available for the grounded ice: a DATA property of the line
+    # (DEMOGORGN is Antarctic-only). Experiments state the method applied on
+    # top of it (config/experiments: bed.nadir / bed.floating), never the DEM.
+    bed_dem: Literal["bedmachine", "demogorgn"]
 
 
 class Reference(_Base):
@@ -259,9 +262,7 @@ class LineSpec(_Base):
             ps = self.passes[key]
             entry = {"agl_med_m": ps.agl_med_m, "rev": ps.reversed,
                      "param_frame": ps.param_frame,
-                     "instrument": ps.instrument}
-            if ps.season is not None:
-                entry["season"] = ps.season
+                     "instrument": ps.instrument, "season": ps.season}
             for seg, parts in ps.segments.items():
                 # whole frame -> (None, None): slice(None, None) and [a:b]
                 # take everything, so consumers need no special case
@@ -292,11 +293,11 @@ class LineSpec(_Base):
         c = 299792458.0
         idn = self.identity
         out_default = root / "outputs" / idn.case_prefix
-        ref_season = (self.passes[self.reference.pass_key].season
-                      or idn.season)
+        ref_season = self.passes[self.reference.pass_key].season
         g = {
             "LINE": self.name,
-            "SEASON": idn.season,
+            "SEASON": ref_season,
+            "BED_DEM": idn.bed_dem,
             "CRS": idn.crs,
             "CASE_PREFIX": idn.case_prefix,
             "OUT_DEFAULT": out_default,

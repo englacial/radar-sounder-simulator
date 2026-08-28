@@ -63,7 +63,7 @@ Single-trace bed-window margins stay physical (+25 dB low, +18 dB at
 ## Known limitations
 
 - Evidence is getz-only so far; the benchmark protocol exists to check the
-  other lines (re-run `pilot_smoke` / `std_benchmark` per line).
+  other lines (re-run `pilot` / `full` per line).
 - The remaining low-pass tail gap (−5.5 vs −8.9) is quantitatively
   consistent with unmigrated along-track diffraction: the sim processes at
   the alias-limited aperture of the product posting, while CSARP's full

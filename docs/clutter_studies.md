@@ -101,7 +101,7 @@ line registry (`--line`).
   (30.6 h before the per-trace facet windowing / fused bed path of
   2026-08-24). Cost per pass falls with altitude because the Fresnel-scaled
   facet spacing coarsens faster (`∝ √h`) than the reach grows; low-altitude,
-  high-frequency passes dominate. The Greenland `std_benchmark` no longer
+  high-frequency passes dominate. The shipped experiments no longer
   runs the constant-gamma companion simulation (its bed-brightness
   correlation row is therefore absent from new reports).
 
@@ -131,7 +131,7 @@ line registry (`--line`).
 - RSSNR-driven reflectivity reproduces measured along-track bed-brightness
   structure (correlation ~0.6-0.8 against data ceilings of 0.9) on both a
   West Antarctic coastal line and a Greenland interior line. (From the
-  constant-gamma companion runs, switched off in `gl_std_benchmark` on
+  constant-gamma companion runs, switched off in the shipped experiments on
   2026-08-24 for runtime; re-enable `processing.companion` to reproduce.)
 - On the thick Greenland interior line, surface+bed geometry cannot explain
   the measured column power (flat with altitude where geometry predicts

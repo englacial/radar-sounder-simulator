@@ -1,0 +1,19 @@
+schema_version: 1
+name: mcords3_p3_2014
+description: MCoRDS3 on the NASA P-3, 2014 and 2017 Greenland (195/30 MHz, 10 us, hanning; read per pass from the OPR frame).
+source: {kind: opr_frame}
+segments: ['20140421_01', '20170424_01', '20170510_03']
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # OPR readme: centre fuselage array, 7 elements at 0.5 lam, nadir beam.
+    kind: array
+    n_elements: 7
+    spacing_lam: 0.5
+    roll_source: nav
+recorded:
+  tx_power_W: 1050       # OPR readme (150 W/channel effective)
+  noise_figure_dB: 3.0

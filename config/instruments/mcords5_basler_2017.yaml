@@ -1,0 +1,23 @@
+schema_version: 1
+name: mcords5_basler_2017
+description: MCoRDS5 on the KU/Airtech Basler, 2017 Antarctica (195/30 MHz; read per pass from the OPR frame).
+source: {kind: opr_frame}
+segments: ['20171217_01']
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # 8-element cross-track array from the product's own param structs
+    # (20171217_01_022): TX amplitude taper as recorded, RX hanning(8)
+    # delay-and-sum; phase centres from OPR lever_arm.m give 0.468 m
+    # spacing = 0.304 lam. Element pattern not modelled.
+    kind: array_tapered
+    spacing_lam: 0.304
+    tx_weights: [39.4, 72.6, 125.8, 177.6, 156.0, 120.7, 92.9, 44.8]
+    rx_weights: [0.117, 0.4132, 0.75, 0.9698, 0.9698, 0.75, 0.4132, 0.117]
+    roll_source: nav
+recorded:
+  tx_power_W: 1800       # OPR readme (225 W/channel)
+  noise_figure_dB: 3.0
