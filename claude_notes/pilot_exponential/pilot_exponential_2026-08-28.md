@@ -322,3 +322,7 @@ is a per-pass-mapping artifact worth fixing before quoting HAPS numbers here.
 - fixture control copies: `outputs/<case>/pilot_fixture_2026-08-28/`
 - legacy 2026-08-24 copies: `outputs/<case>/pilot_smoke_fixture_2026-08-28/`
 - comparison: `outputs/pilot_exponential_comparison/`
+
+## Addendum 2026-08-28: one surface law per line (reference pass spectrum)
+
+Per-pass roughness overrides were dropped (commit 616b72f): every pass, real or synthetic, now uses the line's default entry. Westcoast re-run with `westcoast_2017_exp` (σ 3.33 cm, l 1.04 m) on all five passes; other lines already used one entry. Mid-column sim − measured (dB): p3_2016 −14.2 (was −20.6 with the 2016 fit), p3_2017 −4.9 (unchanged), p3_2019 −5.3 (was −8.0); HAPS 14/20 km mid-column −57.0/−56.9 (the 8 dB per-pass artefact is gone). Comparison figures/tables under outputs/pilot_exponential_comparison/ were regenerated (compare.py).
