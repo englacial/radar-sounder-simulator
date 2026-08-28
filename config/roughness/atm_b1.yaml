@@ -68,17 +68,12 @@ spectra:
       fit (l < 500 m, 95 blocks) 10.1 cm / 21.8 m'
 lines:
   greenland_westcoast:
+    # ONE surface law per line: the reference pass's (p3_2017) ATM spectrum is
+    # used for every pass, real or synthetic (user decision 2026-08-28). The
+    # 2016/2019 spectra stay in `spectra:` for reference only.
     default: westcoast_2017
-    passes:
-      p3_2016: westcoast_2016
-      p3_2017: westcoast_2017
-      p3_2019: westcoast_2019
     exponential:    # alternate mapping for source atm_exponential (acf: exponential)
       default: westcoast_2017_exp
-      passes:
-        p3_2016: westcoast_2016_exp
-        p3_2017: westcoast_2017_exp
-        p3_2019: westcoast_2019_exp
   greenland_geikie01_transit:
     default: geikie_2014
   antarctica_getz:

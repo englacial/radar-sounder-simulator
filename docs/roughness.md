@@ -69,4 +69,7 @@ scatter by ~1–2 dB at 195/300 MHz — a warning is emitted), or `refuse`
 (margins < 1500 m and ice shelves: ν ≥ 0.6, `l` at the fit bound; the
 exponential over-predicts by +2…+25 dB — `source: atm_exponential` raises).
 Site-specific entries take precedence over strata; `stratum_lines` supplies
-the fallback mapping for lines without one.
+the fallback mapping for lines without one. One surface law per line: every
+pass, real or synthetic, uses the line's default entry (the reference pass's
+spectrum); the effective-Gaussian `atm_b1` pair still varies with each pass's
+carrier frequency, the underlying spectrum does not.

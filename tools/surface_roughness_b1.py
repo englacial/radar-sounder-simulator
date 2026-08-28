@@ -92,7 +92,10 @@ def _spectrum_id(tab, line, pass_key, alt=None):
                        f"(have {sorted(tab['lines'])})")
     if alt is not None and alt in ln:      # alternate-family mapping
         ln = {**ln, **ln[alt]}
-    return ln.get("passes", {}).get(pass_key, ln["default"])
+    # one surface law per line: every pass (real or synthetic) uses the
+    # line's default entry -- the reference pass's spectrum. Per-pass
+    # `passes:` overrides are no longer honoured (2026-08-28).
+    return ln["default"]
 
 
 def resolve_exponential(line, pass_key, table=None):
