@@ -26,7 +26,11 @@ run:
 
   physics:
     att_db_per_km: solve       # -> the line's calibration block
-    surface_roughness: true    # C&S firn-layer fixture (sigma 4.9 cm, l 2.98 m)
+    # ATM-derived exponential-ACF surface (config/roughness/atm_b1.yaml +
+    # atm_tier2_strata.yaml; one entry per line, reference-pass spectrum;
+    # adopted 2026-08-28, pilot median mid-column error 58 -> 10 dB). The
+    # former fixture was `true` (C&S firn-layer sigma 4.9 cm, l 2.98 m, Gaussian).
+    surface_roughness: {source: atm_exponential}
     bed_roughness: {sigma_m: 0.10, corr_length_m: 0.886}
 
   processing:
