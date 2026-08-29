@@ -185,7 +185,8 @@ def _window_string(fw):
 
 # (label, radar-struct getter, ft_wind getter) tried IN ORDER: 2017/2019-era
 # products carry params under param_records/param_sar; 2012-era CSARP products
-# under param_csarp (radar.wfs is then a list of per-waveform dicts).
+# under param_csarp (radar.wfs is then a list of per-waveform dicts); 2009-era
+# DC-8 products under a top-level param_radar with a single wfs dict.
 _PARAM_LAYOUTS = (
     ("param_sar",
      lambda a: a["param_records"]["radar"],
@@ -193,6 +194,12 @@ _PARAM_LAYOUTS = (
     ("param_csarp",
      lambda a: a["param_csarp"]["radar"],
      lambda a: a["param_csarp"]["csarp"]["ft_wind"]),
+    # 2009-era DC-8 products: the radar struct sits at the top level as
+    # param_radar (a single wfs dict, not a per-waveform list) and ft_wind is
+    # directly under param_csarp.
+    ("param_radar",
+     lambda a: a["param_radar"],
+     lambda a: a["param_csarp"]["ft_wind"]),
 )
 
 
@@ -307,6 +314,16 @@ def map_window(ft_wind_str):
         return "hann", (
             f"MODELED-WINDOW APPROXIMATION: tukey(alpha={alpha:g}) modeled "
             f"as hann (nearest supported window at this alpha)")
+    if "kaiser" in s:
+        m = re.search(r"kaiser\s*\([^,)]*,\s*([0-9.]+)\s*\)", s)
+        beta = float(m.group(1)) if m else float("nan")
+        return "hann", (
+            f"MODELED-WINDOW APPROXIMATION: the product's compression window "
+            f"is kaiser(beta={beta:g}) but soundersim.waveform supports only "
+            f"none/hann/hamming; modeled as hann. kaiser(6) is close to hann "
+            f"in main-lobe width (~1.4x rect vs 1.44x) with lower far "
+            f"sidelobes (-44 dB vs -31.5 dB), so the simulated range "
+            f"sidelobes are modestly pessimistic")
     if "hamming" in s:
         return "hamming", None
     if "hann" in s:  # 'hanning' / 'hann'

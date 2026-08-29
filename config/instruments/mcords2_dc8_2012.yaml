@@ -1,0 +1,29 @@
+schema_version: 1
+name: mcords2_dc8_2012
+description: MCoRDS2 on the NASA DC-8, 2012 Antarctica (193.9/9.5 MHz, 1/10 us, tukey 0.2; read per pass from the OPR frame).
+source: {kind: opr_frame}
+segments: ['20121023_04']
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # Same 5-element cross-track array as the 2009 install: OPR lever_arm.m
+    # groups 2009-2012 DC-8 rds into one block,
+    #   LArx y = [-0.7874 -0.3937 0 0.3937 0.7874] m, rxchannel = 1:5
+    # -> 0.3937 m = 0.2546 lam at 193.9 MHz. The product's array_param.imgs
+    # confirms 5 combined channels (wf 2, chans 1-5), method 'standard'
+    # (delay-and-sum, Nsv = 1: no beamforming).
+    kind: array
+    n_elements: 5
+    spacing_lam: 0.2546
+    roll_source: nav
+recorded:
+  tx_power_W: null       # 2012 DC-8 install not in the OPR readme
+  noise_figure_dB: 3.0
+provenance: >
+  Array geometry from OPR lever_arm.m (2009-2012 DC-8 rds block); radar_name in the
+  product is 'mcords2', lever_arm_fh lever_arm_mcords_2012_antarctica_DC8_ATM.
+  Waveform/window read per pass from param_csarp.radar (ft_wind tukeywin(N,0.2), modelled
+  as unwindowed per the study's map_window convention).

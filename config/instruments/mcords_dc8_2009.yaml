@@ -1,0 +1,34 @@
+schema_version: 1
+name: mcords_dc8_2009
+description: MCoRDS (v1) on the NASA DC-8, 2009 Antarctica (193.9/9.5 MHz, 30 us, kaiser(6); read per pass from the OPR frame).
+source: {kind: opr_frame}
+segments: ['20091020_06']
+simulated:
+  frequency_Hz:   null
+  bandwidth_Hz:   null
+  pulse_length_s: null
+  window:         null
+  antenna:
+    # 5-element cross-track array under the DC-8 fuselage, shared by every
+    # 2009-2012 DC-8 rds season. OPR lever_arm.m
+    # (2009_Antarctica_DC8 .. 2012_Antarctica_DC8, radar_name rds):
+    #   LArx y = [-0.7874 -0.3937 0 0.3937 0.7874] m, rxchannel = 1:5
+    # -> uniform 0.3937 m = 0.2546 lam at 193.9 MHz. The x stagger
+    # (-30.2438 / -30.7162 m, alternating) is along-track and not modelled.
+    # The product declares 8 rx_paths; lever_arm zeroes the last three.
+    kind: array
+    n_elements: 5
+    spacing_lam: 0.2546
+    # The 2009 CSARP_standard product carries NO Roll/Pitch/Heading, so the
+    # nav source resolves to zero roll (soundersim.opr.frame_scene passes
+    # nav_roll=None). Declared explicitly rather than left to default.
+    roll_source: none
+recorded:
+  tx_power_W: null       # 2009 DC-8 install not in the OPR readme
+  noise_figure_dB: 3.0
+provenance: >
+  Array geometry from OPR lever_arm.m (2009_Antarctica_DC8 rds block, shared with
+  2010_Greenland_DC8, 2010/2011/2012_Antarctica_DC8). Waveform/window read per pass from
+  the frame's own param_radar struct (a 2009-era layout added to
+  run_altitude_comparison._PARAM_LAYOUTS on 2026-08-28); ft_wind is kaiser(N,6),
+  modelled as hann with the approximation recorded per run.

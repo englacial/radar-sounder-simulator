@@ -8,7 +8,9 @@ meta:
     config/experiments/pilot.yaml --line <line>.
 
 run:
-  lines: [antarctica_david, antarctica_getz, greenland_geikie01_transit, greenland_westcoast]
+  lines: [antarctica_david, antarctica_getz, antarctica_pineisland_north,
+          antarctica_pineisland_south, greenland_geikie01_transit,
+          greenland_westcoast]
   segment: pilot
 
   extra_passes:

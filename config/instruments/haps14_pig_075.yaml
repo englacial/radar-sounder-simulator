@@ -1,0 +1,21 @@
+schema_version: 1
+name: haps14_pig_075
+description: '14 km stratospheric-platform design point for the Pine Island lines:
+  75/30 MHz (40% fractional, at the 40% cap), 8 elements at 0.3569 lam
+  = 9.99 m physical width (at the 10 m cap), 17.8 deg null-to-peak beam, 20 us, hann.
+  Chosen by the 2026-08-28 Bed SCR sweep (claude_notes/pig_haps_opt/): low fc wins
+  because the bed-roughness coherent loss (sigma 0.10 m fixture) costs -0.6 dB at
+  50 MHz but -21.8 dB at 300 MHz, swamping the beam the aperture buys.'
+source: {kind: stated}
+simulated:
+  frequency_Hz:   75.0e6
+  bandwidth_Hz:   30e6
+  pulse_length_s: 20e-6
+  window: hann
+  antenna:
+    kind: array
+    n_elements: 8
+    spacing_lam: 0.3569
+    roll_source: none
+recorded:
+  design_note: 'width 9.99 m <= 10 m; 8 elements; B/fc 40% <= 40%'

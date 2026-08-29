@@ -1,0 +1,136 @@
+schema_version: 1
+name: antarctica_pineisland_north
+# Altitude line, interior catchment -> northern Pine Island Ice Shelf
+# (candidate "D" of the 2026-08-28 PIG scout,
+# claude_notes/pig_line_scout_2026-08-28.md). One 100 km ground track flown
+# at ~0.45 km AGL by MCoRDS3/DC-8 in 2014, 2016 and 2018 and at 9.2 km by
+# MCoRDS2/DC-8 in 2012 -- four passes, two altitude levels. The NORTHERN of
+# the two PIG lines (lat -75.17 -> -74.96).
+#
+# Thin ice (median 529 m; the bed sits 5-12 us below the surface), so the bed
+# is unambiguous in EVERY pass including the 9.2 km one -- 100 % of the line
+# above 10 dB, median bed SNR 21.9 dB. The bed is a continuous train of 3-8 km
+# hills and valleys, +-250 m. Crosses the grounding line at ANCHOR s 81.9 km;
+# the floating last 34 km is crevassed (ATM RMS p90 107 cm vs 6.4 cm grounded).
+#
+# s here is the ANCHOR axis (unsliced reference frames, s = 0 at trace 0 of
+# 20181107_01_011), which is what the tool measures on. The scout note's
+# along-track s maps to anchor s + 15.83 km: its GL at s 66.1 km is anchor
+# s 81.9 km, and the pilot window it asks for at s 55-65 km is anchor
+# s 70.79-80.82 km.
+
+identity:
+  case_prefix: antarctica_pineisland_north
+  crs: EPSG:3031
+  fc_hz: 190000000.0
+  grounding_line_s_km: 81.9
+  bed_dem: demogorgn
+
+reference:
+  pass: dc8_2018_0km
+  frames: ['20181107_01_011', '20181107_01_012', '20181107_01_013']
+
+order: [dc8_2014_0km, dc8_2016_0km, dc8_2018_0km, dc8_2012_9km]
+
+passes:
+  dc8_2014_0km:
+    agl_med_m: 456.0
+    season: 2014_Antarctica_DC8
+    param_frame: '20141029_05_013'
+    instrument: mcords3_dc8_2016
+    reversed: false
+    segments:
+      pilot:
+      - {frame: '20141029_05_014', slice: [171, 848]}
+      full:
+      - {frame: '20141029_05_012', slice: [3134, 3332]}
+      - {frame: '20141029_05_013'}
+      - {frame: '20141029_05_014', slice: [0, 3217]}
+  dc8_2016_0km:
+    agl_med_m: 451.0
+    season: 2016_Antarctica_DC8
+    param_frame: '20161104_05_009'
+    instrument: mcords3_dc8_2016
+    reversed: false
+    segments:
+      pilot:
+      - {frame: '20161104_05_009', slice: [1228, 1905]}
+      full:
+      - {frame: '20161104_05_008', slice: [858, 3333]}
+      - {frame: '20161104_05_009'}
+      - {frame: '20161104_05_010', slice: [0, 923]}
+  dc8_2018_0km:
+    agl_med_m: 447.0
+    season: 2018_Antarctica_DC8
+    param_frame: '20181107_01_012'
+    instrument: mcords3_dc8_2016
+    reversed: false
+    segments:
+      pilot:
+      - {frame: '20181107_01_012', slice: [1437, 2114]}
+      full:
+      - {frame: '20181107_01_011', slice: [1067, 3334]}
+      - {frame: '20181107_01_012'}
+      - {frame: '20181107_01_013', slice: [0, 1139]}
+  dc8_2012_9km:
+    agl_med_m: 9220.0
+    season: 2012_Antarctica_DC8
+    param_frame: '20121023_04_009'
+    instrument: mcords2_dc8_2012
+    reversed: false
+    segments:
+      pilot:
+      - {frame: '20121023_04_009', slice: [373, 712]}
+      full:
+      - {frame: '20121023_04_008', slice: [186, 1732]}
+      - {frame: '20121023_04_009'}
+      - {frame: '20121023_04_010', slice: [0, 223]}
+
+segments:
+  pilot:                       # 10 km window, anchor s 70.79-80.82 km (the
+    s0_km: 70.79               # scout note's s 55-65 km): ice 313-439 m, bed
+    n_traces: 48               # -414..-233 m, ending 1.1 km short of the GL
+    decomp_s_km: [75.8]
+  full:                        # 100 km, anchor s 15.83-115.85 km: grounded to
+    s0_km: 15.83               # anchor s 81.9, floating after
+    n_traces: 480
+    crosses_gl: true
+    decomp_s_km: [20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0,   # grounded
+                  90.0, 100.0, 110.0]                          # floating (GL 81.9)
+
+figures:
+  radargram: {y_us: [-1.0, 16.0], db: [-90.0, 5.0], scale: shared, source_color: false}
+  profile: {rel_us: [-1.5, 17.0], x_us: [-1.0, 16.0], db: [-110.0, 5.0]}
+
+rssnr:
+  snapshot: 3YH47013745B2T5ZZR50
+  store: {bucket: opr-radar-metrics, prefix: icechunk/antarctica, region: us-west-2}
+
+provenance:
+  measured_caveats: >
+    CSARP_standard. Two radar generations on one track: MCoRDS2 (2012) at
+    193.9/9.5 MHz on a 105.2 ns lattice and MCoRDS3 (2014/2016/2018) at
+    190/50 MHz on 20.0 ns -- a 5.3x bandwidth and 5.3x fast-time-posting
+    ratio on top of the 20x altitude ratio, so this is an altitude AND
+    waveform trade. Compression windows differ (hanning vs tukey 0.2, the
+    latter modelled as unwindowed). Track offsets from the reference pass are
+    15-21 m median. The bed pick is present on 100 % of the line. The 2012
+    pass carries no data-quality artifact blocks on this rung. Ice is thin
+    (median 529 m), so the surface return and the bed are only ~5 us apart at
+    9.2 km AGL: surface clutter lands directly on the bed, which is the point
+    of the line.
+  real_chain:
+    product: CSARP_standard
+    sar: f-k migration (sar_type 'f-k' read from the param structs on the 2012 and 2016/2018 passes)
+    combine: delay-and-sum, method 'standard', dline 6 (read from array_param on the 2012 pass; CReSIS-standard convention assumed elsewhere)
+    window: hanning on 2014/2016/2018 (verified 2018, decode-fallback 2014); tukeywin(N,0.2) on 2012 modelled as UNWINDOWED
+
+calibration:
+  gamma_surface_db:
+    value: -10.0
+    why: >
+      Physical air-ice value (~1 dB above smooth Fresnel -11.03), pinned on
+      every study line so the lines stay comparable; the in-run solve is
+      recorded as a diagnostic
+      (claude_notes/gamma_solve_design_2026-08-20.md).
+  att_db_per_km: solve       # Theil-Sen RSSNR-vs-2H regression, grounded samples

@@ -1,0 +1,497 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+spec 'full_haps14opt' <- claude_notes/pig_haps_opt/full_haps14opt.yaml
+calibration [antarctica_pineisland_north]: gamma_surface -10.00 dB (anomaly +1.04), A = 13.03 dB/km (solved (RSSNR-vs-2H Theil-Sen regression))
+  regression: A 13.03 [9.86, 15.88] dB/km, r 0.767, n 58 (28 floating excluded)
+picked bed: reference pass dc8_2018_0km (20181107_01_011/20181107_01_012/20181107_01_013), 9999 picks over 148.42 km, line gap frac 0.0005
+bed roughness: sigma 0.1 m, l 0.886 m; nadir coherent attenuation -8.73 dB -> G2 raised 8.73 dB (double-count guard)
+rssnr gamma: 106 samples (cache:/home/thomasteisberg/Documents/coherent-radar-simulator/outputs/antarctica_pineisland_north/rssnr_anchor.npz), snapshot 3YH47013745B2T5ZZR50, K -0.55 dB (K - K_phys 9.77 dB), segment G2 [-49.2 .. -8.2] dB (med -37.3), censored 20/106
+== dc8_2014_0km (full_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  HYBRID bed: GL 81.9 km, ramp 4.0 km; blend-zone DGN-picks med -144.5 / rms 332.7 m; clearance min grounded 203.0 / floating 238.1 m (clamp g 0.00000 / f 0.00000); floating picks n 4474, gaps 0.0011
+  picked bed: residual rms 17.7 m (mean -6.3, |max| 78.9), gaps 0.0000; along-track bed roughness 30.7 -> 35.4 m rms
+  reach: surface 3006 m, bed 881 m -> ct ±3006 m; spacing 7.47 m; n_traces 6747; n_samples_sim 4576
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c00_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.2 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c01_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.4 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c02_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.5 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c03_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.3 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c04_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.9 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c05_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.4 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c06_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.3 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c07_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.3 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c08_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.4 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c09_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.4 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c10_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c11_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.9 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c12_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c13_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.5 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c14_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c15_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.7 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c16_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.9 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c17_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.6 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c18_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.0 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c19_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.2 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c20_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.1 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c21_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.3 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c22_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c23_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.0 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c24_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.0 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c25_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.6 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c26_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.9 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c27_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.0 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c28_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.3 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c29_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.6 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c30_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.3 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c31_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.2 s recorded)
+  [skip-exists] dc8_2014_0km_full_pbed_dgn_rssnr_proc_c32_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (42.9 s recorded)
+  [proc-cache hit] dc8_2014_0km_full_pbed_dgn_rssnr_proc_hyb
+  processed: aperture 82 m (7 traces, half-angle 1.52 deg), 3 looks, mocomp dz rms 0.019 m
+  single-trace decomposition at s = 20.00 km (sim trace 280, measured trace 280): bed-window bed - surface returns +9.7 dB
+  single-trace decomposition at s = 30.00 km (sim trace 954, measured trace 954): bed-window bed - surface returns -1.4 dB
+  single-trace decomposition at s = 40.00 km (sim trace 1628, measured trace 1628): bed-window bed - surface returns +3.5 dB
+  single-trace decomposition at s = 50.00 km (sim trace 2302, measured trace 2302): bed-window bed - surface returns -2.2 dB
+  single-trace decomposition at s = 60.00 km (sim trace 2976, measured trace 2976): bed-window bed - surface returns +16.6 dB
+  single-trace decomposition at s = 70.00 km (sim trace 3648, measured trace 3648): bed-window bed - surface returns +1.4 dB
+  single-trace decomposition at s = 80.00 km (sim trace 4322, measured trace 4322): bed-window bed - surface returns +4.0 dB
+  single-trace decomposition at s = 90.00 km (sim trace 4996, measured trace 4996): bed-window bed - surface returns +20.8 dB
+  single-trace decomposition at s = 100.00 km (sim trace 5670, measured trace 5670): bed-window bed - surface returns +18.6 dB
+  single-trace decomposition at s = 110.00 km (sim trace 6344, measured trace 6344): bed-window bed - surface returns +29.3 dB
+== dc8_2016_0km (full_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  HYBRID bed: GL 81.9 km, ramp 4.0 km; blend-zone DGN-picks med -136.4 / rms 332.2 m; clearance min grounded 204.1 / floating 237.7 m (clamp g 0.00000 / f 0.00000); floating picks n 4474, gaps 0.0011
+  picked bed: residual rms 17.7 m (mean -6.3, |max| 78.9), gaps 0.0000; along-track bed roughness 30.6 -> 35.4 m rms
+  reach: surface 3004 m, bed 891 m -> ct ±3004 m; spacing 7.47 m; n_traces 6731; n_samples_sim 4496
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c00_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (46.0 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c01_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.1 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c02_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.7 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c03_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.9 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c04_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.6 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c05_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.9 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c06_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c07_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.3 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c08_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c09_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c10_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c11_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c12_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.9 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c13_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c14_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.7 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c15_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c16_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (36.4 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c17_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.6 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c18_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c19_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.6 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c20_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c21_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c22_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c23_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (34.9 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c24_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.6 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c25_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c26_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c27_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c28_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c29_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.6 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c30_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c31_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2016_0km_full_pbed_dgn_rssnr_proc_c32_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (34.9 s recorded)
+  [proc-cache hit] dc8_2016_0km_full_pbed_dgn_rssnr_proc_hyb
+  processed: aperture 80 m (6 traces, half-angle 1.52 deg), 3 looks, mocomp dz rms 0.025 m
+  single-trace decomposition at s = 20.00 km (sim trace 281, measured trace 281): bed-window bed - surface returns +11.3 dB
+  single-trace decomposition at s = 30.00 km (sim trace 955, measured trace 955): bed-window bed - surface returns +0.1 dB
+  single-trace decomposition at s = 40.00 km (sim trace 1629, measured trace 1629): bed-window bed - surface returns +1.1 dB
+  single-trace decomposition at s = 50.00 km (sim trace 2303, measured trace 2303): bed-window bed - surface returns -2.0 dB
+  single-trace decomposition at s = 60.00 km (sim trace 2976, measured trace 2976): bed-window bed - surface returns +18.0 dB
+  single-trace decomposition at s = 70.00 km (sim trace 3650, measured trace 3650): bed-window bed - surface returns +2.5 dB
+  single-trace decomposition at s = 80.00 km (sim trace 4324, measured trace 4324): bed-window bed - surface returns +2.5 dB
+  single-trace decomposition at s = 90.00 km (sim trace 4998, measured trace 4998): bed-window bed - surface returns +20.8 dB
+  single-trace decomposition at s = 99.99 km (sim trace 5671, measured trace 5671): bed-window bed - surface returns +16.5 dB
+  single-trace decomposition at s = 110.00 km (sim trace 6344, measured trace 6344): bed-window bed - surface returns +30.2 dB
+== dc8_2018_0km (full_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  HYBRID bed: GL 81.9 km, ramp 4.0 km; blend-zone DGN-picks med -145.5 / rms 332.5 m; clearance min grounded 203.4 / floating 239.1 m (clamp g 0.00000 / f 0.00000); floating picks n 4474, gaps 0.0011
+  picked bed: residual rms 17.7 m (mean -6.3, |max| 78.9), gaps 0.0000; along-track bed roughness 30.7 -> 35.4 m rms
+  reach: surface 2997 m, bed 893 m -> ct ±2997 m; spacing 7.47 m; n_traces 6739; n_samples_sim 4501
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c00_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c01_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.6 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c02_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.0 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c03_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.5 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c04_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.2 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c05_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.3 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c06_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c07_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.7 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c08_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c09_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.1 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c10_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.3 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c11_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.1 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c12_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (34.9 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c13_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (34.8 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c14_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c15_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.0 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c16_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.3 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c17_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.2 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c18_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.2 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c19_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.1 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c20_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.0 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c21_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.2 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c22_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.0 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c23_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.0 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c24_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c25_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.1 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c26_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c27_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c28_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.8 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c29_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.3 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c30_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (35.4 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c31_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (34.5 s recorded)
+  [skip-exists] dc8_2018_0km_full_pbed_dgn_rssnr_proc_c32_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia8034a068 (37.8 s recorded)
+  [proc-cache hit] dc8_2018_0km_full_pbed_dgn_rssnr_proc_hyb
+  processed: aperture 75 m (6 traces, half-angle 1.52 deg), 3 looks, mocomp dz rms 0.081 m
+  single-trace decomposition at s = 20.00 km (sim trace 281, measured trace 281): bed-window bed - surface returns +10.5 dB
+  single-trace decomposition at s = 30.00 km (sim trace 955, measured trace 955): bed-window bed - surface returns -0.9 dB
+  single-trace decomposition at s = 40.00 km (sim trace 1629, measured trace 1629): bed-window bed - surface returns +4.5 dB
+  single-trace decomposition at s = 50.00 km (sim trace 2303, measured trace 2303): bed-window bed - surface returns -1.9 dB
+  single-trace decomposition at s = 60.00 km (sim trace 2977, measured trace 2977): bed-window bed - surface returns +17.4 dB
+  single-trace decomposition at s = 70.00 km (sim trace 3651, measured trace 3651): bed-window bed - surface returns +4.4 dB
+  single-trace decomposition at s = 80.00 km (sim trace 4325, measured trace 4325): bed-window bed - surface returns +3.8 dB
+  single-trace decomposition at s = 90.01 km (sim trace 4999, measured trace 4999): bed-window bed - surface returns +22.2 dB
+  single-trace decomposition at s = 100.00 km (sim trace 5671, measured trace 5671): bed-window bed - surface returns +17.6 dB
+  single-trace decomposition at s = 110.00 km (sim trace 6344, measured trace 6344): bed-window bed - surface returns +31.3 dB
+== dc8_2012_9km (full_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  HYBRID bed: GL 81.9 km, ramp 4.0 km; blend-zone DGN-picks med -133.5 / rms 365.0 m; clearance min grounded -0.5 / floating 238.8 m (clamp g 0.00000 / f 0.00000); floating picks n 4474, gaps 0.0011
+  picked bed: residual rms 17.7 m (mean -6.3, |max| 78.9), gaps 0.0000; along-track bed roughness 30.6 -> 35.4 m rms
+  reach: surface 7310 m, bed 3022 m -> ct ±7310 m; spacing 31.97 m; n_traces 3501; n_samples_sim 1009
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c00_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (6.3 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c01_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (6.0 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c02_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c03_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c04_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (6.1 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c05_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (6.2 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c06_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c07_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c08_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.6 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c09_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c10_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c11_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c12_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.6 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c13_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.6 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c14_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c15_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (3.1 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c16_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c17_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c18_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.6 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c19_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.8 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c20_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c21_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c22_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.6 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c23_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c24_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c25_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c26_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.6 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c27_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (6.1 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c28_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c29_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c30_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.9 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c31_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c32_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c33_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (2.8 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c34_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [skip-exists] dc8_2012_9km_full_pbed_dgn_rssnr_proc_c35_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iac8e5ee53 (5.7 s recorded)
+  [proc-cache hit] dc8_2012_9km_full_pbed_dgn_rssnr_proc_hyb
+  processed: aperture 275 m (10 traces, half-angle 0.75 deg), 3 looks, mocomp dz rms 0.016 m
+  single-trace decomposition at s = 20.01 km (sim trace 141, measured trace 141): bed-window bed - surface returns -20.1 dB
+  single-trace decomposition at s = 30.00 km (sim trace 478, measured trace 478): bed-window bed - surface returns -38.6 dB
+  single-trace decomposition at s = 40.01 km (sim trace 816, measured trace 816): bed-window bed - surface returns -30.2 dB
+  single-trace decomposition at s = 50.00 km (sim trace 1153, measured trace 1153): bed-window bed - surface returns -35.2 dB
+  single-trace decomposition at s = 59.99 km (sim trace 1490, measured trace 1490): bed-window bed - surface returns -16.8 dB
+  single-trace decomposition at s = 70.01 km (sim trace 1765, measured trace 1765): bed-window bed - surface returns -21.5 dB
+  single-trace decomposition at s = 80.00 km (sim trace 2102, measured trace 2102): bed-window bed - surface returns -29.1 dB
+  single-trace decomposition at s = 89.99 km (sim trace 2439, measured trace 2439): bed-window bed - surface returns -9.1 dB
+  single-trace decomposition at s = 100.01 km (sim trace 2777, measured trace 2777): bed-window bed - surface returns -15.8 dB
+  single-trace decomposition at s = 110.00 km (sim trace 3114, measured trace 3114): bed-window bed - surface returns +9.1 dB
+== haps_14km (full_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  HYBRID bed: GL 81.9 km, ramp 4.0 km; blend-zone DGN-picks med -144.5 / rms 372.4 m; clearance min grounded 0.3 / floating 236.8 m (clamp g 0.00000 / f 0.00000); floating picks n 4474, gaps 0.0011
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 13734 m
+  picked bed: residual rms 17.7 m (mean -6.3, |max| 78.9), gaps 0.0000; along-track bed roughness 30.7 -> 35.4 m rms
+  reach: surface 8711 m, bed 3591 m -> ct ±8711 m; spacing 69.16 m; n_traces 6739; n_samples_sim 3737
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c00_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.4 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c01_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.5 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c02_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c03_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.2 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c04_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c05_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.3 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c06_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c07_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.0 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c08_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.3 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c09_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.0 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c10_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c11_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c12_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.4 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c13_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c14_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c15_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c16_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c17_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.0 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c18_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c19_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c20_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.0 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c21_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c22_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c23_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c24_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c25_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c26_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c27_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c28_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.4 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c29_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.0 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c30_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.9 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c31_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.4 s recorded)
+  [skip-exists] haps_14km_full_pbed_dgn_rssnr_proc_c32_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (4.3 s recorded)
+  [proc-cache hit] haps_14km_full_pbed_dgn_rssnr_proc_hyb
+  processed: aperture 2502 m (170 traces, half-angle 4.83 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 20.00 km (sim trace 281): bed-window bed - surface returns -20.0 dB
+  single-trace decomposition at s = 30.00 km (sim trace 955): bed-window bed - surface returns -23.1 dB
+  single-trace decomposition at s = 40.00 km (sim trace 1629): bed-window bed - surface returns -13.2 dB
+  single-trace decomposition at s = 50.00 km (sim trace 2303): bed-window bed - surface returns -19.4 dB
+  single-trace decomposition at s = 60.00 km (sim trace 2977): bed-window bed - surface returns +2.4 dB
+  single-trace decomposition at s = 70.00 km (sim trace 3651): bed-window bed - surface returns -21.8 dB
+  single-trace decomposition at s = 80.00 km (sim trace 4325): bed-window bed - surface returns -20.6 dB
+  single-trace decomposition at s = 90.01 km (sim trace 4999): bed-window bed - surface returns -2.4 dB
+  single-trace decomposition at s = 100.00 km (sim trace 5671): bed-window bed - surface returns -1.0 dB
+  single-trace decomposition at s = 110.00 km (sim trace 6344): bed-window bed - surface returns +5.9 dB
+== haps_20km (full_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  HYBRID bed: GL 81.9 km, ramp 4.0 km; blend-zone DGN-picks med -144.5 / rms 389.2 m; clearance min grounded -21.1 / floating 236.6 m (clamp g 0.00005 / f 0.00000); floating picks n 4474, gaps 0.0011
+  SYNTHETIC pass: 20000 m constant ellipsoidal height, roll 0, AGL med 19734 m
+  picked bed: residual rms 17.7 m (mean -6.3, |max| 78.9), gaps 0.0000; along-track bed roughness 30.7 -> 35.4 m rms
+  reach: surface 10285 m, bed 4277 m -> ct ±10285 m; spacing 82.74 m; n_traces 6739; n_samples_sim 3737
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c00_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.9 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c01_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (3.0 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c02_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.8 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c03_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c04_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c05_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c06_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c07_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c08_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c09_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c10_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c11_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c12_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c13_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.5 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c14_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c15_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c16_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c17_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c18_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c19_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c20_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c21_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c22_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c23_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c24_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c25_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c26_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c27_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c28_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.9 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c29_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c30_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.4 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c31_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.8 s recorded)
+  [skip-exists] haps_20km_full_pbed_dgn_rssnr_proc_c32_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05 (2.8 s recorded)
+  [proc-cache hit] haps_20km_full_pbed_dgn_rssnr_proc_hyb
+  processed: aperture 3516 m (238 traces, half-angle 4.83 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 20.00 km (sim trace 281): bed-window bed - surface returns -6.9 dB
+  single-trace decomposition at s = 30.00 km (sim trace 955): bed-window bed - surface returns -39.6 dB
+  single-trace decomposition at s = 40.00 km (sim trace 1629): bed-window bed - surface returns -25.2 dB
+  single-trace decomposition at s = 50.00 km (sim trace 2303): bed-window bed - surface returns -36.4 dB
+  single-trace decomposition at s = 60.00 km (sim trace 2977): bed-window bed - surface returns -16.6 dB
+  single-trace decomposition at s = 70.00 km (sim trace 3651): bed-window bed - surface returns -18.5 dB
+  single-trace decomposition at s = 80.00 km (sim trace 4325): bed-window bed - surface returns -26.8 dB
+  single-trace decomposition at s = 90.01 km (sim trace 4999): bed-window bed - surface returns +3.8 dB
+  single-trace decomposition at s = 100.00 km (sim trace 5671): bed-window bed - surface returns +4.2 dB
+  single-trace decomposition at s = 110.00 km (sim trace 6344): bed-window bed - surface returns +13.3 dB
+== haps14_pig_075 (full_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  HYBRID bed: GL 81.9 km, ramp 4.0 km; blend-zone DGN-picks med -144.5 / rms 372.4 m; clearance min grounded 0.3 / floating 236.8 m (clamp g 0.00000 / f 0.00000); floating picks n 4474, gaps 0.0011
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 13734 m
+  picked bed: residual rms 17.7 m (mean -6.3, |max| 78.9), gaps 0.0000; along-track bed roughness 30.7 -> 35.4 m rms
+  reach: surface 8711 m, bed 3591 m -> ct ±8711 m; spacing 61.86 m; n_traces 6739; n_samples_sim 3737
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c00_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c01_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c02_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c03_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c04_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c05_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c06_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c07_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c08_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c09_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c10_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c11_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c12_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c13_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c14_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c15_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c16_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c17_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c18_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c19_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c20_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c21_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c22_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c23_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c24_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c25_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c26_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c27_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c28_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c29_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c30_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c31_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [skip-exists] haps14_pig_075_full_pbed_dgn_rssnr_proc_c32_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b (3.9 s recorded)
+  [proc-cache hit] haps14_pig_075_full_pbed_dgn_rssnr_proc_hyb
+  processed: aperture 2000 m (136 traces, half-angle 3.86 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 20.00 km (sim trace 281): bed-window bed - surface returns -16.5 dB
+  single-trace decomposition at s = 30.00 km (sim trace 955): bed-window bed - surface returns -36.2 dB
+  single-trace decomposition at s = 40.00 km (sim trace 1629): bed-window bed - surface returns -20.2 dB
+  single-trace decomposition at s = 50.00 km (sim trace 2303): bed-window bed - surface returns -29.5 dB
+  single-trace decomposition at s = 60.00 km (sim trace 2977): bed-window bed - surface returns -14.1 dB
+  single-trace decomposition at s = 70.00 km (sim trace 3651): bed-window bed - surface returns -11.9 dB
+  single-trace decomposition at s = 80.00 km (sim trace 4325): bed-window bed - surface returns -29.3 dB
+  single-trace decomposition at s = 90.01 km (sim trace 4999): bed-window bed - surface returns +0.1 dB
+  single-trace decomposition at s = 100.00 km (sim trace 5671): bed-window bed - surface returns +5.0 dB
+  single-trace decomposition at s = 110.00 km (sim trace 6344): bed-window bed - surface returns +13.2 dB
+== haps14_pig_050 (full_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  HYBRID bed: GL 81.9 km, ramp 4.0 km; blend-zone DGN-picks med -144.5 / rms 372.4 m; clearance min grounded 0.3 / floating 236.8 m (clamp g 0.00000 / f 0.00000); floating picks n 4474, gaps 0.0011
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 13734 m
+  picked bed: residual rms 17.7 m (mean -6.3, |max| 78.9), gaps 0.0000; along-track bed roughness 30.7 -> 35.4 m rms
+  reach: surface 8711 m, bed 3591 m -> ct ±8711 m; spacing 75.76 m; n_traces 6739; n_samples_sim 3737
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c00_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c01_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (4.0 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c02_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c03_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c04_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c05_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c06_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c07_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c08_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c09_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c10_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c11_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c12_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c13_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c14_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c15_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c16_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c17_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c18_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c19_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c20_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c21_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c22_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c23_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c24_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c25_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c26_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c27_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c28_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c29_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c30_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c31_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [skip-exists] haps14_pig_050_full_pbed_dgn_rssnr_proc_c32_hyb_srough_sr0.108_13.5_exp_att13.03_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db (3.9 s recorded)
+  [proc-cache hit] haps14_pig_050_full_pbed_dgn_rssnr_proc_hyb
+  processed: aperture 3008 m (204 traces, half-angle 5.80 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 20.00 km (sim trace 281): bed-window bed - surface returns -14.9 dB
+  single-trace decomposition at s = 30.00 km (sim trace 955): bed-window bed - surface returns -36.5 dB
+  single-trace decomposition at s = 40.00 km (sim trace 1629): bed-window bed - surface returns -19.2 dB
+  single-trace decomposition at s = 50.00 km (sim trace 2303): bed-window bed - surface returns -30.5 dB
+  single-trace decomposition at s = 60.00 km (sim trace 2977): bed-window bed - surface returns -14.5 dB
+  single-trace decomposition at s = 70.00 km (sim trace 3651): bed-window bed - surface returns -24.6 dB
+  single-trace decomposition at s = 80.00 km (sim trace 4325): bed-window bed - surface returns -29.1 dB
+  single-trace decomposition at s = 90.01 km (sim trace 4999): bed-window bed - surface returns +3.8 dB
+  single-trace decomposition at s = 100.00 km (sim trace 5671): bed-window bed - surface returns +10.1 dB
+  single-trace decomposition at s = 110.00 km (sim trace 6344): bed-window bed - surface returns +9.7 dB
+  bed-return tail dc8_2014_0km: slope dB/us measured -5.45, picked_bed -7.03; excess at +2 us picked_bed -0.2; guard picked_bed ok (+15.6 dB)
+  bed-return tail dc8_2016_0km: slope dB/us measured -5.28, picked_bed -7.13; excess at +2 us picked_bed -4.3; guard picked_bed ok (+15.5 dB)
+  bed-return tail dc8_2018_0km: slope dB/us measured -5.98, picked_bed -7.15; excess at +2 us picked_bed -6.3; guard picked_bed ok (+16.6 dB)
+  bed-return tail dc8_2012_9km: slope dB/us measured -1.97, picked_bed -1.65; excess at +2 us picked_bed -9.5; guard picked_bed FAIL (-1.6 dB)
+  bed-return tail haps_14km: slope dB/us picked_bed -4.89; guard picked_bed FAIL (-13.6 dB)
+  bed-return tail haps_20km: slope dB/us picked_bed -1.33; guard picked_bed FAIL (-12.1 dB)
+  bed-return tail haps14_pig_075: slope dB/us picked_bed -3.18; guard picked_bed FAIL (-8.0 dB)
+  bed-return tail haps14_pig_050: slope dB/us picked_bed -1.39; guard picked_bed FAIL (-5.3 dB)
+  zone dc8_2014_0km/grounded: bed window sim -80.5 meas -78.0 (residual -2.52 dB); tail slope sim -4.80 meas -6.46; guard FAIL (-1.2 dB)
+  zone dc8_2014_0km/floating: bed window sim -58.5 meas -51.2 (residual -7.34 dB); tail slope sim -7.06 meas -5.44; guard ok (+18.5 dB)
+  zone dc8_2016_0km/grounded: bed window sim -80.6 meas -77.0 (residual -3.63 dB); tail slope sim -4.89 meas -6.15; guard FAIL (-1.0 dB)
+  zone dc8_2016_0km/floating: bed window sim -59.2 meas -48.4 (residual -10.78 dB); tail slope sim -7.16 meas -5.28; guard ok (+17.9 dB)
+  zone dc8_2018_0km/grounded: bed window sim -80.6 meas -77.0 (residual -3.63 dB); tail slope sim -5.00 meas -6.79; guard FAIL (-0.5 dB)
+  zone dc8_2018_0km/floating: bed window sim -59.1 meas -49.8 (residual -9.24 dB); tail slope sim -7.18 meas -5.98; guard ok (+19.4 dB)
+  zone dc8_2012_9km/grounded: bed window sim -45.6 meas -42.8 (residual -2.81 dB); tail slope sim -1.42 meas -1.70; guard FAIL (-22.1 dB)
+  zone dc8_2012_9km/floating: bed window sim -37.0 meas -23.2 (residual -13.81 dB); tail slope sim -1.74 meas -1.99; guard FAIL (+0.8 dB)
+  zone haps_14km/grounded: bed window sim -61.9; tail slope sim -1.05; guard FAIL (-19.3 dB)
+  zone haps_14km/floating: bed window sim -46.5; tail slope sim -9.41; guard FAIL (-4.9 dB)
+  zone haps_20km/grounded: bed window sim -58.1; tail slope sim -0.29; guard FAIL (-20.5 dB)
+  zone haps_20km/floating: bed window sim -49.8; tail slope sim -1.94; guard FAIL (-8.6 dB)
+  zone haps14_pig_075/grounded: bed window sim -60.0; tail slope sim -2.40; guard FAIL (-22.6 dB)
+  zone haps14_pig_075/floating: bed window sim -49.7; tail slope sim -3.28; guard FAIL (-4.4 dB)
+  zone haps14_pig_050/grounded: bed window sim -58.0; tail slope sim -0.89; guard FAIL (-19.9 dB)
+  zone haps14_pig_050/floating: bed window sim -48.9; tail slope sim -1.65; guard FAIL (-3.2 dB)
+  [metrics] merged into 58 entries (had 58)
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/outputs/antarctica_pineisland_north/full_haps14opt/report.html
+clutter (midcol rel surf, meas/sim dB): dc8_2014_0km: -56.1/-59.9 [surface returns] | dc8_2016_0km: -53.3/-60.1 [surface returns] | dc8_2018_0km: -55.5/-60.4 [surface returns] | dc8_2012_9km: -26.6/-32.1 [surface returns] | haps_14km: ----/-46.3 [surface returns] | haps_20km: ----/-45.1 [surface returns] | haps14_pig_075: ----/-46.7 [surface returns] | haps14_pig_050: ----/-46.3 [surface returns]

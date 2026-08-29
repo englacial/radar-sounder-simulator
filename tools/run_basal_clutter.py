@@ -1656,10 +1656,19 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
         # Reversed trace order flips the kernel's nav-derived along-track
         # axis u_at; roll is applied about u_at, so negate it to preserve
         # the PHYSICAL tilt direction of the array (scout pitfall 2).
-        fsub = fsub.assign(Roll=-fsub.Roll)
-        roll_note = ("pass flown backwards: slices reversed and nav roll "
-                     "NEGATED (roll rotates about the nav-order along-track "
-                     "axis, which reversal flips)")
+        # Pre-2010 CSARP products carry no attitude at all: the scene then
+        # gets nav_roll=None (opr.frame_scene), the kernel treats it as zero
+        # roll, and there is nothing to negate.
+        if "Roll" in fsub:
+            fsub = fsub.assign(Roll=-fsub.Roll)
+            roll_note = ("pass flown backwards: slices reversed and nav roll "
+                         "NEGATED (roll rotates about the nav-order "
+                         "along-track axis, which reversal flips)")
+        else:
+            roll_note = ("pass flown backwards: slices reversed. The product "
+                         "carries NO Roll variable, so the antenna is "
+                         "modelled unrolled (zero) and there is no roll sign "
+                         "to flip")
     synth_note = None
     if spec.get("synthetic_msl_m"):
         fsub, bot_sub, synth_note = synth_altitude_fsub(

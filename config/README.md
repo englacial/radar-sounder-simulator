@@ -70,9 +70,19 @@ reference pass.
 | line | kind | passes | bed DEM |
 |---|---|---|---|
 | `antarctica_getz` | altitude | `dc8_2016_{0,9,11}km` | DEMOGORGN; GL at s 69.7 km |
+| `antarctica_pineisland_south` | altitude | `dc8_{2014,2016,2018}_0km`, `dc8_2012_9km`, `dc8_2009_10km` | DEMOGORGN; GL at s 6.7 km; three radar generations |
+| `antarctica_pineisland_north` | altitude | `dc8_{2014,2016,2018}_0km`, `dc8_2012_9km` | DEMOGORGN; GL at s 66.1 km; thin ice (529 m median) |
 | `antarctica_david` | frequency | `basler_2017` (195 MHz), `baslermkb_{2022,2023}` (60 MHz) | DEMOGORGN; GL at s 95.4 km; reference is the 60 MHz 2023 pass |
 | `greenland_geikie01_transit` | altitude | `p3_2014_low`, `p3_2017_high` | BedMachine; `full` contains a turn flown on different radii (s 40–80 km) |
 | `greenland_westcoast` | instrument | `p3_2016` (MCoRDS5), `p3_2017`, `p3_2019` (MCoRDS3) | BedMachine |
+
+The two Pine Island lines share one OIB survey ladder over the upper trunk and
+were selected in `claude_notes/pig_line_scout_2026-08-28.md`; `_south` (lat
+−75.35 → −75.56) carries the trough step and a third altitude level, `_north`
+(lat −75.17 → −74.96) carries thin ice with the bed visible in every pass.
+Both take their surface-roughness law from the Tier 2 `aa_grounded_500_1500`
+stratum as a PROVISIONAL stand-in — no line-specific ATM fit yet, see the note
+in `config/roughness/atm_tier2_strata.yaml`.
 
 `calibration:` holds the two physical mapping parameters, `gamma_surface_db`
 (manual `{value, why}` or `solve`) and `att_db_per_km` (manual or `solve` =
@@ -98,7 +108,9 @@ numbers no code consumes.
 | `mcords3_p3_2014` | MCoRDS3 on P-3, 2014 + 2017 Greenland | 7 el, 0.5 λ |
 | `mcords3_p3_2019` | MCoRDS3 on P-3, 2019 (steered L/R beams unmodelled) | 7 el, 0.5 λ |
 | `mcords5_p3_2016` | MCoRDS5 on NOAA P-3, 2 channels, 0.61 m | 2 el, 0.41 λ |
-| `mcords3_dc8_2016` | MCoRDS3 on DC-8, 3 × 2 element array | 3 el, 0.45 λ (OPR lever_arm.m) |
+| `mcords3_dc8_2016` | MCoRDS3 on DC-8 2014/2016/2018, 3 × 2 element array | 3 el, 0.45 λ (OPR lever_arm.m) |
+| `mcords2_dc8_2012` | MCoRDS2 on DC-8, 2012 (193.9/9.5 MHz) | 5 el, 0.2546 λ (OPR lever_arm.m) |
+| `mcords_dc8_2009` | MCoRDS on DC-8, 2009 (193.9/9.5 MHz) | 5 el, 0.2546 λ, no roll (product has no attitude) |
 | `mcords5_basler_2017` | MCoRDS5 on Basler, 8 channels, 3.7 m | 8 el tapered, from the product param structs |
 | `marfa_baslermkb_2022` | not in the readme (2022/2023) | right-wing 0.4 λ dipole, no beamforming |
 | `haps_60mhz` | synthetic (`kind: stated`) | 8 el, 0.5 λ, no roll |

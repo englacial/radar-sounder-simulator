@@ -1,0 +1,26 @@
+schema_version: 1
+meta:
+  name: haps14_bedsmooth
+  description: >
+    Finalists at 15 decomposition traces: the low-frequency plateau (50/60/75),
+    the candidate the TAIL guard prefers (150), and 300 MHz as the anchor.
+    One-off study.
+run:
+  line: antarctica_pineisland_north
+  segment: probe
+  passes: [f050, f060, f075, f150, f300]
+  extra_passes:
+    f050: {carrier: reference, altitude_m: 14000.0, instrument: haps14_pig_050}
+    f060: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o060w}
+    f075: {carrier: reference, altitude_m: 14000.0, instrument: haps14_pig_075}
+    f150: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o150w}
+    f300: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o300w}
+  bed: {nadir: picked, floating: picked, demogorgn_seed: 0}
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse: {specular_fraction: 0.5, tilt_s0_deg: 3.0}
+  physics:
+    att_db_per_km: solve
+    surface_roughness: {source: atm_exponential}
+    bed_roughness: {sigma_m: 0.05, corr_length_m: 0.886}
+  processing: {chain: standard, proc_cache: true, companion: false}

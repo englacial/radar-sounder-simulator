@@ -46,6 +46,11 @@ def _inject_synthetic():
 def _getz_with_synthetic():
     _inject_synthetic()
     yield
+    # The injection mutates rbc's MODULE globals, which leak into every later
+    # test module: test_basal_lines' round-trip check then compares activation
+    # against a state that carries syn_14km and fails. Re-activate the line
+    # clean on teardown so the leak stops at this module's edge.
+    rbc.activate_line(LINE)
 
 
 _inject_synthetic()

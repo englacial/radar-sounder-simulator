@@ -1,0 +1,41 @@
+schema_version: 1
+meta:
+  name: haps14_sweep1
+  description: >
+    Coarse sweep of the 14 km HAPS design space on the Pine Island probe
+    window (= pilot window, 5 decomposition traces). Synthetic passes only:
+    the real passes are already characterised by the pilot runs and add
+    nothing here. One-off study, not committed to config/experiments/.
+
+run:
+  lines: [antarctica_pineisland_north, antarctica_pineisland_south]
+  segment: probe
+  passes: [c050w, c060w, c100w, c150w, c200w, c300n, c300w]
+
+  extra_passes:
+    c050w: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o050w}
+    c060w: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o060w}
+    c100w: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o100w}
+    c150w: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o150w}
+    c200w: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o200w}
+    c300n: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o300n}
+    c300w: {carrier: reference, altitude_m: 14000.0, instrument: haps14_o300w}
+
+  bed:
+    nadir: picked
+    floating: picked
+    demogorgn_seed: 0
+
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse: {specular_fraction: 0.5, tilt_s0_deg: 3.0}
+
+  physics:
+    att_db_per_km: solve
+    surface_roughness: {source: atm_exponential}
+    bed_roughness: {sigma_m: 0.10, corr_length_m: 0.886}
+
+  processing:
+    chain: standard
+    proc_cache: true
+    companion: false

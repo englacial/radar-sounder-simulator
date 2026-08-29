@@ -1,0 +1,32 @@
+schema_version: 1
+meta:
+  name: haps14_sweep2
+  description: >
+    Refinement at the low-frequency end, where sweep1 showed the optimum sits,
+    plus two isolated levers: bandwidth (r050b10 = half B) and compressed-pulse
+    support (r050t3 / r050t1 = short T, which truncates the surface sinc tail
+    before it reaches the bed window). One-off study.
+
+run:
+  lines: [antarctica_pineisland_north, antarctica_pineisland_south]
+  segment: probe
+  passes: [r050, r075, r090, r110, r050b10, r050t3, r050t1]
+
+  extra_passes:
+    r050:    {carrier: reference, altitude_m: 14000.0, instrument: haps14_pig_050}
+    r075:    {carrier: reference, altitude_m: 14000.0, instrument: haps14_pig_075}
+    r090:    {carrier: reference, altitude_m: 14000.0, instrument: haps14_r090}
+    r110:    {carrier: reference, altitude_m: 14000.0, instrument: haps14_r110}
+    r050b10: {carrier: reference, altitude_m: 14000.0, instrument: haps14_r050b10}
+    r050t3:  {carrier: reference, altitude_m: 14000.0, instrument: haps14_r050t3}
+    r050t1:  {carrier: reference, altitude_m: 14000.0, instrument: haps14_r050t1}
+
+  bed: {nadir: picked, floating: picked, demogorgn_seed: 0}
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse: {specular_fraction: 0.5, tilt_s0_deg: 3.0}
+  physics:
+    att_db_per_km: solve
+    surface_roughness: {source: atm_exponential}
+    bed_roughness: {sigma_m: 0.10, corr_length_m: 0.886}
+  processing: {chain: standard, proc_cache: true, companion: false}

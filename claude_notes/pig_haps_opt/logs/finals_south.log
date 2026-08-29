@@ -1,0 +1,186 @@
+warning: `VIRTUAL_ENV=/home/thomasteisberg/Documents/opr/radar_return_statistics_postprocessing/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+spec 'haps14_finals' <- claude_notes/pig_haps_opt/finals.yaml
+calibration [antarctica_pineisland_south]: gamma_surface -10.00 dB (anomaly +1.04), A = 15.77 dB/km (solved (RSSNR-vs-2H Theil-Sen regression))
+  regression: A 15.77 [14.03, 17.38] dB/km, r 0.93, n 97
+picked bed: reference pass dc8_2018_0km (20181107_01_022/20181107_01_023/20181107_01_024), 10000 picks over 148.28 km, line gap frac 0.0000
+bed roughness: sigma 0.1 m, l 0.886 m; nadir coherent attenuation -8.73 dB -> G2 raised 8.73 dB (double-count guard)
+rssnr gamma: 107 samples (cache:/home/thomasteisberg/Documents/coherent-radar-simulator/outputs/antarctica_pineisland_south/rssnr_anchor.npz), snapshot 3YH47013745B2T5ZZR50, K -0.55 dB (K - K_phys 9.77 dB), segment G2 [-29.4 .. -2.1] dB (med -21.0), censored 10/107
+== f050 (probe_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 13599 m
+  picked bed: residual rms 20.3 m (mean -12.0, |max| 75.1), gaps 0.0000; along-track bed roughness 63.0 -> 67.0 m rms
+  reach: surface 10515 m, bed 3602 m -> ct ±10515 m; spacing 79.12 m; n_traces 671; n_samples_sim 5053
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] f050_probe_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db  6.7 s  facets/iface ~84592  n_samples 1264
+  [ok] f050_probe_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db  6.8 s  facets/iface ~84630  n_samples 1264
+  [ok] f050_probe_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia535675db  6.5 s  facets/iface ~84320  n_samples 1264
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] f050_probe_pbed_dgn_rssnr_proc (14 MB)
+  processed: aperture 3337 m (226 traces, half-angle 5.80 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 51.00 km (sim trace 34): bed-window bed - surface returns -8.6 dB
+  single-trace decomposition at s = 51.64 km (sim trace 77): bed-window bed - surface returns +5.9 dB
+  single-trace decomposition at s = 52.27 km (sim trace 119): bed-window bed - surface returns +7.1 dB
+  single-trace decomposition at s = 52.92 km (sim trace 163): bed-window bed - surface returns -0.6 dB
+  single-trace decomposition at s = 53.54 km (sim trace 205): bed-window bed - surface returns -1.9 dB
+  single-trace decomposition at s = 54.18 km (sim trace 248): bed-window bed - surface returns -11.9 dB
+  single-trace decomposition at s = 54.81 km (sim trace 291): bed-window bed - surface returns -8.9 dB
+  single-trace decomposition at s = 55.45 km (sim trace 334): bed-window bed - surface returns -2.9 dB
+  single-trace decomposition at s = 56.09 km (sim trace 377): bed-window bed - surface returns -3.9 dB
+  single-trace decomposition at s = 56.73 km (sim trace 420): bed-window bed - surface returns -1.4 dB
+  single-trace decomposition at s = 57.36 km (sim trace 463): bed-window bed - surface returns -1.9 dB
+  single-trace decomposition at s = 57.99 km (sim trace 505): bed-window bed - surface returns -1.6 dB
+  single-trace decomposition at s = 58.62 km (sim trace 548): bed-window bed - surface returns -6.7 dB
+  single-trace decomposition at s = 59.26 km (sim trace 591): bed-window bed - surface returns -19.5 dB
+  single-trace decomposition at s = 59.90 km (sim trace 634): bed-window bed - surface returns -27.5 dB
+== f060 (probe_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 13599 m
+  picked bed: residual rms 20.3 m (mean -12.0, |max| 75.1), gaps 0.0000; along-track bed roughness 63.0 -> 67.0 m rms
+  reach: surface 10515 m, bed 3602 m -> ct ±10515 m; spacing 72.22 m; n_traces 671; n_samples_sim 5053
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] f060_probe_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia1215dee6  6.1 s  facets/iface ~101320  n_samples 1264
+  [ok] f060_probe_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia1215dee6  6.1 s  facets/iface ~101660  n_samples 1264
+  [ok] f060_probe_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia1215dee6  6.2 s  facets/iface ~101320  n_samples 1264
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] f060_probe_pbed_dgn_rssnr_proc (14 MB)
+  processed: aperture 2776 m (188 traces, half-angle 4.83 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 51.00 km (sim trace 34): bed-window bed - surface returns -8.8 dB
+  single-trace decomposition at s = 51.64 km (sim trace 77): bed-window bed - surface returns +2.1 dB
+  single-trace decomposition at s = 52.27 km (sim trace 119): bed-window bed - surface returns +6.6 dB
+  single-trace decomposition at s = 52.92 km (sim trace 163): bed-window bed - surface returns -11.9 dB
+  single-trace decomposition at s = 53.54 km (sim trace 205): bed-window bed - surface returns -4.2 dB
+  single-trace decomposition at s = 54.18 km (sim trace 248): bed-window bed - surface returns -9.3 dB
+  single-trace decomposition at s = 54.81 km (sim trace 291): bed-window bed - surface returns -3.1 dB
+  single-trace decomposition at s = 55.45 km (sim trace 334): bed-window bed - surface returns -5.1 dB
+  single-trace decomposition at s = 56.09 km (sim trace 377): bed-window bed - surface returns -5.7 dB
+  single-trace decomposition at s = 56.73 km (sim trace 420): bed-window bed - surface returns +0.1 dB
+  single-trace decomposition at s = 57.36 km (sim trace 463): bed-window bed - surface returns -0.6 dB
+  single-trace decomposition at s = 57.99 km (sim trace 505): bed-window bed - surface returns -1.1 dB
+  single-trace decomposition at s = 58.62 km (sim trace 548): bed-window bed - surface returns -5.7 dB
+  single-trace decomposition at s = 59.26 km (sim trace 591): bed-window bed - surface returns -13.7 dB
+  single-trace decomposition at s = 59.90 km (sim trace 634): bed-window bed - surface returns -21.1 dB
+== f075 (probe_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 13599 m
+  picked bed: residual rms 20.3 m (mean -12.0, |max| 75.1), gaps 0.0000; along-track bed roughness 63.0 -> 67.0 m rms
+  reach: surface 10515 m, bed 3602 m -> ct ±10515 m; spacing 64.60 m; n_traces 671; n_samples_sim 5053
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] f075_probe_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b  6.1 s  facets/iface ~126540  n_samples 1264
+  [ok] f075_probe_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b  6.1 s  facets/iface ~126920  n_samples 1264
+  [ok] f075_probe_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia276e449b  6.1 s  facets/iface ~126540  n_samples 1264
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] f075_probe_pbed_dgn_rssnr_proc (14 MB)
+  processed: aperture 2218 m (151 traces, half-angle 3.87 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 51.00 km (sim trace 34): bed-window bed - surface returns -6.1 dB
+  single-trace decomposition at s = 51.64 km (sim trace 77): bed-window bed - surface returns +5.6 dB
+  single-trace decomposition at s = 52.27 km (sim trace 119): bed-window bed - surface returns +7.8 dB
+  single-trace decomposition at s = 52.92 km (sim trace 163): bed-window bed - surface returns -8.6 dB
+  single-trace decomposition at s = 53.54 km (sim trace 205): bed-window bed - surface returns -2.6 dB
+  single-trace decomposition at s = 54.18 km (sim trace 248): bed-window bed - surface returns -14.6 dB
+  single-trace decomposition at s = 54.81 km (sim trace 291): bed-window bed - surface returns -10.9 dB
+  single-trace decomposition at s = 55.45 km (sim trace 334): bed-window bed - surface returns -3.0 dB
+  single-trace decomposition at s = 56.09 km (sim trace 377): bed-window bed - surface returns -2.4 dB
+  single-trace decomposition at s = 56.73 km (sim trace 420): bed-window bed - surface returns -2.2 dB
+  single-trace decomposition at s = 57.36 km (sim trace 463): bed-window bed - surface returns -4.2 dB
+  single-trace decomposition at s = 57.99 km (sim trace 505): bed-window bed - surface returns -1.6 dB
+  single-trace decomposition at s = 58.62 km (sim trace 548): bed-window bed - surface returns -4.0 dB
+  single-trace decomposition at s = 59.26 km (sim trace 591): bed-window bed - surface returns -21.9 dB
+  single-trace decomposition at s = 59.90 km (sim trace 634): bed-window bed - surface returns -29.9 dB
+== f150 (probe_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 13599 m
+  picked bed: residual rms 20.3 m (mean -12.0, |max| 75.1), gaps 0.0000; along-track bed roughness 63.0 -> 67.0 m rms
+  reach: surface 10515 m, bed 3602 m -> ct ±10515 m; spacing 45.68 m; n_traces 671; n_samples_sim 5053
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] f150_probe_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaa0d3d887  24.9 s  facets/iface ~253398  n_samples 1264
+  [ok] f150_probe_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaa0d3d887  24.8 s  facets/iface ~253464  n_samples 1264
+  [ok] f150_probe_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_iaa0d3d887  24.9 s  facets/iface ~252927  n_samples 1264
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] f150_probe_pbed_dgn_rssnr_proc (14 MB)
+  processed: aperture 1107 m (76 traces, half-angle 1.93 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 51.00 km (sim trace 34): bed-window bed - surface returns +3.9 dB
+  single-trace decomposition at s = 51.64 km (sim trace 77): bed-window bed - surface returns -4.7 dB
+  single-trace decomposition at s = 52.27 km (sim trace 119): bed-window bed - surface returns -0.3 dB
+  single-trace decomposition at s = 52.92 km (sim trace 163): bed-window bed - surface returns -11.5 dB
+  single-trace decomposition at s = 53.54 km (sim trace 205): bed-window bed - surface returns -15.3 dB
+  single-trace decomposition at s = 54.18 km (sim trace 248): bed-window bed - surface returns -17.2 dB
+  single-trace decomposition at s = 54.81 km (sim trace 291): bed-window bed - surface returns -11.7 dB
+  single-trace decomposition at s = 55.45 km (sim trace 334): bed-window bed - surface returns -4.5 dB
+  single-trace decomposition at s = 56.09 km (sim trace 377): bed-window bed - surface returns -6.4 dB
+  single-trace decomposition at s = 56.73 km (sim trace 420): bed-window bed - surface returns -9.1 dB
+  single-trace decomposition at s = 57.36 km (sim trace 463): bed-window bed - surface returns -5.3 dB
+  single-trace decomposition at s = 57.99 km (sim trace 505): bed-window bed - surface returns -3.5 dB
+  single-trace decomposition at s = 58.62 km (sim trace 548): bed-window bed - surface returns -7.9 dB
+  single-trace decomposition at s = 59.26 km (sim trace 591): bed-window bed - surface returns -32.9 dB
+  single-trace decomposition at s = 59.90 km (sim trace 634): bed-window bed - surface returns -31.7 dB
+== f300 (probe_pbed_dgn_rssnr_proc) ==
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:927: RuntimeWarning: divide by zero encountered in log10
+  (20.0 * np.log10(np.abs(
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/run_basal_clutter.py:929: RuntimeWarning: divide by zero encountered in log10
+  20.0 * np.log10(np.abs(
+  DEMOGORGN bed: seed 0, snapshot WG801625MG778C4DS6Y0, clamp 0.0000
+  SYNTHETIC pass: 14000 m constant ellipsoidal height, roll 0, AGL med 13599 m
+  picked bed: residual rms 20.3 m (mean -12.0, |max| 75.1), gaps 0.0000; along-track bed roughness 63.0 -> 67.0 m rms
+  reach: surface 10515 m, bed 3602 m -> ct ±10515 m; spacing 32.30 m; n_traces 671; n_samples_sim 5053
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  surface roughness: sigma 10.80 cm, l 13.500 m (non-fixture; chunk rid_sr0.108_13.5_exp)
+  [ok] f300_probe_pbed_dgn_rssnr_proc_c00_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia322233d8  25.5 s  facets/iface ~507587  n_samples 1264
+  [ok] f300_probe_pbed_dgn_rssnr_proc_c01_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia322233d8  25.6 s  facets/iface ~507680  n_samples 1264
+  [ok] f300_probe_pbed_dgn_rssnr_proc_c02_srough_sr0.108_13.5_exp_att15.77_brough0.1_0.886_fs0.5_s03_n1_gfx0.05_ia322233d8  25.5 s  facets/iface ~506920  n_samples 1264
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+  [proc-cache write] f300_probe_pbed_dgn_rssnr_proc (14 MB)
+  processed: aperture 553 m (38 traces, half-angle 0.96 deg), 3 looks, mocomp dz rms 0.0 m
+  single-trace decomposition at s = 51.00 km (sim trace 34): bed-window bed - surface returns -5.6 dB
+  single-trace decomposition at s = 51.64 km (sim trace 77): bed-window bed - surface returns -7.8 dB
+  single-trace decomposition at s = 52.27 km (sim trace 119): bed-window bed - surface returns -9.8 dB
+  single-trace decomposition at s = 52.92 km (sim trace 163): bed-window bed - surface returns -19.8 dB
+  single-trace decomposition at s = 53.54 km (sim trace 205): bed-window bed - surface returns -21.1 dB
+  single-trace decomposition at s = 54.18 km (sim trace 248): bed-window bed - surface returns -25.8 dB
+  single-trace decomposition at s = 54.81 km (sim trace 291): bed-window bed - surface returns -17.2 dB
+  single-trace decomposition at s = 55.45 km (sim trace 334): bed-window bed - surface returns -11.6 dB
+  single-trace decomposition at s = 56.09 km (sim trace 377): bed-window bed - surface returns -12.1 dB
+  single-trace decomposition at s = 56.73 km (sim trace 420): bed-window bed - surface returns -16.5 dB
+  single-trace decomposition at s = 57.36 km (sim trace 463): bed-window bed - surface returns -12.2 dB
+  single-trace decomposition at s = 57.99 km (sim trace 505): bed-window bed - surface returns -10.9 dB
+  single-trace decomposition at s = 58.62 km (sim trace 548): bed-window bed - surface returns -15.5 dB
+  single-trace decomposition at s = 59.26 km (sim trace 591): bed-window bed - surface returns -40.0 dB
+  single-trace decomposition at s = 59.90 km (sim trace 634): bed-window bed - surface returns -38.9 dB
+  bed-return tail f050: slope dB/us picked_bed -1.76; guard picked_bed FAIL (-9.4 dB)
+  bed-return tail f060: slope dB/us picked_bed -0.52; guard picked_bed FAIL (-14.8 dB)
+  bed-return tail f075: slope dB/us picked_bed -0.32; guard picked_bed FAIL (-13.5 dB)
+  bed-return tail f150: slope dB/us picked_bed -1.22; guard picked_bed FAIL (-14.3 dB)
+  bed-return tail f300: slope dB/us picked_bed -1.04; guard picked_bed FAIL (-21.8 dB)
+/home/thomasteisberg/Documents/coherent-radar-simulator/tools/surface_roughness_b1.py:135: UserWarning: atm_exponential: marginal stratum: power law fits better; exponential under-predicts wide-angle scatter by ~-1.6 dB (median at 1.5 m) -- see atm_tier2_strata.yaml [aa_grounded_500_1500]
+  warnings.warn(f"atm_exponential: {info['warning']} [{sid}]")
+wrote /home/thomasteisberg/Documents/coherent-radar-simulator/outputs/antarctica_pineisland_south/haps14_finals/report.html
+clutter (midcol rel surf, meas/sim dB): f050: ----/-45.2 [surface returns] | f060: ----/-43.8 [surface returns] | f075: ----/-44.9 [surface returns] | f150: ----/-45.4 [surface returns] | f300: ----/-43.8 [surface returns]

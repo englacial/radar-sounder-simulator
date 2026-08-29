@@ -1,0 +1,13 @@
+import pandas as pd
+df = pd.read_pickle("pig_frames.pkl")
+df['date'] = df['properties'].apply(lambda p: p['opr:date'])
+df['seg']  = df['properties'].apply(lambda p: int(p['opr:segment']))
+df['frame']= df['properties'].apply(lambda p: int(p['opr:frame']))
+df['fc']   = df['properties'].apply(lambda p: p.get('opr:frequency'))
+df['B']    = df['properties'].apply(lambda p: p.get('opr:bandwidth'))
+df['segment_path'] = df['date'] + '_' + df['seg'].map('{:02d}'.format)
+segs = df.groupby(['collection','segment_path']).agg(n_frames=('frame','size'), fc=('fc','first'), B=('B','first')).reset_index()
+print(len(segs))
+segs.to_csv("pig_segments.csv", index=False)
+print(segs.groupby('collection').size())
+print(segs.head(20).to_string())

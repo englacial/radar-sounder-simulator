@@ -1,8 +1,11 @@
 schema_version: 1
 name: mcords3_dc8_2016
-description: MCoRDS3 on the NASA DC-8, 2016 Antarctica (190/50 MHz, 10 us, hanning; read per pass from the OPR frame).
+description: 'MCoRDS3 on the NASA DC-8, 2014/2016/2018 Antarctica (190/50 MHz, 10 us, hanning;
+  read per pass from the OPR frame). One install across the three seasons: OPR lever_arm.m
+  groups 2014/2016/2018_Antarctica_DC8 rds into a single array block.'
 source: {kind: opr_frame}
-segments: ['20161105_05', '20161028_05', '20161031_07']
+segments: ['20161105_05', '20161028_05', '20161031_07',
+           '20141029_05', '20161104_05', '20181107_01']   # pineisland lines
 simulated:
   frequency_Hz:   null
   bandwidth_Hz:   null
@@ -12,6 +15,8 @@ simulated:
     # 3 cross-track x 2 along-track elements (OPR readme, 2014 install);
     # OPR lever_arm.m phase centres y = -27.9/2/27.9 in -> mean 0.71 m
     # = 0.45 lam at 190 MHz. The along-track pair is not modelled.
+    # Unchanged by the 2014/2018 segment additions (same lever_arm block),
+    # so existing chunk cache keys are untouched.
     kind: array
     n_elements: 3
     spacing_lam: 0.45

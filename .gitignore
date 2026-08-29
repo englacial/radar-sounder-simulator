@@ -7,3 +7,6 @@ __pycache__/
 .ruff_cache/
 
 reference_papers/
+# Local agent worktrees and output backups (large, never versioned)
+.claude/
+outputs_backup_*/

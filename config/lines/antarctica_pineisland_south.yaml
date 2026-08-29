@@ -1,0 +1,164 @@
+schema_version: 1
+name: antarctica_pineisland_south
+# Altitude line, upper Pine Island trunk (candidate "A" of the 2026-08-28
+# PIG scout, claude_notes/pig_line_scout_2026-08-28.md). One 100 km ground
+# track flown at ~0.45 km AGL by MCoRDS3/DC-8 in 2014, 2016 and 2018, at
+# 9.2 km by MCoRDS2/DC-8 in 2012 and at 10.3 km by MCoRDS/DC-8 in 2009 --
+# five passes, three altitude levels. The SOUTHERN of the two PIG lines
+# (lat -75.35 -> -75.56 vs -75.17 -> -74.96 on the northern line).
+#
+# GROUNDED ONLY, by necessity. The 2018 reference pass flew this track
+# downstream-to-inland, and the anchor axis follows the reference pass's
+# flight direction (ref_bed_picks concatenates its UNSLICED frames), so here
+# grounded ice sits at HIGH s and the floating ice plain at LOW s -- the
+# opposite of what the A regression, the hybrid bed and the zone-split
+# metrics assume (all take grounded = s < GL). Rather than special-case those
+# three code paths, the window starts just past the grounding line (anchor
+# s 22.13 km) and the line declares NO grounding line. The ~7 km of floating
+# ice plain is dropped; it was never the point of this line.
+#
+# s here is the ANCHOR axis (s = 0 at trace 0 of 20181107_01_022). The scout
+# note's along-track s maps to anchor s + 15.48 km: the trough step it reports
+# at s 35 km is at anchor s 50.5 km, and the pilot window it asks for at
+# s 35-45 km is anchor s 50.50-60.43 km.
+#
+# The bed runs at 5-13 us near the grounding zone, steps DOWN ~700 m into the
+# trough at anchor s 50.5 km, and sits at 20-23 us for the remaining 65 km
+# (relief 1116 m p5-p95, the largest of the scouted set).
+
+identity:
+  case_prefix: antarctica_pineisland_south
+  crs: EPSG:3031
+  fc_hz: 190000000.0
+  bed_dem: demogorgn
+
+reference:
+  pass: dc8_2018_0km
+  frames: ['20181107_01_022', '20181107_01_023', '20181107_01_024']
+
+order: [dc8_2014_0km, dc8_2016_0km, dc8_2018_0km, dc8_2012_9km, dc8_2009_10km]
+
+passes:
+  dc8_2014_0km:
+    agl_med_m: 456.0
+    season: 2014_Antarctica_DC8
+    param_frame: '20141029_05_024'
+    instrument: mcords3_dc8_2016
+    reversed: false
+    segments:
+      pilot:
+      - {frame: '20141029_05_024', slice: [2516, 3187]}
+      full:
+      - {frame: '20141029_05_024', slice: [641, 3332]}
+      - {frame: '20141029_05_025'}
+      - {frame: '20141029_05_026', slice: [0, 230]}
+  dc8_2016_0km:
+    agl_med_m: 451.0
+    season: 2016_Antarctica_DC8
+    param_frame: '20161104_05_019'
+    instrument: mcords3_dc8_2016
+    reversed: false
+    segments:
+      pilot:
+      - {frame: '20161104_05_019', slice: [2985, 3333]}
+      - {frame: '20161104_05_020', slice: [0, 322]}
+      full:
+      - {frame: '20161104_05_019', slice: [1110, 3333]}
+      - {frame: '20161104_05_020'}
+      - {frame: '20161104_05_021', slice: [0, 698]}
+  dc8_2018_0km:
+    agl_med_m: 447.0
+    season: 2018_Antarctica_DC8
+    param_frame: '20181107_01_022'
+    instrument: mcords3_dc8_2016
+    reversed: false
+    segments:
+      pilot:
+      - {frame: '20181107_01_023', slice: [71, 742]}
+      full:
+      - {frame: '20181107_01_022', slice: [1530, 3334]}
+      - {frame: '20181107_01_023'}
+      - {frame: '20181107_01_024', slice: [0, 1118]}
+  dc8_2012_9km:
+    agl_med_m: 9220.0
+    season: 2012_Antarctica_DC8
+    param_frame: '20121023_04_020'
+    instrument: mcords2_dc8_2012
+    reversed: false
+    segments:
+      pilot:
+      - {frame: '20121023_04_020', slice: [1103, 1439]}
+      full:
+      - {frame: '20121023_04_020', slice: [165, 1732]}
+      - {frame: '20121023_04_021', slice: [0, 1630]}
+  dc8_2009_10km:
+    agl_med_m: 10273.0
+    season: 2009_Antarctica_DC8
+    param_frame: '20091020_06_002'
+    instrument: mcords_dc8_2009
+    reversed: true            # the only pass flown against the anchor axis
+    # NO pilot segment. The pilot window sits in the deep trough, where this
+    # pass's own OPS bottom pick is present on 18 % of traces and reads
+    # 10.4-12.6 us below the surface -- the 2012 (9.2 km) and 2018 (0.4 km)
+    # passes both put the bed at 17.7-20.9 us there, so the 2009 pick is a
+    # shallow mis-pick, not the bed. Since the tool sizes each pass's
+    # fast-time window from that pass's OWN picks, carrying the pass here
+    # builds a window ~8 us short of the real bed. Over the FULL window the
+    # pick is 56 % present and correct where present (~22.6 us in the
+    # trough), so the pass is kept there.
+    segments:
+      full:
+      - {frame: '20091020_06_003', slice: [0, 2289]}
+      - {frame: '20091020_06_002', slice: [49, 4286]}
+      - {frame: '20091020_06_001', slice: [2525, 2611]}
+
+segments:
+  pilot:                       # 10 km window, anchor s 50.50-60.43 km (the
+    s0_km: 50.5                # scout note's s 35-45 km): ice 1498-1734 m,
+    n_traces: 48               # bed -1333..-1084 m, the deep trough floor
+    decomp_s_km: [55.5]        # just past the step. All grounded.
+  full:                        # 92.7 km, anchor s 22.69-115.43 km: the whole
+    s0_km: 22.69               # grounded stretch from the grounding zone
+    n_traces: 445              # inland (~208 m/trace, the study convention)
+    decomp_s_km: [30.0, 40.0, 50.0, 55.5, 60.0, 70.0,
+                  80.0, 90.0, 100.0, 110.0]     # all grounded
+
+figures:
+  radargram: {y_us: [-1.0, 28.0], db: [-90.0, 5.0], scale: shared, source_color: false}
+  profile: {rel_us: [-1.5, 29.0], x_us: [-1.0, 28.0], db: [-110.0, 5.0]}
+
+rssnr:
+  snapshot: 3YH47013745B2T5ZZR50
+  store: {bucket: opr-radar-metrics, prefix: icechunk/antarctica, region: us-west-2}
+
+provenance:
+  measured_caveats: >
+    CSARP_standard. THREE radar generations on one track: MCoRDS (2009) and
+    MCoRDS2 (2012) at 193.9/9.5 MHz on a 105.2 ns lattice, MCoRDS3
+    (2014/2016/2018) at 190/50 MHz on 20.0 ns -- a 5.3x bandwidth and 5.3x
+    fast-time-posting ratio on top of the 20x altitude ratio, so this is an
+    altitude AND waveform trade, not a same-instrument repeat. Compression
+    windows differ per generation (hanning / tukey 0.2 / kaiser 6; the last
+    two are modelled approximately, see real_chain). The 2009 product carries
+    NO Roll/Pitch/Heading, so that pass is modelled unrolled. Track offsets
+    from the reference pass are 13-24 m median, p95 < 30 m on every pass.
+    The 2012 pass has data-quality artifact blocks elsewhere on the line
+    (s 19-26, 58-67, 93-96 km) but NOT inside the pilot window. The bed pick
+    is present on 90 % of the line (gap at s 56-67 km); in CSARP_standard the
+    bed past the 35 km trough step is only marginally detectable at altitude,
+    while CSARP_mvdr resolves it (addendum, pig_line_scout_2026-08-28.md).
+  real_chain:
+    product: CSARP_standard
+    sar: f-k migration (sar_type 'f-k' read from the param structs on the 2012 and 2016/2018 passes)
+    combine: delay-and-sum, method 'standard', dline 6 (read from array_param on the 2012 pass; CReSIS-standard convention assumed elsewhere)
+    window: hanning on 2014/2016/2018 (verified 2018, decode-fallback 2014); tukeywin(N,0.2) on 2012 modelled as UNWINDOWED; kaiser(N,6) on 2009 modelled as HANN
+
+calibration:
+  gamma_surface_db:
+    value: -10.0
+    why: >
+      Physical air-ice value (~1 dB above smooth Fresnel -11.03), pinned on
+      every study line so the lines stay comparable; the in-run solve is
+      recorded as a diagnostic
+      (claude_notes/gamma_solve_design_2026-08-20.md).
+  att_db_per_km: solve       # Theil-Sen RSSNR-vs-2H regression, grounded samples
