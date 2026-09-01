@@ -12,6 +12,24 @@ description: 'Per-stratum exponential-ACF surface roughness (sigma, l) from the 
   bands within facies proxies (elevation/latitude rule; RACMO melt where available). 1.0/0.75 m Bragg
   points are sub-band extrapolations. East Antarctic plateau unsampled.'
 spectra:
+  aa_grounded_500_1500_mean:
+    family: exponential
+    sigma_m: 0.0655
+    l_m: 1.67
+    usability: marginal
+    stratum: AA grounded 500-1500 (area mean)
+    hemisphere: aa
+    n_site_years: 171
+    misfit_1p5m_dB_med_p5_p95:
+    - -1.6
+    - -5.7
+    - 4.1
+    provenance: 'ADOPTED 2026-09-01 (area-mean aggregation): LSQ exponential PSD through the
+      linear-domain MEAN over 171 site-years of best-family S(k_B); the aa_grounded_500_1500 pair is
+      the site-median (sigma, l), kept for reference. Mean-vs-median +3.5..+4.1 dB at the Bragg
+      points; +4.6 dB vs the median pair at 1.54 m. Only this stratum has an area-mean variant so
+      far (it is the only one a study line maps to); refit others the same way before first use.
+      claude_notes/experiments_2026-08-31/atm_area_mean/{reaggregate.py,results.md}'
   aa_grounded_1500_2500:
     family: exponential
     sigma_m: 0.113
@@ -590,7 +608,7 @@ stratum_lines:
     default: gl_interior_gt2500
     note: site-specific geikie_2014 (5.15 cm / 5.28 m) takes precedence; stratum median 5.0 cm / 7.3 m
   antarctica_pineisland_south:
-    default: aa_grounded_500_1500
+    default: aa_grounded_500_1500_mean
     note: 'PROVISIONAL, no line-specific ATM fit yet. Grounded surface elevation 449 m median
       (p10-p90 207-606 m), so the line straddles the <500 / 500-1500 band edge. The 500-1500
       stratum is chosen over grounded_lt500_m on a MEASUREMENT, not the elevation rule: Tier 1
@@ -602,7 +620,7 @@ stratum_lines:
       claude_notes/atm_roughness/atm_pull.py + atm_roughness.py --line antarctica_pineisland_south
       (ATM_DAYS entries added 2026-08-28).'
   antarctica_pineisland_north:
-    default: aa_grounded_500_1500
+    default: aa_grounded_500_1500_mean
     note: 'PROVISIONAL, no line-specific ATM fit yet. Same stratum and same reasoning as
       antarctica_pineisland_south (grounded surface 342 m median, p10-p90 115-588 m), but the
       over-estimate is larger here: Tier 1 ILATM2 RMS on the grounded part is 4.8 cm p50 /

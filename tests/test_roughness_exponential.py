@@ -173,18 +173,26 @@ def test_runner_keys_fork_only_for_exponential():
 
 def test_atm_exponential_resolution():
     tab = b1.load_table()
+    # area-mean aggregation adopted 2026-09-01 (docs/roughness.md): the
+    # atm_exponential entries are fits through the area-mean per-block S(k_B)
     s, l, inf = b1.resolve_exponential("greenland_geikie01_transit", "p3_2014_low",
                                        tab)
-    assert (s, l) == (0.0515, 5.276) and inf["acf"] == "exponential"
+    assert (s, l) == (0.0325, 1.48) and inf["acf"] == "exponential"
     _, _, inf17 = b1.resolve_exponential("greenland_westcoast", "p3_2017",
                                          tab)
-    assert inf17["spectrum"] == "westcoast_2017_exp"
-    # Tier 2 strata (config/roughness/atm_tier2_strata.yaml) are merged in:
-    # getz has no site exponential entry and falls back to its stratum (marginal)
+    assert inf17["spectrum"] == "westcoast_2017_expmean"
+    # Tier 2 strata (config/roughness/atm_tier2_strata.yaml) are merged in;
+    # getz now carries its own line entry (was the aa_grounded_lt500_m stratum)
+    sg, lg, infg = b1.resolve_exponential("antarctica_getz", "dc8_2016_0km", tab)
+    assert infg["spectrum"] == "getz_2016_expmean"
+    assert (sg, lg) == (0.0456, 1.21)
+    # the PIG lines still resolve through a stratum entry -- the area-mean
+    # variant, which keeps the family's marginal warning
     with pytest.warns(UserWarning, match="marginal"):
-        sg, lg, infg = b1.resolve_exponential("antarctica_getz", "dc8_2016_0km", tab)
-    assert infg["spectrum"] == "aa_grounded_lt500_m" and infg["usability"] == "marginal"
-    assert (sg, lg) == (0.249, 24.5)
+        sp, lp, infp = b1.resolve_exponential("antarctica_pineisland_north",
+                                              "dc8_2016_0km", tab)
+    assert infp["spectrum"] == "aa_grounded_500_1500_mean"
+    assert (sp, lp) == (0.0655, 1.67)
     # refused strata raise; site entries win over strata on a name clash
     bad = {**tab, "lines": {**tab["lines"], "x": {"default": "gl_margin_lt500_m"}}}
     with pytest.raises(ValueError, match="refuse"):
@@ -198,7 +206,7 @@ def test_atm_exponential_resolution():
                                            {**p, "key": "p3_2017_high"}, info=True)
     finally:
         rbc.activate_line(line0)
-    assert pair == (0.0515, 5.276, "exponential")
+    assert pair == (0.0325, 1.48, "exponential")
     assert rbc.surf_rough_pair([0.01, 0.5, "exponential"]) == (0.01, 0.5,
                                                                "exponential")
     assert rbc.surf_rough_pair([0.01, 0.5, "gaussian"]) == (0.01, 0.5)
