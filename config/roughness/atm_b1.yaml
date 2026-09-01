@@ -70,32 +70,36 @@ spectra:
     family: exponential
     sigma_m: 0.0428
     l_m: 1.32
-    provenance: 'AREA-MEAN re-aggregation experiment (branch atm-area-mean, 2026-08-31): LSQ exponential
-      PSD through the linear-domain MEAN of per-block best-family S(k_B) at 5/1.5/1.0/0.75 m (102 blocks,
-      2017-05-10). The adopted westcoast_2017_exp fits the block MEDIANS; mean-vs-median +0.7..+1.3 dB.
-      claude_notes/experiments_2026-08-31/atm_area_mean/'
+    provenance: 'ADOPTED 2026-09-01 (area-mean aggregation): LSQ exponential PSD through the
+      linear-domain MEAN of per-block best-family S(k_B) at 5/1.5/1.0/0.75 m (102 blocks, ILATM1B
+      2017-05-10). Replaces westcoast_2017_exp (block-MEDIAN fit, kept for reference);
+      mean-vs-median +0.7..+1.3 dB. Method + validation:
+      claude_notes/experiments_2026-08-31/atm_area_mean/{reaggregate.py,results.md}'
   geikie_2014_expmean:
     family: exponential
     sigma_m: 0.0325
     l_m: 1.48
-    provenance: 'AREA-MEAN re-aggregation experiment (2026-08-31): mean of per-block S(k_B), 76 blocks
-      2014-04-21; +0.5..+2.4 dB vs block medians. NOTE the adopted geikie_2014 is a median of per-block
-      (sigma, l) FITS -- a third aggregation; at the Bragg points the mean fit sits ~+1.4 dB above it.'
+    provenance: 'ADOPTED 2026-09-01 (area-mean aggregation): mean of per-block S(k_B), 76 blocks
+      ILATM1B 2014-04-21; +0.5..+2.4 dB vs block medians. Replaces geikie_2014 for source
+      atm_exponential (that entry is a median of per-block (sigma, l) FITS -- a different
+      aggregation again; the mean fit sits ~+1.4 dB above it at the Bragg points).'
   getz_2016_expmean:
     family: exponential
     sigma_m: 0.0456
     l_m: 1.21
-    provenance: 'AREA-MEAN re-aggregation experiment (2026-08-31): mean of per-block S(k_B), 176 blocks
-      2016-11-05 -- the line''s OWN ATM, replacing the aa_grounded_lt500_m stratum fallback. -4.0..-1.8 dB
-      vs the adopted stratum entry at the four Bragg points (dimmer near nadir: the high-pass over-prediction
-      direction).'
+    provenance: 'ADOPTED 2026-09-01 (area-mean aggregation): mean of per-block S(k_B), 176 blocks
+      ILATM1B 2016-11-05 -- the line''s OWN ATM, replacing the aa_grounded_lt500_m stratum fallback
+      (that stratum''s heavy tail comes from other coastal sites). -4.0..-1.8 dB vs the stratum entry
+      at the four Bragg points (dimmer near nadir: fixes half the high-pass over-prediction; the
+      2026-08 HAPS design numbers used the stratum entry and shift materially).'
   david_2013_expmean:
     family: exponential
     sigma_m: 0.1358
     l_m: 1.887
-    provenance: 'AREA-MEAN re-aggregation experiment (2026-08-31): mean of per-block S(k_B), 144 blocks
-      pooled 2013-11-19/20 -- line-specific ATM exists (the stratum_lines "no ATM on the line" note predates
-      the per-line runs), replacing aa_grounded_500_1500. +9.5..+10.5 dB vs the adopted stratum entry.'
+    provenance: 'ADOPTED 2026-09-01 (area-mean aggregation): mean of per-block S(k_B), 144 blocks
+      pooled ILATM1B 2013-11-19/20 -- line-specific ATM exists (the stratum_lines "no ATM on the line"
+      note predates the per-line ATM runs), replacing the aa_grounded_500_1500 stratum fallback.
+      +9.5..+10.5 dB vs the stratum entry; closed the david mid-column deficit (-12 dB typ -> -2).'
 lines:
   greenland_westcoast:
     # ONE surface law per line: the reference pass's (p3_2017) ATM spectrum is

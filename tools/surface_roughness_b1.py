@@ -21,6 +21,11 @@ config/roughness/atm_b1.yaml (provenance there).
 exponential-ACF table entry (sigma, l) straight to the kernel's
 ``acf: exponential`` option (docs/roughness.md) -- no effective pair, no
 carrier or clutter-angle dependence -- and refuses power-law entries.
+
+Aggregation convention (adopted 2026-09-01): the entries those mappings
+point at are fits through the linear-domain AREA MEAN of per-block S(k_B)
+-- the statistic the ensemble-mean clutter integrates -- not the median;
+see docs/roughness.md and the atm_b1.yaml description.
 """
 from __future__ import annotations
 

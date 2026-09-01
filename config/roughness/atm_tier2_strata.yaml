@@ -24,10 +24,12 @@ spectra:
     - -1.6
     - -5.7
     - 4.1
-    provenance: 'AREA-MEAN re-aggregation experiment (branch atm-area-mean, 2026-08-31): LSQ exponential
-      PSD through the linear-domain MEAN over site-years of best-family S(k_B); the adopted
-      aa_grounded_500_1500 pair is the site-median (sigma, l). Mean-vs-median +3.5..+4.1 dB at the
-      Bragg points; +4.6 dB vs the adopted pair at 1.54 m. claude_notes/experiments_2026-08-31/atm_area_mean/'
+    provenance: 'ADOPTED 2026-09-01 (area-mean aggregation): LSQ exponential PSD through the
+      linear-domain MEAN over 171 site-years of best-family S(k_B); the aa_grounded_500_1500 pair is
+      the site-median (sigma, l), kept for reference. Mean-vs-median +3.5..+4.1 dB at the Bragg
+      points; +4.6 dB vs the median pair at 1.54 m. Only this stratum has an area-mean variant so
+      far (it is the only one a study line maps to); refit others the same way before first use.
+      claude_notes/experiments_2026-08-31/atm_area_mean/{reaggregate.py,results.md}'
   aa_grounded_1500_2500:
     family: exponential
     sigma_m: 0.113

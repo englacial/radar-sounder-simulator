@@ -60,9 +60,22 @@ Eq. 22's `erfi(A_m)` grows like `exp(Re(A_m)²)` and is never evaluated unscaled
 
 ### Per-stratum exponential parameters (OIB ATM Tier 2)
 
-`config/roughness/atm_tier2_strata.yaml` carries site-median exponential (σ, l)
-per facies/elevation stratum on both ice sheets (726 ATM sites), merged into
-the `atm_b1.yaml` table by `tools/surface_roughness_b1.load_table`. Each entry
+`config/roughness/atm_tier2_strata.yaml` carries per-stratum exponential (σ, l)
+entries per facies/elevation stratum on both ice sheets (726 ATM sites), merged
+into the `atm_b1.yaml` table by `tools/surface_roughness_b1.load_table`.
+
+**Aggregation (adopted 2026-09-01)**: the entries used by
+`source: atm_exponential` are fits through the linear-domain **area mean** of
+the per-block (per-site-year) S(k_B) at the four Bragg points, not the median.
+The radar's ensemble-mean clutter integrates the area average of the local
+spectrum over the footprint, and the measured σ² fields are heavily
+right-skewed — a minority of rough blocks carries most of the scattered power
+— so the median under-represents the clutter by 1–13 dB depending on the
+population (largest for the coastal <500 m Antarctic stratum). Median-fit
+entries remain in the tables for reference. Lines with their own ATM coverage
+(westcoast, geikie, getz, david) use their own line's area mean rather than a
+stratum. Validation across all six pilot lines (median |mid-column error|
+9.2 → 3.8 dB): `claude_notes/experiments_2026-08-31/atm_area_mean/results.md`. Each entry
 has a `usability`: `use` (exponential is the best 3-parameter family, ν ≈ 0.5),
 `marginal` (a power law fits better; the exponential under-predicts wide-angle
 scatter by ~1–2 dB at 195/300 MHz — a warning is emitted), or `refuse`
