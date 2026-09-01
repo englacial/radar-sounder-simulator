@@ -66,6 +66,36 @@ spectra:
     provenance: 'NOT the best family (power law, beta 3.02): least-squares exponential PSD through the
       line-median per-block S(k_B) at 5/1.5/1.0/0.75 m; residual < 0.1 dB. Direct block-median exponential
       fit (l < 500 m, 95 blocks) 10.1 cm / 21.8 m'
+  westcoast_2017_expmean:
+    family: exponential
+    sigma_m: 0.0428
+    l_m: 1.32
+    provenance: 'AREA-MEAN re-aggregation experiment (branch atm-area-mean, 2026-08-31): LSQ exponential
+      PSD through the linear-domain MEAN of per-block best-family S(k_B) at 5/1.5/1.0/0.75 m (102 blocks,
+      2017-05-10). The adopted westcoast_2017_exp fits the block MEDIANS; mean-vs-median +0.7..+1.3 dB.
+      claude_notes/experiments_2026-08-31/atm_area_mean/'
+  geikie_2014_expmean:
+    family: exponential
+    sigma_m: 0.0325
+    l_m: 1.48
+    provenance: 'AREA-MEAN re-aggregation experiment (2026-08-31): mean of per-block S(k_B), 76 blocks
+      2014-04-21; +0.5..+2.4 dB vs block medians. NOTE the adopted geikie_2014 is a median of per-block
+      (sigma, l) FITS -- a third aggregation; at the Bragg points the mean fit sits ~+1.4 dB above it.'
+  getz_2016_expmean:
+    family: exponential
+    sigma_m: 0.0456
+    l_m: 1.21
+    provenance: 'AREA-MEAN re-aggregation experiment (2026-08-31): mean of per-block S(k_B), 176 blocks
+      2016-11-05 -- the line''s OWN ATM, replacing the aa_grounded_lt500_m stratum fallback. -4.0..-1.8 dB
+      vs the adopted stratum entry at the four Bragg points (dimmer near nadir: the high-pass over-prediction
+      direction).'
+  david_2013_expmean:
+    family: exponential
+    sigma_m: 0.1358
+    l_m: 1.887
+    provenance: 'AREA-MEAN re-aggregation experiment (2026-08-31): mean of per-block S(k_B), 144 blocks
+      pooled 2013-11-19/20 -- line-specific ATM exists (the stratum_lines "no ATM on the line" note predates
+      the per-line runs), replacing aa_grounded_500_1500. +9.5..+10.5 dB vs the adopted stratum entry.'
 lines:
   greenland_westcoast:
     # ONE surface law per line: the reference pass's (p3_2017) ATM spectrum is
@@ -73,11 +103,18 @@ lines:
     # 2016/2019 spectra stay in `spectra:` for reference only.
     default: westcoast_2017
     exponential:    # alternate mapping for source atm_exponential (acf: exponential)
-      default: westcoast_2017_exp
+      # branch atm-area-mean: area-mean entry (was westcoast_2017_exp, block-median fit)
+      default: westcoast_2017_expmean
   greenland_geikie01_transit:
     default: geikie_2014
+    exponential:    # branch atm-area-mean (was the geikie_2014 block-median-fit entry)
+      default: geikie_2014_expmean
   antarctica_getz:
     default: getz_2016
+    exponential:    # branch atm-area-mean (was the aa_grounded_lt500_m stratum fallback)
+      default: getz_2016_expmean
   antarctica_david:
     default: getz_2016
     note: no ATM on the line; Getz transferred (same season/ice type argument, plan caveat)
+    exponential:    # branch atm-area-mean (was the aa_grounded_500_1500 stratum fallback)
+      default: david_2013_expmean
