@@ -10,3 +10,8 @@ reference_papers/
 # Local agent worktrees and output backups (large, never versioned)
 .claude/
 outputs_backup_*/
+
+# Run logs under claude_notes are transient session artifacts: their durable
+# content belongs in a committed note (results.md-style), not the raw log.
+# Already-tracked logs are unaffected (gitignore only gates new additions).
+claude_notes/**/*.log
