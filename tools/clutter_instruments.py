@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import (BaseModel, ConfigDict, field_validator,
+from pydantic import (BaseModel, ConfigDict, Field, field_validator,
                       model_validator)
 
 INSTRUMENT_SCHEMA_VERSION = 1
@@ -60,10 +60,20 @@ class Antenna(_Base):
     axis: Literal["along_track", "cross_track"] = "along_track"
     n_elements: int = 7
     spacing_lam: float = 0.5
+    element_directivity_db: float | None = Field(
+        default=None, ge=3.0, allow_inf_nan=False)
     tx_weights: list[float] | None = None   # array_tapered: TX amplitude taper
     rx_weights: list[float] | None = None   # array_tapered: RX combine taper
     length_lam: float = 0.5                 # finite_dipole length (wavelengths)
     roll_source: Literal["none", "nav"] = "nav"
+
+    @model_validator(mode="after")
+    def _element_directivity_is_for_arrays(self):
+        if self.element_directivity_db is not None and self.kind not in (
+                "array", "array_tapered"):
+            raise ValueError("element_directivity_db is only valid for array "
+                             "antennas")
+        return self
 
 
 class Simulated(_Base):

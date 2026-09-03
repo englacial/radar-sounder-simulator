@@ -70,6 +70,20 @@ def test_posting_div_requires_the_matched_chain():
         RunSpec.model_validate(_doc(processing={"posting_div": 2}))
 
 
+def test_focus_aperture_requires_the_matched_chain():
+    with pytest.raises(ValueError, match="focus_aperture"):
+        RunSpec.model_validate(
+            _doc(processing={"focus_aperture": "first_fresnel"}))
+    kw = RunSpec.model_validate(_doc(processing={
+        "chain": "standard", "focus_aperture": "first_fresnel",
+    })).to_run_kwargs()
+    assert kw["focus_aperture"] == "first_fresnel"
+    kw = RunSpec.model_validate(_doc(processing={
+        "chain": "standard", "focus_aperture": "product_resolution",
+    })).to_run_kwargs()
+    assert kw["focus_aperture"] == "product_resolution"
+
+
 # ------------------------------------------------------- kwargs conversion
 def test_to_run_kwargs_matches_run_signature():
     """A renamed or dropped kwarg has to fail here, not at minute 40."""

@@ -15,8 +15,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import run_basal_clutter as rbc  # noqa: E402
+from soundersim import synthetic as syn  # noqa: E402
 
 C = 299792458.0
+
+
+def test_chunk_scene_records_parent_grid_origin():
+    base = syn.slab_scene(extent=4000.0, posting=50.0, n_traces=30,
+                          spacing=100.0)
+    chunk = rbc.chunk_scene(base, np.arange(4, 10), ct=300.0)
+    r0, c0 = chunk.grid_origin
+    assert r0 > 0 and c0 > 0
+    np.testing.assert_allclose(chunk.transform * (0, 0),
+                               base.transform * (c0, r0))
 
 
 # --------------------------------------------------- alias-limited aperture
@@ -143,7 +154,8 @@ def test_chunk_digests_forwards_the_hypothesis_knobs(tmp_path):
     existed. The digests must be computed with the same knobs the chunks
     were simulated with."""
     p = {"key": "k", "segment": "pilot", "picked_bed": False,
-         "gamma_rssnr": True, "proc": True, "dgn": True}
+         "gamma_rssnr": True, "proc": True, "dgn": True,
+         "rc_sim": rbc.RadarConfig(dt=1e-9, n_samples=64, t0=0.0)}
     spec, brough = (0.5, 3.0, 1.0), (0.22, 0.886)
     rid = rbc.chunk_rid(p, 0, 18.61, True, bed_rough=brough, spec=spec)
     assert "_fs0.5" in rid and "_brough0.22" in rid

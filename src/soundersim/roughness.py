@@ -202,3 +202,32 @@ def speckle_phasors(n, seed):
     rng = np.random.default_rng(seed)
     ph = rng.standard_normal(n) + 1j * rng.standard_normal(n)
     return (ph / np.sqrt(2.0)).astype(np.complex64)
+
+
+def speckle_phasors_for_keys(keys, seed):
+    """Stateless Gaussian phasors keyed by stable parent-grid cell indices."""
+    keys = np.asarray(keys, dtype=np.int64)
+    if keys.ndim != 2 or keys.shape[1] != 2:
+        raise ValueError("speckle keys must have shape (n, 2)")
+    base = np.random.SeedSequence(seed).generate_state(1, dtype=np.uint64)[0]
+
+    def mix(x):
+        with np.errstate(over="ignore"):
+            x = x + np.uint64(0x9E3779B97F4A7C15)
+            x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+            x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        return x ^ (x >> np.uint64(31))
+
+    with np.errstate(over="ignore"):
+        keyed = (base ^ keys[:, 0].astype(np.uint64)
+                 ^ (keys[:, 1].astype(np.uint64)
+                    * np.uint64(0xD2B74407B1CE6E93)))
+    h1 = mix(keyed)
+    h2 = mix(keyed ^ np.uint64(0xCA5A826395121157))
+    scale = 1.0 / (1 << 53)
+    u1 = ((h1 >> np.uint64(11)).astype(np.float64) + 0.5) * scale
+    u2 = ((h2 >> np.uint64(11)).astype(np.float64) + 0.5) * scale
+    radius = np.sqrt(-2.0 * np.log(u1))
+    angle = 2.0 * np.pi * u2
+    ph = radius * (np.cos(angle) + 1j * np.sin(angle)) / np.sqrt(2.0)
+    return ph.astype(np.complex64)

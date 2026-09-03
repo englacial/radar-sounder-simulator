@@ -146,6 +146,9 @@ class Processing(_Base):
     chain: Literal["none", "standard"] = "none"
     proc_cache: bool = False
     posting_div: int = 1
+    focus_aperture: Literal[
+        "alias_limited", "product_resolution", "first_fresnel"
+    ] = "alias_limited"
     # Whether to run the constant-gamma comparison arm the RSSNR acceptance
     # analysis scores against. It runs INSIDE this experiment, in this
     # experiment's own cache directory, so there is no companion run to name
@@ -157,6 +160,9 @@ class Processing(_Base):
         if self.posting_div > 1 and self.chain != "standard":
             raise ValueError("posting_div refines the product-posting sim "
                              "grid: use it with processing.chain 'standard'")
+        if self.focus_aperture != "alias_limited" and self.chain != "standard":
+            raise ValueError("focus_aperture requires processing.chain "
+                             "'standard'")
         return self
 
 
@@ -299,6 +305,7 @@ class RunSpec(_Base):
             "processing": proc.chain,
             "proc_cache": proc.proc_cache,
             "posting_div": proc.posting_div,
+            "focus_aperture": proc.focus_aperture,
             "companion": bool(proc.companion),
             "trace_decomp_s_km": fig.trace_decomp_s_km,
             "per_pass_figs": fig.per_pass,

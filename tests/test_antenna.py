@@ -46,6 +46,8 @@ def test_config_round_trip_all_kinds():
         AntennaConfig(),
         AntennaConfig(kind="dipole", axis="cross_track", roll_source="nav"),
         AntennaConfig(kind="array", n_elements=5, spacing_lam=0.5),
+        AntennaConfig(kind="array", n_elements=12, spacing_lam=0.5,
+                      element_directivity_db=3.0),
         AntennaConfig(kind="tabulated", theta_deg=[0.0, 45.0, 90.0],
                       gain=[1.0, 0.7, 0.1]),
     ):
@@ -65,6 +67,10 @@ def test_config_validation():
         AntennaConfig(kind="array", n_elements=1)
     with pytest.raises(ValueError):
         AntennaConfig(kind="array", spacing_lam=0.0)
+    with pytest.raises(ValueError):
+        AntennaConfig(kind="array", element_directivity_db=-1.0)
+    with pytest.raises(ValueError):
+        AntennaConfig(kind="dipole", element_directivity_db=3.0)
     with pytest.raises(ValueError):
         AntennaConfig(kind="tabulated")  # no samples
     with pytest.raises(ValueError):
@@ -193,6 +199,59 @@ def test_array_factor_closed_form():
     assert fr3[0] == pytest.approx(0.5, abs=0.002)  # g**2 = half power
 
 
+def test_array_element_directivity_scales_peak_and_pattern():
+    """Element dBi sets peak gain and a cosine-power angular taper."""
+    n, d, element_db = 12, 0.5, 3.0
+    us = np.array([0.0, 0.1, 0.3])
+    dhats = np.column_stack([np.zeros(3), -us,
+                             -np.sqrt(1.0 - us ** 2)])
+    ant = AntennaConfig(kind="array", n_elements=n, spacing_lam=d,
+                        element_directivity_db=element_db)
+    # 3 dBi (uniform hemisphere) elements at lambda/2: D = 2N per side
+    # exactly, so the integrated scale must reproduce the closed form
+    scale = antenna._array_field_scale(ant)
+    assert scale == pytest.approx(np.sqrt(n * 10.0 ** (element_db / 10.0)),
+                                  rel=2e-3)
+    q = antenna.element_power_exponent(element_db)
+    element = (1.0 - us ** 2) ** (q / 4.0)
+    g = antenna.field_gain(ant, dhats, U_AT, U_CT)
+    np.testing.assert_allclose(
+        g, scale * element * array_factor(us, n, d), rtol=1e-12)
+    fr, pr = _facet_ratio(dhats, ant)
+    np.testing.assert_allclose(fr, g ** 2, rtol=4e-4)
+    np.testing.assert_allclose(pr, g ** 4, rtol=8e-4)
+
+
+def test_directive_elements_do_not_multiply_array_directivity():
+    """Element and array factor both narrow the cross-track beam, so the
+    integrated peak sits below D_el * N_eff (pinned: 20-el Taylor-30 lambda/2
+    array of 6 dBi elements is ~17.3 dBi one-way, product says ~18.3)."""
+    w = [0.2490, 0.2947, 0.3782, 0.4859, 0.6036, 0.7186, 0.8215, 0.9055,
+         0.9650, 0.9961]
+    w = w + w[::-1]
+    ant = AntennaConfig(kind="array_tapered", spacing_lam=0.5,
+                        tx_weights=w, rx_weights=w, element_directivity_db=6.0)
+    one_way_db = 20.0 * np.log10(antenna._array_field_scale(ant))
+    assert one_way_db == pytest.approx(17.27, abs=0.05)
+    n_eff = np.sum(w) ** 2 / np.sum(np.square(w))
+    assert one_way_db < 10.0 * np.log10(n_eff) + 6.0 - 0.9
+    # peak-normalized element pattern is untouched by the scale
+    g0 = antenna.field_gain(ant, np.array([0.0, 0.0, -1.0]), U_AT, U_CT)
+    assert float(g0) == pytest.approx(antenna._array_field_scale(ant))
+
+
+def test_forward_hemisphere_cosine_power_element_pattern():
+    q3 = antenna.element_power_exponent(3.0)
+    q6 = antenna.element_power_exponent(6.0)
+    assert q3 == 0.0
+    assert q6 == pytest.approx(10 ** 0.6 / 2.0 - 1.0)
+    theta = np.deg2rad([0.0, 30.0, 60.0, 90.0, 120.0])
+    field = antenna.element_field_pattern(np.cos(theta), q6)
+    np.testing.assert_allclose(field[:4] ** 2,
+                               np.cos(theta[:4]) ** q6, atol=1e-12)
+    assert field[-1] == 0.0
+
+
 def test_array_params_are_traced_no_recompile():
     """Same pattern kind, different n/spacing/vector values: the jitted
     callable is reused (one jit cache entry), per the M19 no-recompile rule."""
@@ -203,8 +262,10 @@ def test_array_params_are_traced_no_recompile():
     area = np.array([25.0])
     pos = np.array([[0.0, 0.0, 3000.0]])
     win = dict(t0=1.9e-5, dt=1e-8, n_samples=64, c=C)
-    for n_el, d in ((5, 0.5), (7, 0.35), (3, 0.6)):
-        ant = AntennaConfig(kind="array", n_elements=n_el, spacing_lam=d)
+    for n_el, d, directivity in ((5, 0.5, None), (7, 0.35, None),
+                                 (3, 0.6, 4.0)):
+        ant = AntennaConfig(kind="array", n_elements=n_el, spacing_lam=d,
+                            element_directivity_db=directivity)
         pat = antenna.pattern_args(ant, U_AT[None], U_CT[None])
         incoherent_cluttergram(pos, U_CT[None], ctr, nrm, area, pattern=pat,
                                **win)
@@ -448,6 +509,14 @@ def test_array_tapered_uniform_matches_array_kind():
                       tx_weights=[1.0] * n, rx_weights=[1.0] * n),
         dhats, U_AT, U_CT)
     np.testing.assert_allclose(g_t, array_factor(us, n, d), atol=1e-12)
+    g_td = antenna.field_gain(
+        AntennaConfig(kind="array_tapered", spacing_lam=d,
+                      tx_weights=[1.0] * n, rx_weights=[1.0] * n,
+                      element_directivity_db=3.0), dhats, U_AT, U_CT)
+    g_ad = antenna.field_gain(
+        AntennaConfig(kind="array", n_elements=n, spacing_lam=d,
+                      element_directivity_db=3.0), dhats, U_AT, U_CT)
+    np.testing.assert_allclose(g_td, g_ad, rtol=1e-12)
 
 
 def test_array_tapered_kernel_two_way():

@@ -59,18 +59,19 @@ def test_tangent_rule_matches_value_and_slope():
     assert l == pytest.approx(np.sqrt(2 * 2.7) / kb)
 
 
-def test_atm_table_resolves_per_line_and_pass():
+def test_atm_table_resolves_one_spectrum_per_line():
     tab = b1.load_table()
     s17, l17, inf = b1.resolve("greenland_westcoast", "p3_2017", 195e6,
                                30.0, tab)
     assert inf["spectrum"] == "westcoast_2017"
     assert 0.005 < s17 < 0.02 and 0.4 < l17 < 0.7
-    s16, _, inf16 = b1.resolve("greenland_westcoast", "p3_2016", 195e6,
-                               30.0, tab)
-    assert inf16["spectrum"] == "westcoast_2016" and s16 != s17
+    s16, l16, inf16 = b1.resolve("greenland_westcoast", "p3_2016", 195e6,
+                                 30.0, tab)
+    assert inf16["spectrum"] == "westcoast_2017"
+    assert (s16, l16) == pytest.approx((s17, l17))
     _, _, inf_h = b1.resolve("greenland_westcoast", "haps_14km", 60e6,
                              30.0, tab)
-    assert inf_h["spectrum"] == "westcoast_2017"           # line default
+    assert inf_h["spectrum"] == "westcoast_2017"
     _, lg, infg = b1.resolve("greenland_geikie01_transit", "p3_2017_high", 195e6,
                              30.0, tab)
     assert infg["family"] == "exponential" and 0.5 < lg < 0.7
@@ -114,4 +115,5 @@ def test_spec_surface_roughness_forms():
     assert kw["surf_rough"] == [0.01, 0.5]
     doc["run"]["physics"]["surface_roughness"] = False
     assert RunSpec.model_validate(doc).to_run_kwargs()["surf_rough"] is False
-    assert base.to_run_kwargs()["surf_rough"] is True
+    assert base.to_run_kwargs()["surf_rough"] == {
+        "source": "atm_exponential"}

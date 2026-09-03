@@ -93,6 +93,7 @@ class Facets:
     e2: np.ndarray        # (N, 3) float64 mean edge vector along +row (m)
     cell: np.ndarray      # (N, 2) int: (row i, col j) source grid cell
     grid_shape: tuple     # (ny-1, nx-1) number of cells
+    phase_keys: np.ndarray = None  # (N, 2) stable parent-grid lattice cells
 
     def index_map(self):
         """(ny-1, nx-1) -> flat facet index."""
@@ -111,27 +112,40 @@ def _bilinear(dem, rows, cols):
             + d10 * fr * (1 - fc) + d11 * fr * fc)
 
 
-def build_facets(dem, transform, crs, frame, spacing=None):
+def _lattice_axis(n, step, origin):
+    """Crop-local sample coordinates and their parent-lattice indices."""
+    eps = 1e-10
+    first = int(np.ceil((origin - eps) / step))
+    last = int(np.floor((origin + n - 1 + eps) / step))
+    keys = np.arange(first, last + 1, dtype=np.int64)
+    if len(keys) < 2:
+        raise ValueError("DEM crop is too small for the requested facet spacing")
+    return keys.astype(np.float64) * step - origin, keys
+
+
+def build_facets(dem, transform, crs, frame, spacing=None,
+                 grid_origin=(0, 0)):
     """Tessellate a projected DEM window into upward-oriented rectangular facets.
 
     dem values are ellipsoidal heights (m). ``spacing`` (m) sets the target facet
     size: coarser than the DEM posting subsamples by stride; finer bilinearly
     upsamples the DEM (in the projected grid, before the ECEF pipeline) to
-    roughly that size; ``None`` keeps the native posting.
+    roughly that size; ``None`` keeps the native posting. ``grid_origin`` is
+    the crop's (row, column) offset in its parent DEM. It anchors both sampling
+    and per-facet random fields so overlapping crops represent identical land.
     """
     dem = np.asarray(dem, dtype=np.float64)
     ny, nx = dem.shape
     px = 0.5 * (abs(transform.a) + abs(transform.e))
     if spacing is None or abs(spacing - px) < 1e-9:
-        rows, cols = np.arange(ny, dtype=float), np.arange(nx, dtype=float)
-    elif spacing > px:  # coarser: stride subsample
-        step = max(1, int(round(spacing / px)))
-        rows = np.arange(0, ny, step, dtype=float)
-        cols = np.arange(0, nx, step, dtype=float)
-    else:  # finer: bilinear subdivision toward the target facet size
-        f = px / spacing
-        rows = np.linspace(0, ny - 1, max(2, int(round((ny - 1) * f)) + 1))
-        cols = np.linspace(0, nx - 1, max(2, int(round((nx - 1) * f)) + 1))
+        step = 1.0
+    elif spacing > px:
+        step = float(max(1, int(round(spacing / px))))
+    else:
+        step = float(spacing / px)
+    orow, ocol = map(float, grid_origin)
+    rows, row_keys = _lattice_axis(ny, step, orow)
+    cols, col_keys = _lattice_axis(nx, step, ocol)
     dem = _bilinear(dem, rows, cols)
 
     # Pixel centers -> projected (E, N), carrying ellipsoidal height.
@@ -156,8 +170,10 @@ def build_facets(dem, transform, crs, frame, spacing=None):
     hc, wc = dem.shape[0] - 1, dem.shape[1] - 1
     ci, cj = np.meshgrid(np.arange(hc), np.arange(wc), indexing="ij")
     cell = np.stack([ci.ravel(), cj.ravel()], axis=1)
+    ki, kj = np.meshgrid(row_keys[:-1], col_keys[:-1], indexing="ij")
+    phase_keys = np.stack([ki.ravel(), kj.ravel()], axis=1)
     return Facets(centers, normals, areas, e1.reshape(-1, 3), e2.reshape(-1, 3),
-                  cell, (hc, wc))
+                  cell, (hc, wc), phase_keys)
 
 
 def check_facet_size(facets, wavelength, min_range, beta=0.5):

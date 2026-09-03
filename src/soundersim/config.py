@@ -51,10 +51,10 @@ class AntennaConfig(BaseModel):
     - ``dipole``: half-wave dipole, g = cos((pi/2) cos(psi)) / sin(psi) with
       psi the angle from the dipole ``axis`` (null along the axis, 1 at
       broadside). ``axis`` is along-track (default) or cross-track.
-    - ``array``: uniform unsteered linear array of ``n_elements`` isotropic
-      elements along the CROSS-TRACK axis with boresight at nadir (the
-      MCoRDS-like case); element spacing ``spacing_lam`` is in CARRIER
-      WAVELENGTHS (dimensionless). g = |array factor|
+    - ``array``: uniform unsteered linear array of ``n_elements`` elements
+      along the CROSS-TRACK axis with boresight at nadir (the MCoRDS-like
+      case); element spacing ``spacing_lam`` is in CARRIER WAVELENGTHS
+      (dimensionless). g = |array factor|
       = sin(N x)/(N sin x), x = pi * spacing_lam * sin(theta_ct).
     - ``array_tapered``: like ``array`` but with separate TX and RX
       amplitude tapers (arbitrary units, each normalized by its own sum);
@@ -84,6 +84,10 @@ class AntennaConfig(BaseModel):
     axis: Literal["along_track", "cross_track"] = "along_track"  # dipole kinds
     n_elements: int = 5          # array only
     spacing_lam: float = 0.5     # array element spacing (carrier wavelengths)
+    # Optional peak power directivity of one forward-hemisphere cosine-power
+    # element. None preserves the legacy isotropic, peak-normalized AF.
+    element_directivity_db: Optional[float] = Field(
+        default=None, ge=3.0, allow_inf_nan=False)
     tx_weights: Optional[list[float]] = None  # array_tapered: TX taper
     rx_weights: Optional[list[float]] = None  # array_tapered: RX taper
     length_lam: float = 0.5      # finite_dipole length (carrier wavelengths)
@@ -93,6 +97,10 @@ class AntennaConfig(BaseModel):
 
     @model_validator(mode="after")
     def _pattern_params(self):
+        if self.element_directivity_db is not None and self.kind not in (
+                "array", "array_tapered"):
+            raise ValueError("element_directivity_db is only valid for array "
+                             "antennas")
         if self.kind == "array":
             if self.n_elements < 2:
                 raise ValueError("array antenna requires n_elements >= 2")

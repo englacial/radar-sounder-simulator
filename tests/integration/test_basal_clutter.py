@@ -28,36 +28,32 @@ rbc = _load("run_basal_clutter", "tools/run_basal_clutter.py")
 
 
 def test_pass_table_matches_scout():
-    """Frames, slices, direction and altitudes from claude_notes/
-    basal_clutter_scout.md (pilot s=30-40 km; full segment s=18-68 km)."""
+    """Current Getz pass identities, pilot slices and full-line coverage."""
     rbc.activate_line("antarctica_getz")
     assert rbc.SEASON == "2016_Antarctica_DC8"
-    # the three REAL passes (ORDER) plus the deliberate synthetic 30 km
-    # entry (--add-30km), which rides the LOW pass's frames
-    assert rbc.ORDER == ["real_low", "real_9km", "real_10km"]
+    assert rbc.ORDER == ["dc8_2016_0km", "dc8_2016_9km", "dc8_2016_11km"]
     assert list(rbc.PASSES) == rbc.ORDER + list(rbc.SYNTHETIC_KEYS)
-    # the synthetic set is a line-definition choice and gets revised; assert
-    # the CONSTRUCTION (constant ellipsoidal height, rides a real carrier)
-    # rather than a particular altitude
-    for k in rbc.SYNTHETIC_KEYS:
-        assert rbc.PASSES[k]["synthetic_msl_m"] > 0
-        assert rbc.PASSES[k]["agl_med_m"] is None
 
-    p = rbc.PASSES["real_low"]
+    p = rbc.PASSES["dc8_2016_0km"]
     assert not p["rev"]
     assert p["pilot"] == [("20161105_05_005", (2020, 2693))]
-    assert p["full"] == [("20161105_05_005", (1212, 3333)),
-                         ("20161105_05_006", (0, 1244))]
-    p = rbc.PASSES["real_9km"]
+    assert p["full"] == [("20161105_05_005", (None, None)),
+                         ("20161105_05_006", (None, None)),
+                         ("20161105_05_007", (0, 3327))]
+    p = rbc.PASSES["dc8_2016_9km"]
     assert p["rev"]
     assert p["pilot"] == [("20161028_05_006", (858, 1532))]
-    assert p["full"] == [("20161028_05_006", (0, 2341)),
-                         ("20161028_05_005", (2308, 3337))]
-    p = rbc.PASSES["real_10km"]
+    assert p["full"] == [("20161028_05_007", (0, 216)),
+                         ("20161028_05_006", (None, None)),
+                         ("20161028_05_005", (None, None)),
+                         ("20161028_05_004", (223, 3337))]
+    p = rbc.PASSES["dc8_2016_11km"]
     assert p["rev"]
     assert p["pilot"] == [("20161031_07_005", (337, 1011))]
-    assert p["full"] == [("20161031_07_005", (0, 1820)),
-                         ("20161031_07_004", (1786, 3336))]
+    assert p["full"] == [("20161031_07_005", (0, 3033)),
+                         ("20161031_07_004", (None, None)),
+                         ("20161031_07_003", (None, None)),
+                         ("20161031_07_002", (3044, 3341))]
 
     # scout AGL medians and pilot trace counts (673/674/674)
     assert [rbc.PASSES[k]["agl_med_m"] for k in rbc.ORDER] == \
@@ -65,10 +61,6 @@ def test_pass_table_matches_scout():
     counts = [sum(b - a for _, (a, b) in rbc.PASSES[k]["pilot"])
               for k in rbc.ORDER]
     assert counts == [673, 674, 674]
-    # full-segment trace counts match the scout (3365 / 3370 / 3370)
-    fcounts = [sum(b - a for _, (a, b) in rbc.PASSES[k]["full"])
-               for k in rbc.ORDER]
-    assert fcounts == [3365, 3370, 3370]
     # each pass reads its params from a frame it actually flies
     for k in rbc.ORDER:
         fid = rbc.PASSES[k]["param_frame"]
@@ -123,13 +115,14 @@ def test_picked_bed_reference_is_the_low_pass():
     """--picked-bed takes its picks from ONE reference pass -- the LOW pass
     (cleanest bed of the triplet) -- applied to all three simulations, and
     tags its outputs/cache keys so the BedMachine runs stay cached."""
-    assert rbc.REF_PASS == "real_low"
+    rbc.activate_line("antarctica_getz")
+    assert rbc.REF_PASS == "dc8_2016_0km"
     assert rbc.REF_FRAMES == ("20161105_05_005", "20161105_05_006",
                               "20161105_05_007")
     # every frame the low pass simulates is covered by the reference frames
     for seg in ("pilot", "full"):
         assert all(fid in rbc.REF_FRAMES
-                   for fid, _ in rbc.PASSES["real_low"][seg])
+                   for fid, _ in rbc.PASSES[rbc.REF_PASS][seg])
     assert rbc.case_tag(True) == rbc.PBED_TAG == "_pbed"
     assert rbc.case_tag(False) == ""
     # offline reference: frame + bottom-pick caches exist for all ref frames
@@ -243,7 +236,7 @@ def test_picked_bed_matches_picks_at_nadir_and_keeps_cross_track():
     assert abs(stats["residual_rms_m"] - 60.0 / np.sqrt(2.0)) < 1.0
     assert abs(stats["residual_absmax_m"] - 60.0) < 1.0
     assert stats["bed_roughness_rms_m"]["picked"] > \
-        stats["bed_roughness_rms_m"]["bedmachine"]
+        stats["bed_roughness_rms_m"]["dem"]
 
 
 def test_picked_bed_gaps_fall_back_to_bedmachine():

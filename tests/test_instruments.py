@@ -203,6 +203,25 @@ def test_david_instruments_declare_real_antennas():
     assert a60.roll_source == "nav"
 
 
+def test_element_directivity_resolves_through_a_stated_instrument():
+    w = [0.25, 0.5, 0.75, 1.0, 1.0, 0.75, 0.5, 0.25]
+    inst = _inst(simulated={
+        "frequency_Hz": 60e6, "bandwidth_Hz": 20e6, "pulse_length_s": 8e-6,
+        "window": "hann",
+        "antenna": {"kind": "array_tapered", "spacing_lam": 0.5,
+                    "tx_weights": w, "rx_weights": w,
+                    "element_directivity_db": 6.0, "roll_source": "none"}})
+    ant = inst.resolve()[1]
+    assert ant.kind == "array_tapered"
+    assert ant.tx_weights == ant.rx_weights == w
+    assert ant.element_directivity_db == pytest.approx(6.0)
+    with pytest.raises(ValueError, match="element_directivity_db"):
+        _inst(simulated={
+            "frequency_Hz": 60e6, "bandwidth_Hz": 20e6,
+            "pulse_length_s": 8e-6, "window": "hann",
+            "antenna": {"kind": "dipole", "element_directivity_db": 6.0}})
+
+
 def _ant(**kw):
     return rbc.AntennaConfig(**kw)
 
@@ -251,6 +270,14 @@ def test_realistic_instrument_antenna_forks_the_cache_key():
         antenna=_ant(kind="array", n_elements=8, spacing_lam=0.5,
                      roll_source="nav")))
     assert "_ia" in rbc.chunk_rid(p3, 0, 14.0, True)
+    p4 = _p(rc_sim=rbc.RadarConfig(
+        dt=1e-9, n_samples=64, t0=0.0, f0=60e6,
+        antenna=_ant(kind="array", n_elements=12, spacing_lam=0.5,
+                     element_directivity_db=3.0, roll_source="none")))
+    meta4 = rbc.chunk_meta(p4, 0, np.arange(198), 5, 1939, 14.0, True)
+    assert meta4["instrument_antenna"]["element_directivity_db"] == 3.0
+    assert meta4["instrument_antenna"]["element_pattern"] == \
+        "forward_cosine_power_integrated_directivity"
 
 
 def test_cli_antenna_override_bypasses_the_instrument_fingerprint():

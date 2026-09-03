@@ -114,10 +114,18 @@ numbers no code consumes.
 | `mcords5_basler_2017` | MCoRDS5 on Basler, 8 channels, 3.7 m | 8 el tapered, from the product param structs |
 | `marfa_baslermkb_2022` | not in the readme (2022/2023) | right-wing 0.4 λ dipole, no beamforming |
 | `haps_60mhz` | synthetic (`kind: stated`) | 8 el, 0.5 λ, no roll |
+| `haps_60mhz_6el_halflambda` | synthetic constrained design | 6 el, 0.5 λ, central pair TX, Taylor 40 dB RX, 3 dBi elements, no roll |
+| `haps_60mhz_6el_lambda` | synthetic constrained design | 6 el, 1.0 λ (25 m span), central pair TX, Taylor 40 dB RX, 3 dBi elements, no roll |
 
 The resolved antenna is fingerprinted into the chunk cache key; a swapped
 instrument forks the key. Quote segment and frame ids (`'20161105_05'`):
 YAML 1.1 reads `_` as a digit separator.
+
+For matched processing, `processing.posting_div` refines the simulated
+slow-time grid before focusing. `processing.focus_aperture` is
+`alias_limited` (use the refined grid's full unaliased band),
+`product_resolution` (retain the aperture and resolution of the original
+product posting), or `first_fresnel` (one monostatic first-zone diameter).
 
 ## Analysis conventions
 

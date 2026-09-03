@@ -4,6 +4,7 @@ import warnings
 
 import numpy as np
 import pytest
+from affine import Affine
 from pyproj import Proj, Transformer
 
 from soundersim import synthetic as syn
@@ -240,6 +241,26 @@ def test_subdivision_converges():
                          spacing=s).areas.sum() for s in (None, 25.0, 12.5)}
     d1, d2 = abs(A[25.0] - A[None]), abs(A[12.5] - A[25.0])
     assert d2 < 0.35 * d1  # successive refinement change shrinks ~4x
+
+
+@pytest.mark.parametrize("spacing", [None, 100.0, 37.0])
+def test_cropped_facets_share_parent_lattice(spacing):
+    """Overlapping terrain has identical geometry and IDs in every crop."""
+    scene = syn.hill_scene(extent=3000.0, posting=50.0)
+    frame = LocalFrame.centered_on(scene)
+    full = build_facets(scene.dem, scene.transform, scene.crs, frame,
+                        spacing=spacing)
+    r0, r1, c0, c1 = 7, 46, 9, 49
+    crop = build_facets(
+        scene.dem[r0:r1, c0:c1],
+        scene.transform * Affine.translation(c0, r0), scene.crs, frame,
+        spacing=spacing, grid_origin=(r0, c0))
+
+    lookup = {tuple(k): i for i, k in enumerate(full.phase_keys)}
+    parent_i = np.array([lookup[tuple(k)] for k in crop.phase_keys])
+    np.testing.assert_allclose(crop.centers, full.centers[parent_i], atol=1e-8)
+    np.testing.assert_allclose(crop.normals, full.normals[parent_i], atol=1e-12)
+    np.testing.assert_allclose(crop.areas, full.areas[parent_i], atol=1e-8)
 
 
 def test_check_facet_size_warns():

@@ -423,7 +423,10 @@ def crop_scene(base, ct_dist, nav_z, name):
     nav = base.nav_llh.copy()
     nav[:, 2] = nav_z
     sc = MultilayerScene(name, dems, tr_c, base.crs, nav, base.media,
-                         {**base.params, "ct_dist": ct_dist})
+                         {**base.params, "ct_dist": ct_dist},
+                         grid_origin=tuple(
+                             np.asarray(getattr(base, "grid_origin", (0, 0)))
+                             + (r0, c0)))
     sc.nav_roll = getattr(base, "nav_roll", None)
     return sc
 
@@ -542,7 +545,9 @@ def firn_strip_scenes(base, ct_firn, nav_z, n_chunks=None):
         sc = SyntheticScene(
             f"{base.name}_firnstrip{rows_idx[0]}", dem, tr_c, base.crs, nav,
             {**base.params, "ct_dist_firn": ct_firn},
-            nav_roll=None if roll is None else np.asarray(roll)[rows_idx])
+            nav_roll=None if roll is None else np.asarray(roll)[rows_idx],
+            grid_origin=tuple(
+                np.asarray(getattr(base, "grid_origin", (0, 0))) + (r0, c0)))
         out.append((sc, rows_idx))
     return out
 
