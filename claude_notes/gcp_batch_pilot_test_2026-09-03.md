@@ -15,7 +15,9 @@ is updated as the run proceeds so a session restart loses nothing.
 | **total so far** | **$0.10** |
 
 Launched jobs (delete when done: `gcloud batch jobs delete JOB --location us-central1`):
-- (none yet)
+- `soundersim-sim-pin-20260903` 18:57Z: PIN, 6 pass tasks, n2-highmem-8 Spot
+  (~$0.19/h est.), memory 56000 MiB/task (one task per VM), maxRunDuration
+  90 min -> worst case 6 x 1.5 h x $0.19 = $1.7; expected ~$0.5.
 
 ## Environment facts found
 
