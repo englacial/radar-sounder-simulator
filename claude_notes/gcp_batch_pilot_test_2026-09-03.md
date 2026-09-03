@@ -189,6 +189,12 @@ $15 stop line.
   metrics.json 449 shared scalars, 0 differ; radargrams.png byte-identical
   (md5 372f86a11e48611e0f7e6407a476bb1c). Kernel wall summed over the 62
   chunks: cloud 14353 s vs local 5195 s (2.76x per chunk on n2-highmem-8).
+- westcoast cloud processing done 22:06Z (env 23, data 11, run 1350 s,
+  upload 12 s); cloud kernel wall summed 10886 s over 49 chunks (p3_2016
+  3210 s / 13 chunks, p3_2017 3503 s / 15, p3_2019 3370 s / 15). First
+  westcoast result at posting_div 8 anywhere (UNVERIFIED, no local run):
+  midcol_rel_surf_db p3_2016 -68.04, p3_2017 -69.53, p3_2019 -69.98,
+  haps halflambda -50.76, lambda -51.12 dB; bed_visibility 0.39 / 7.65 dB.
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
