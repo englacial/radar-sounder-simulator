@@ -103,6 +103,24 @@ The 18 local PIN chunks (main checkout) copied into this worktree's
 `CHUNKS 18/18 cached`: the meta key carries no host paths, so a chunk
 simulated elsewhere hits `[skip-exists]`.
 
-## Timings / verification
+- `soundersim-sim-4lines-20260903` 19:25Z: getz+david+PIS+geikie at
+  fc47ed6 + estimate fix, 178 chunk tasks (21+32+62+63), n2-highmem-8
+  Spot, memory 56000 MiB (one chunk per VM), parallelism 22, maxRunDuration
+  60 min. Projection ~9 VM-h x ~$0.28 = ~$2.6.
 
-(filled in as jobs complete)
+## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
+
+Timing (task json + chunk wall_s): submit 19:05:0xZ -> tasks running
+19:05:54Z; only 4 Spot VMs were granted so tasks 3-5 ran sequentially on one
+VM. Per task: env 0-13 s (uv install + full sync; 0 when the VM already had
+it), data 1-3 s, upload 1-2 s. Simulation per chunk, cloud / local:
+dc8 0 km 363-386 / 200-236 s (1.8x), dc8 9 km 72-74 / 29-30 s (2.4x), HAPS
+60-64 / 31-32 s (2.0x). Per-pass task wall: 0 km 1125-1149 s, 9 km 222 s,
+HAPS 190-202 s. Spend: 4 VMs x ~20 min = 1.3 VM-h x ~$0.28 = ~$0.4.
+
+Verification vs the local run (main checkout outputs/antarctica_pineisland_north/
+pilot/runs, tools/gcp/compare_runs.py, log claude_notes/logs/gcp_compare_pin_c.log):
+all 18 chunks `meta==` (cloud meta_key == local meta_key, i.e. the runner's
+cache-hit rule holds) and **max |diff| = 0.0 on field, nadir_twtt and twtt**
+-- bit-identical between the Zen 5 box and Ice Lake N2 VMs (same jaxlib
+0.10.2 CPU wheel, XLA:CPU deterministic here).
