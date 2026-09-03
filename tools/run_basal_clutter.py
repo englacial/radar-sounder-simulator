@@ -268,6 +268,13 @@ RADARGRAM_PCT: tuple = ()              # per_panel robust scaling limits
 CHUNK_M: float = 0.0                   # along-track chunk target
 FACET_SPACING_SCALE: float = 0.0       # default lattice refinement (<= 1)
 CHUNK_M_PROC: float = 0.0              # ... at fine posting
+# Per-chunk memory guard. Measured 2026-09-03 at posting_div 8 (~1800
+# traces/chunk): pineisland_north 0.56 M facets/interface/chunk ran,
+# westcoast 1.35 M was OOM-killed at 110 GB, david 1.63 M at 100 GB -- the
+# kernels' footprint grows as traces x facets (~50 B per pair). Chunks are
+# split further until traces * facets_per_interface (estimated from the
+# chunk_scene crop) fits this budget; 1.1e9 keeps pineisland_north at 3.
+CHUNK_TRACE_FACETS: float = 1.1e9
 
 ANALYSIS = clutter_analysis.load_analysis()
 ANALYSIS_GLOBALS = tuple(sorted(ANALYSIS.to_globals()))
@@ -1810,15 +1817,42 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
 # ========================================================================
 def chunk_rows(p):
     """Split the sim trace indices into along-track chunks (~CHUNK_M, or
-    ~CHUNK_M_PROC at fine posting: ~200 traces/chunk bounds kernel memory,
-    and the shorter DEM windows cut wasted facet work)."""
+    ~CHUNK_M_PROC at fine posting; the shorter DEM windows cut wasted facet
+    work), then split further while traces x facets per interface would
+    exceed CHUNK_TRACE_FACETS (kernel memory bound)."""
     s_sel = p["s_sim"]
     track = float(s_sel[-1] - s_sel[0])
     chunk_m = CHUNK_M_PROC if p.get("proc") else CHUNK_M
     n_chunks = max(1, int(round(track / chunk_m)))
-    edges = s_sel[0] + track * np.arange(1, n_chunks) / n_chunks
-    which = np.searchsorted(edges, s_sel)
-    return [np.where(which == c)[0] for c in range(n_chunks)]
+
+    def split(n):
+        edges = s_sel[0] + track * np.arange(1, n) / n
+        which = np.searchsorted(edges, s_sel)
+        return [np.where(which == c)[0] for c in range(n)]
+
+    while True:   # memory guard (CHUNK_TRACE_FACETS)
+        chunks = split(n_chunks)
+        pairs = max(len(r) * _chunk_facets_estimate(p, r) for r in chunks)
+        if pairs <= CHUNK_TRACE_FACETS or n_chunks >= len(s_sel):
+            return chunks
+        n_chunks += 1
+
+
+def _chunk_facets_estimate(p, rows):
+    """Facets per interface the chunk_scene crop will hold for ``rows``:
+    the traces' bbox padded by ct + 100 m, in DEM cells (0 when the pass has
+    no reach/base yet, e.g. in unit tests without a scene)."""
+    base, reach = p.get("base"), p.get("reach")
+    if base is None or reach is None:
+        return 0
+    tr = Transformer.from_crs("EPSG:4326", base.crs, always_xy=True)
+    nav = base.nav_llh[rows]
+    px, py = tr.transform(nav[:, 1], nav[:, 0])
+    pad = reach["ct_m"] + 100.0
+    cell = 0.5 * (abs(base.transform.a) + abs(base.transform.e))
+    ncol = (px.max() - px.min() + 2 * pad) / cell + 2
+    nrow = (py.max() - py.min() + 2 * pad) / cell + 2
+    return int(ncol * nrow)
 
 
 def chunk_scene(base, rows, ct, gamma=False):
@@ -3971,7 +4005,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "att_db_per_km": att, "surf_rough": surf_rough,
         "surface_roughness": surface_roughness_record(surf_rough, preps),
         "margin_us": MARGIN_US, "post_bed_window_us": POST_BED_US,
-        "chunk_m": CHUNK_M, "picked_bed": bool(picked_bed),
+        "chunk_m": CHUNK_M, "chunk_trace_facets": CHUNK_TRACE_FACETS,
+        "picked_bed": bool(picked_bed),
         "gamma_rssnr": bool(gamma_rssnr),
         "demogorgn_bed": bool(demogorgn_bed),
         "antenna": antenna,

@@ -30,6 +30,27 @@ def test_chunk_scene_records_parent_grid_origin():
                                base.transform * (c0, r0))
 
 
+def test_chunk_rows_splits_further_on_trace_facet_budget():
+    """Chunk count follows the along-track target until traces x facets
+    (from the chunk_scene crop) would exceed the kernel memory budget."""
+    rbc.activate_line("antarctica_pineisland_north")
+    base = syn.slab_scene(extent=30_000.0, posting=7.467, n_traces=5409,
+                          spacing=1.85)
+    s_sim = np.linspace(0.0, 10_000.0, 5409)
+    n_track = len(rbc.chunk_rows({"s_sim": s_sim, "proc": True}))
+    small = {"s_sim": s_sim, "proc": True, "base": base,
+             "reach": {"ct_m": 1882.0}}       # the pineisland_north 0 km case
+    big = {"s_sim": s_sim, "proc": True, "base": base,
+           "reach": {"ct_m": 3714.0}}         # the david basler_2017 case
+    assert len(rbc.chunk_rows(small)) == n_track
+    chunks = rbc.chunk_rows(big)
+    assert len(chunks) > n_track
+    assert sum(len(c) for c in chunks) == 5409
+    for c in chunks:
+        assert len(c) * rbc._chunk_facets_estimate(big, c) \
+            <= rbc.CHUNK_TRACE_FACETS
+
+
 # --------------------------------------------------- alias-limited aperture
 
 def test_alias_limited_aperture_math():
