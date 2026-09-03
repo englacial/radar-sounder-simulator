@@ -137,6 +137,15 @@ $15 stop line.
   quota request) is the only way to more parallelism; the running jobs
   pick a raised quota up automatically. Continuing at 4 VMs (cost is the
   same; ETA ~23:10Z for everything).
+- 20:30Z: user raised CPUS_ALL_REGIONS to 256; the b jobs scaled to 12 VMs
+  and hit the next cap, `SSD_TOTAL_GB 500/region` (40 GB pd-balanced boot
+  disks). Launcher now defaults to 30 GB pd-standard boot disks. Stopped
+  the b launchers (so their finally could not delete the NAT), deleted
+  the b jobs (4lines-b at 32/178 + 5 running after 22 min; pinwc-b at
+  12/67 + 4 running; ~4 VM-h ~$1.1) and relaunched at 20:42Z:
+  `soundersim-sim-4lines-c-20260903` (24 VMs) and
+  `soundersim-sim-pinwc-c-20260903` (8 VMs), RESULTS_FROM all earlier
+  jobs so finished chunks are skipped. 32 VMs = 256 vCPU.
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
