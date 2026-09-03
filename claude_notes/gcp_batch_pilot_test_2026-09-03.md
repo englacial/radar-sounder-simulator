@@ -137,6 +137,23 @@ printed `[skip-exists]` for every chunk and `[ok]` (re-simulation) for none;
 it went straight to focusing/analysis/figures (log
 claude_notes/logs/gcp_process_pin_local.log).
 
+Metrics (cloud chunks -> local processing step, vs the main checkout's
+metrics.json): 449 shared scalar keys, **0 differ** (wall-time keys
+excluded). Spot checks, cloud / local:
+
+| key | cloud | local |
+|---|---|---|
+| clutter_dc8_2014_0km/sim/midcol_rel_surf_db | -64.01 | -64.01 |
+| clutter_dc8_2016_0km/sim/midcol_rel_surf_db | -64.66 | -64.66 |
+| clutter_dc8_2018_0km/sim/midcol_rel_surf_db | -64.38 | -64.38 |
+| clutter_dc8_2012_9km/sim/midcol_rel_surf_db | -22.54 | -22.54 |
+| clutter_haps_14km_halflambda/sim/midcol_rel_surf_db | -44.60 | -44.60 |
+| clutter_haps_14km_lambda/sim/midcol_rel_surf_db | -45.67 | -45.67 |
+| haps_14km_halflambda_bed_visibility | -8.10 | -8.10 |
+| haps_14km_lambda_bed_visibility | 14.82 | 14.82 |
+
+radargrams.png: byte-identical (md5 2488e5ce35f15dc223ff7aa27205b6e0 both).
+
 ## Job soundersim-sim-4lines-20260903 (getz/david/PIS/geikie, 178 chunk tasks)
 
 Launched 19:25Z at the ddfa899-equivalent chunking (getz 9 3 3 3 3, david
