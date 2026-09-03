@@ -58,12 +58,21 @@ def pass_tasks(config, lines, per_chunk):
         order = rbc.run(**kw, list_passes=True)
         outdir = str(rbc.OUT_DEFAULT.relative_to(rbc.ROOT)
                      / (kw["out_name"] or kw["segment"]))
+        if per_chunk:
+            # chunk counts need the prepped pass: stage_bundle.py saves the
+            # --dry-run manifest {pass: {n_chunks, cached, ...}}
+            mp = ROOT / "outputs" / "gcp" / "chunks" / f"{line}.json"
+            if not mp.exists():
+                raise SystemExit(f"--per-chunk needs {mp} (run "
+                                 "tools/gcp/stage_bundle.py first)")
+            man = json.loads(mp.read_text())
+            for key in order:
+                for ci in range(man[key]["n_chunks"]):
+                    if not man[key]["cached"][ci]:
+                        tasks.append(("simulate", line, f"{key}:{ci}",
+                                      outdir))
+            continue
         for key in order:
-            if per_chunk:
-                # chunk counts need the prepped pass; the manifest of a
-                # --dry-run gives them. Keep pass tasks unless asked.
-                raise SystemExit("--per-chunk: build tasks from a --dry-run "
-                                 "manifest (not wired in this version)")
             tasks.append(("simulate", line, key, outdir))
     return tasks
 

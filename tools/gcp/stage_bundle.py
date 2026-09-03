@@ -12,6 +12,7 @@ the 67 GB ATM/covariate caches.
       --lines antarctica_pineisland_north [--no-upload]
 """
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -62,9 +63,9 @@ def line_inputs(config, line):
     record_opens(seen)
     sys.argv = ["run_basal_clutter", "--config", config, "--line", line,
                 "--dry-run"]
-    rbc.main_config()
+    manifest = rbc.main_config()[0]
     # the run's own chunk cache is output, not input
-    return sorted(f for f in seen if "/runs/" not in f)
+    return sorted(f for f in seen if "/runs/" not in f), manifest
 
 
 def main():
@@ -76,12 +77,18 @@ def main():
     a = ap.parse_args()
     import subprocess
     mdir = ROOT / "outputs" / "gcp" / "lines"
+    cdir = ROOT / "outputs" / "gcp" / "chunks"
     mdir.mkdir(parents=True, exist_ok=True)
+    cdir.mkdir(parents=True, exist_ok=True)
     for line in a.lines:
-        files = line_inputs(a.config, line)
+        files, manifest = line_inputs(a.config, line)
         size = sum((ROOT / f).stat().st_size for f in files)
         (mdir / f"{line}.txt").write_text("".join(f + "\n" for f in files))
-        print(f"{line}: {len(files)} files, {size / 1e9:.2f} GB", flush=True)
+        # chunk manifest {pass: {rids, cached, n_chunks}} for --per-chunk
+        (cdir / f"{line}.json").write_text(json.dumps(manifest, indent=1))
+        print(f"{line}: {len(files)} files, {size / 1e9:.2f} GB, "
+              f"{sum(m['n_chunks'] for m in manifest.values())} chunks",
+              flush=True)
         if a.no_upload:
             continue
         # symlinked caches (a read-only view of another checkout) upload as
