@@ -476,7 +476,9 @@ def firn_scenes(wscene, ct_dist, spacing, n_chunks=None):
             f"{wscene.name}_firnstrip{rows_idx[0]}", dem, tr_c, wscene.crs,
             wscene.nav_llh[rows_idx],
             {**wscene.params, "ct_dist_firn": ct_dist},
-            nav_roll=None if roll is None else np.asarray(roll)[rows_idx])
+            nav_roll=None if roll is None else np.asarray(roll)[rows_idx],
+            grid_origin=tuple(
+                np.asarray(getattr(wscene, "grid_origin", (0, 0))) + (r0, c0)))
         out.append((sc, rows_idx))
     return out
 

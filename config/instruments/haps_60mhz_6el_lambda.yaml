@@ -1,0 +1,24 @@
+schema_version: 1
+name: haps_60mhz_6el_lambda
+description: >
+  Simplified constrained HAPS candidate: six elements at 1 lambda spacing, central
+  pair on transmit, Taylor-40 receive weighting, and a short explicit chirp.
+source: {kind: stated}
+simulated:
+  frequency_Hz: 60.0e6
+  bandwidth_Hz: 20.0e6
+  pulse_length_s: 5.0e-6
+  window: hann
+  construction: chirp
+  antenna:
+    kind: array_tapered
+    element_directivity_db: 3
+    spacing_lam: 1.0
+    tx_weights: [0, 0, 1, 1, 0, 0]
+    rx_weights: [0.188985, 0.583114, 0.942977,
+                 0.942977, 0.583114, 0.188985]
+    roll_source: none
+recorded:
+  physical_span_m: 24.98
+  active_tx_elements: 2
+  receive_taper: {kind: taylor, nbar: 4, sidelobe_db: 40}

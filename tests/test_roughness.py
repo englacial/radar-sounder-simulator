@@ -167,6 +167,19 @@ def test_speckle_phasors():
     assert np.mean(np.abs(ph) ** 2) == pytest.approx(1.0, abs=0.03)
 
 
+def test_keyed_speckle_is_crop_and_order_invariant():
+    rows, cols = np.meshgrid(np.arange(100, 300), np.arange(400, 500),
+                             indexing="ij")
+    keys = np.column_stack([rows.ravel(), cols.ravel()])
+    ph = rg.speckle_phasors_for_keys(keys, seed=(3, 1))
+    take = np.random.default_rng(4).permutation(len(keys))[:3000]
+    np.testing.assert_array_equal(
+        ph[take], rg.speckle_phasors_for_keys(keys[take], seed=(3, 1)))
+    assert not np.array_equal(
+        ph[take], rg.speckle_phasors_for_keys(keys[take], seed=(3, 2)))
+    assert np.mean(np.abs(ph) ** 2) == pytest.approx(1.0, abs=0.03)
+
+
 # ------------------------------------------------------ Haynes 2018 (c) core
 
 def test_haynes_disk_core():

@@ -34,6 +34,7 @@ class SyntheticScene:
     # Optional per-trace roll (rad, + = right wing down), used by antenna
     # roll_source="nav" (real frames set it; synthetic scenes leave it None = 0).
     nav_roll: np.ndarray = None
+    grid_origin: tuple = (0, 0)  # crop offset in the parent DEM, row/column
 
 
 def _build(name, z_func, params, *, n_traces=20, altitude=1000.0,
@@ -132,6 +133,7 @@ class MultilayerScene:
     nav_llh: np.ndarray
     media: list  # list[Medium], len == len(dems) + 1
     params: dict = field(default_factory=dict)
+    grid_origin: tuple = (0, 0)  # crop offset in the parent DEM, row/column
 
     @property
     def dem(self):

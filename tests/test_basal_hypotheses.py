@@ -238,6 +238,13 @@ def test_posting_div_halves_the_spacing_and_doubles_the_aperture():
     assert L2 / L1 == pytest.approx(2.0, rel=0.01)
 
 
+def test_first_fresnel_aperture_is_full_zone_diameter():
+    lam, r = 5.0, 14000.0
+    length, theta = rbc.first_fresnel_aperture(lam, r)
+    assert length == pytest.approx(2.0 * np.sqrt(lam * r / 2.0))
+    assert np.tan(np.radians(theta)) == pytest.approx(length / (2.0 * r))
+
+
 # -------------------------------------------------------- run() guards
 
 def test_run_rejects_unsupported_hypothesis_combinations():
