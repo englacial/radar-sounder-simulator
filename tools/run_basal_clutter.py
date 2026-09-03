@@ -2170,16 +2170,47 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
 
 
 def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
-                  bed_rough=None, spec=None, gfix=None):
+                  bed_rough=None, spec=None, gfix=None, chunks=None):
     """Chunked cached coherent surface+bed runs; assembled per-layer fields.
-    Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...)."""
-    chunks = chunk_rows(p)
-    est = [_chunk_facets_estimate(p, r) for r in chunks]
-    print(f"  chunks: {len(chunks)} x {min(len(r) for r in chunks)}-"
-          f"{max(len(r) for r in chunks)} traces, est facets/interface "
+    Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...).
+
+    ``chunks`` (a set of chunk indices, or ``()`` for a dry run) restricts
+    the run to those chunks for a cloud/fan-out worker: the selected chunks
+    are simulated into ``runs_dir`` under exactly the rid + meta the full
+    run uses, nothing is assembled, and the return carries ``rids`` (every
+    chunk's rid) plus ``cached`` (which of them already hit the cache)."""
+    all_chunks = chunk_rows(p)
+    est = [_chunk_facets_estimate(p, r) for r in all_chunks]
+    print(f"  chunks: {len(all_chunks)} x {min(len(r) for r in all_chunks)}-"
+          f"{max(len(r) for r in all_chunks)} traces, est facets/interface "
           f"{min(est) / 1e3:.0f}-{max(est) / 1e3:.0f} k, max traces*facets "
-          f"{max(len(r) * e for r, e in zip(chunks, est)) / 1e9:.2f} G "
+          f"{max(len(r) * e for r, e in zip(all_chunks, est)) / 1e9:.2f} G "
           f"(budget {CHUNK_TRACE_FACETS / 1e9:.2f} G)", flush=True)
+    if chunks is not None:
+        cfg = None
+        partial = {"rids": [], "cached": [], "wall_s": 0.0,
+                   "n_chunks": len(all_chunks)}
+        for ci, rows in enumerate(all_chunks):
+            rid = chunk_rid(p, ci, att, surf_rough, antenna, bed_rough, spec,
+                            gfix)
+            meta = chunk_meta(p, ci, rows, len(all_chunks), len(p["idx"]),
+                              att, surf_rough, antenna, bed_rough, spec, gfix)
+            partial["rids"].append(rid)
+            if ci in chunks:
+                if cfg is None:
+                    cfg = sim_cfg(p["rc_sim"], p["spacing"], att, surf_rough,
+                                  antenna, bed_rough,
+                                  diffuse_exponent=spec[2] if spec else 1.0,
+                                  gfix=gfix)
+                scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"],
+                                    gamma=p["gamma_rssnr"])
+                diag, _ = rac.run_level(rid, scene, cfg, meta, runs_dir,
+                                        p["oversample"], force)
+                partial["wall_s"] += diag["wall_s"]
+            partial["cached"].append(
+                rac.chunk_cached(rid, meta, runs_dir) is not None)
+        return partial
+    chunks = all_chunks
     surf_rough = resolve_surf_rough(surf_rough, p)
     if surf_rough_tag(surf_rough):
         print(f"  surface roughness: sigma {surf_rough[0] * 100:.2f} cm, "
@@ -3379,7 +3410,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         per_pass_figs=False,
         plot_s_max_km=None, proc_cache=False, line=None,
         spec_doc=None, spec_path=None,
-        instruments=None, extra_passes=None):
+        instruments=None, extra_passes=None,
+        simulate_only=None,  # {pass: set(chunk) | None}: simulate, no analysis
+        dry_run=False,       # prep every pass, report chunk rids, simulate none
+        list_passes=False):  # return the resolved pass order, touch no data
     # Always re-activate: this resets PASSES to the line definition, so
     # extra_passes added below cannot leak into a later run in-process.
     activate_line(line or LINE)
@@ -3481,6 +3515,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     if not order:
         raise ValueError(f"no pass covers segment {segment!r} on line "
                          f"{LINE!r}")
+    if list_passes:
+        return order
+    if simulate_only:
+        unknown = [k for k in simulate_only if k not in order]
+        if unknown:
+            raise ValueError(f"simulate_only: {unknown} not among this "
+                             f"run's passes {order}")
+        order = [k for k in order if k in simulate_only]
     n_traces = n_traces or N_TRACES_BY_SEGMENT[segment]
     ts_km = (DECOMP_S_KM[segment] if trace_decomp_s_km is None
              else trace_decomp_s_km)
@@ -3579,6 +3621,19 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"n_traces {len(p['idx'])}; "
               f"n_samples_sim {p['rc_sim'].n_samples}", flush=True)
         preps[key] = p
+        if dry_run or simulate_only is not None:
+            # fan-out worker / manifest mode: chunks into runs/, no analysis
+            want = () if dry_run else simulate_only[key]
+            r = simulate_pass(p, runs_dir, att, surf_rough, force,
+                              antenna=antenna, bed_rough=bed_rough,
+                              spec=spec, gfix=grazing_fix,
+                              chunks=(set(range(len(chunk_rows(p))))
+                                      if want is None else set(want)))
+            sims[key] = r
+            for ci, (rid, hit) in enumerate(zip(r["rids"], r["cached"])):
+                print(f"  chunk {ci:02d} {'cached' if hit else 'MISSING'} "
+                      f"{rid}", flush=True)
+            continue
         sims[key] = simulate_pass(p, runs_dir, att, surf_rough, force,
                                   antenna=antenna, bed_rough=bed_rough,
                                   spec=spec, gfix=grazing_fix)
@@ -3619,6 +3674,17 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 segment, GL_S_KM if hybrid else None, plot_s_max_km,
                 main_slug)
             print(f"FIGSET_READY {key}", flush=True)
+
+    if dry_run or simulate_only is not None:
+        # chunk manifest for the fan-out launcher: one entry per pass with
+        # every chunk's rid + cache state; nothing else is written
+        manifest = {k: {"rids": s["rids"], "cached": s["cached"],
+                        "n_chunks": s["n_chunks"], "wall_s": s["wall_s"]}
+                    for k, s in sims.items()}
+        n_hit = sum(sum(m["cached"]) for m in manifest.values())
+        n_all = sum(m["n_chunks"] for m in manifest.values())
+        print(f"CHUNKS {n_hit}/{n_all} cached in {runs_dir}", flush=True)
+        return manifest, None, out
 
     # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
     corr_stats = corr_series = None
@@ -4509,9 +4575,30 @@ def main_config():
                     help="override the spec's run.out_root (execution only)")
     ap.add_argument("--force", action="store_true",
                     help="re-simulate cached chunks")
+    # fan-out workers (tools/gcp): the chunk cache in runs/ is the interface,
+    # so a worker simulates chunks under the run's exact rid + meta and a
+    # later normal run of the same spec hits [skip-exists] on them
+    ap.add_argument("--simulate-only", nargs="+", default=None,
+                    metavar="PASS[:CHUNK,..]",
+                    help="simulate only these passes (optionally only the "
+                    "listed 0-based chunks) into runs/ and exit before any "
+                    "processing/analysis")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="prep every pass and print each chunk's rid and "
+                    "cache state; simulate nothing")
+    ap.add_argument("--list-passes", action="store_true",
+                    help="print the passes this spec runs on --line and "
+                    "exit (no data touched)")
     args = ap.parse_args()
     spec = load_spec(args.config)
     kw = spec.to_run_kwargs()
+    if args.simulate_only:
+        kw["simulate_only"] = {}
+        for item in args.simulate_only:
+            key, _, cs = item.partition(":")
+            kw["simulate_only"][key] = ([int(c) for c in cs.split(",")]
+                                        if cs else None)
+    kw["dry_run"] = args.dry_run
     if spec.run.lines:
         if not args.line or args.line not in spec.run.lines:
             raise SystemExit(
@@ -4533,8 +4620,15 @@ def main_config():
     global FIG_WIDTH_SCALE, BED_OVERLAY
     FIG_WIDTH_SCALE = spec.run.figures.width_scale
     BED_OVERLAY = spec.run.figures.bed_overlay
+    if args.list_passes:
+        print("\n".join(run(**kw, list_passes=True)))
+        return None
     print(f"spec {spec.meta.name!r} <- {args.config}", flush=True)
     gamma, att, cal_rec = resolve_calibration(kw["line"])
+    if (args.simulate_only or args.dry_run) and gamma == "solve":
+        raise SystemExit("--simulate-only/--dry-run need a manual "
+                         "gamma_surface_db: the solve loop changes the "
+                         "chunk cache key between its evaluations")
     gtxt = ("solve" if gamma == "solve" else
             f"{gamma:+.2f} dB (anomaly {cal_rec['surface_anomaly_db']:+.2f})")
     print(f"calibration [{cal_rec['line']}]: gamma_surface {gtxt}, "
@@ -4620,6 +4714,8 @@ def main_config():
               f"gamma_required "
               f"{history[-1]['gamma_required_median_db']:+.2f} dB",
               flush=True)
+    if args.simulate_only or args.dry_run:
+        return out   # chunks only: no run_config.json/metrics to annotate
     cfg_path = Path(out[2]) / "run_config.json"
     doc = json.loads(cfg_path.read_text())
     doc["calibration_resolution"] = cal_rec
