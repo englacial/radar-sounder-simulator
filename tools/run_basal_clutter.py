@@ -2186,6 +2186,7 @@ def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
           f"{min(est) / 1e3:.0f}-{max(est) / 1e3:.0f} k, max traces*facets "
           f"{max(len(r) * e for r, e in zip(all_chunks, est)) / 1e9:.2f} G "
           f"(budget {CHUNK_TRACE_FACETS / 1e9:.2f} G)", flush=True)
+    surf_rough = resolve_surf_rough(surf_rough, p)
     if chunks is not None:
         cfg = None
         partial = {"rids": [], "cached": [], "wall_s": 0.0,
@@ -2211,7 +2212,6 @@ def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
                 rac.chunk_cached(rid, meta, runs_dir) is not None)
         return partial
     chunks = all_chunks
-    surf_rough = resolve_surf_rough(surf_rough, p)
     if surf_rough_tag(surf_rough):
         print(f"  surface roughness: sigma {surf_rough[0] * 100:.2f} cm, "
               f"l {surf_rough[1]:.3f} m (non-fixture; chunk rid"
