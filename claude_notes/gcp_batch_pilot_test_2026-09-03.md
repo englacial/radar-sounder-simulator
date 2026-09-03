@@ -51,6 +51,12 @@ Launched jobs (delete when done: `gcloud batch jobs delete JOB --location us-cen
   david 19, pineisland_south 31, geikie 29, westcoast 25 chunks. The cloud
   runs of those lines use 1effcbb; local runs must adopt the same rule (or
   an identical n_chunks) for the keys to match.
+- 19:18Z rebased onto fc47ed6 (CHUNK_TRACE_FACETS 4e8; getz at ~1.2e9
+  actual pairs still hit 99 GB => >= 80 B/pair). With my estimate fix the
+  expected counts are the coordinator's (PIN 0 km 6, getz 0 km 9, david
+  low ~16); WITHOUT it, fc47ed6 alone still gives 3 chunks (DEM-cell
+  count) and will OOM. PIN job c (3-chunk rids) stays valid against the
+  existing local PIN results; the new-chunking PIN run is a second target.
 
 ## Environment facts found
 
