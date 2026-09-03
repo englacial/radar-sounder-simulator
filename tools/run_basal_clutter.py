@@ -1842,20 +1842,31 @@ def chunk_rows(p):
 
 
 def _chunk_facets_estimate(p, rows):
-    """Facets per interface the chunk_scene crop will hold for ``rows``:
-    the traces' bbox padded by ct + 100 m, in DEM cells (0 when the pass has
-    no reach/base yet, e.g. in unit tests without a scene)."""
+    """Facets per interface the chunk_scene crop will hold for ``rows``: the
+    crop chunk_scene makes (trace bbox padded by ct + 100 m) at the pass's
+    facet spacing -- the kernel lays facets at ``p['spacing']`` over the
+    crop's extent, so a 32 m DEM cell holds (32/7.47)^2 = 18 facets at the
+    low-altitude spacing (rac._n_facets). Falls back to one facet per DEM
+    cell without a spacing; 0 without reach/base (unit tests)."""
     base, reach = p.get("base"), p.get("reach")
     if base is None or reach is None:
         return 0
+    cell = 0.5 * (abs(base.transform.a) + abs(base.transform.e))
+    spacing = float(p.get("spacing") or cell)
     tr = Transformer.from_crs("EPSG:4326", base.crs, always_xy=True)
     nav = base.nav_llh[rows]
     px, py = tr.transform(nav[:, 1], nav[:, 0])
     pad = reach["ct_m"] + 100.0
-    cell = 0.5 * (abs(base.transform.a) + abs(base.transform.e))
-    ncol = (px.max() - px.min() + 2 * pad) / cell + 2
-    nrow = (py.max() - py.min() + 2 * pad) / cell + 2
-    return int(ncol * nrow)
+    ny, nx = base.dem.shape
+    cols, rws = (~base.transform) * (
+        np.array([px.min() - pad, px.max() + pad]),
+        np.array([py.min() - pad, py.max() + pad]))
+    c0 = int(np.clip(np.floor(min(cols)), 0, nx - 2))
+    c1 = int(np.clip(np.ceil(max(cols)) + 1, c0 + 2, nx))
+    r0 = int(np.clip(np.floor(min(rws)), 0, ny - 2))
+    r1 = int(np.clip(np.ceil(max(rws)) + 1, r0 + 2, ny))
+    return int(((r1 - r0 - 1) * cell / spacing)
+               * ((c1 - c0 - 1) * cell / spacing))
 
 
 def chunk_scene(base, rows, ct, gamma=False):
