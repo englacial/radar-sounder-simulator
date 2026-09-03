@@ -3,16 +3,66 @@
 Implements option (a) of claude_notes/gcp_compute_options_2026-09-03.md: a
 Cloud Batch task array, one VM per pass, using the chunk cache in `runs/` as
 the interface. Branch `worktree-agent-ac931ca9a50a12e0a` (on top of
-`antenna-directivity-processing` 234167d). Status: IN PROGRESS -- this note
-is updated as the run proceeds so a session restart loses nothing.
+`antenna-directivity-processing`, rebased onto ddfa899). Status: DONE
+22:26Z -- all six pilot lines simulated and processed in the cloud; NAT and
+Batch jobs deleted; the chronological log below is kept as written.
 
-## Spend tally (running; $20 budget, $15 stop line)
+## Summary
 
-| item | estimate |
-|---|---|
-| GCS staging (~5 GB, us-central1 standard, ingress free) | ~$0.10/month |
-| (jobs appended below as launched) | |
-| **total so far** | **$0.10** |
+- **Pipeline works and reproduces local results bit-for-bit.** Every chunk
+  compared (PIN 18/18 at the 3-chunk rule, getz 21/21, PIS 62/62) has an
+  identical meta_key (the runner's cache-hit rule) and max |diff| = 0.0 on
+  field / nadir_twtt / twtt; the runner prints `[skip-exists]` on copied
+  cloud chunks and re-simulates none; metrics.json scalars differ in 0 of
+  449 (PIN, PIS) / 377 (getz) keys and radargrams.png is byte-identical
+  for those three lines. david, geikie, westcoast and PIN-at-6-chunks are
+  simulated + processed in the cloud but UNVERIFIED (local campaign still
+  running; the local westcoast has no pdiv-8 result yet).
+- **Wall clock** (n2-highmem-8 Spot, 4 Ice Lake cores per chunk): per-VM
+  overhead is negligible (env 8-80 s, data 1-12 s, upload 1-12 s; VM boot
+  ~50 s); the kernel runs 1.8-2.8x slower per chunk than the local 9900X.
+  With 22-24 VMs the 178 four-line chunks took **24 min wall**; PIN +
+  westcoast (67 chunks, 8 VMs) 57 min incl. a 25-min queue wait; the
+  processing (focusing) step per line 8-56 min on one VM. End to end,
+  including three quota walls, 19:05Z -> 22:26Z.
+- **Spend** ~$8 (estimate; console will show the actual): ~26 VM-h of
+  n2-highmem-8 Spot at ~$0.28/h ≈ $7.4 (of which ~$2.5 was duplicated or
+  cancelled work while quota walls were hit), NAT ~$0.15, GCS 6 GB ~$0.12/mo,
+  egress to the local box ~4 GB ≈ $0.5. Under the $15 line; above the
+  $4.5 projection because the per-chunk slowdown was 2.5x not 1.3x and the
+  IP/CPU/SSD/instance quotas forced three relaunches.
+- **Quota walls found (project ice-infrastructure):** PREEMPTIBLE_CPUS 0
+  (Spot draws on family quota), no C3D at all, IN_USE_ADDRESSES 8/region
+  (external IPs), CPUS_ALL_REGIONS 32 global (raised to 256 by the user),
+  SSD_TOTAL_GB 500/region (pd-balanced boot disks -> now pd-standard),
+  INSTANCES 24/region. For the full campaign raise INSTANCES and (if
+  wanted) request C3D_CPUS; keep --no-external-ip + the NAT lifecycle.
+- **Runner bug found and fixed** (ddfa899 on the base branch): the
+  CHUNK_TRACE_FACETS guard counted DEM cells, 18x below the facets the
+  kernel lays at 7.47 m, so it never split the low-altitude passes.
+- **Chunking is result-neutral to ~0.1 dB**: PIN at 6 chunks (cloud) vs 3
+  chunks (local): headline metrics identical to 2 decimals; 57/449 scalar
+  keys differ by -0.06..+0.10 dB (bed-tail levels/slopes, decomposition
+  sub-terms) from the changed along-track facet windows / f32 summation.
+  Note the 0 km rids are the SAME string under both rules (n_chunks is
+  only in the meta), so the two chunkings overwrite each other in one
+  runs/ dir; the meta check keeps the cache correct.
+
+## Spend tally (final; $20 budget, $15 stop line)
+
+| item | VM-h | estimate |
+|---|---|---|
+| GCS bucket prefix batch_2026-09-03 (6.1 GB, standard, us-central1) | | $0.12/month |
+| PIN launches a+b (failed: simc dev dep; json sidecars) | 0.5 | $0.15 |
+| PIN job c (3-chunk rids, verified) | 1.3 | $0.4 |
+| 4lines (IP-capped, 56/178 then cancelled) | 3.6 | $1.0 |
+| 4lines-b + pinwc-b (SSD-capped, cancelled) | 4.5 | $1.3 |
+| 4lines-c (178 chunks, 24 min) | 8.8 | $2.5 |
+| pinwc-c (67 chunks) | 4.7 | $1.3 |
+| proc-4lines + proc-pinwc (6 lines) | 3.1 | $0.9 |
+| Cloud NAT 19:5xZ-22:25Z + data | | $0.15 |
+| egress (results synced to the local box, ~4 GB) | | $0.5 |
+| **total** | **~26** | **~$8** |
 
 Launched jobs (delete when done: `gcloud batch jobs delete JOB --location us-central1`):
 - `soundersim-sim-pin-20260903` 18:57Z: PIN, 6 pass tasks, n2-highmem-8 Spot
@@ -195,6 +245,75 @@ $15 stop line.
   westcoast result at posting_div 8 anywhere (UNVERIFIED, no local run):
   midcol_rel_surf_db p3_2016 -68.04, p3_2017 -69.53, p3_2019 -69.98,
   haps halflambda -50.76, lambda -51.12 dB; bed_visibility 0.39 / 7.65 dB.
+- PIN (6-chunk) cloud processing done 22:24Z (env 54, data 12, run 2421
+  s, upload 11 s). `soundersim-proc-pinwc-20260903` SUCCEEDED 22:25Z and
+  its launcher's finally ran `nat.py down`: **deleted NAT soundersim-nat,
+  deleted router soundersim-nat-router**; `gcloud compute routers list
+  --regions us-central1` -> Listed 0 items; `gcloud compute instances
+  list` -> 0 items. Private Google Access left enabled (free).
+- 22:27Z: deleted the five remaining Batch jobs (sim-pin-c, sim-4lines-c,
+  sim-pinwc-c, proc-4lines, proc-pinwc); the earlier ones were deleted
+  when superseded. Bucket prefix `batch_2026-09-03/` kept (6.1 GB: data
+  0.9 GB, results incl. duplicates ~5 GB) -- delete `results/` when the
+  local copies (outputs_cloud/ in this worktree, 4.1 GB) are no longer
+  needed.
+
+## Exact commands used (final form)
+
+```bash
+P=gs://ice-infrastructure-soundersim/batch_2026-09-03
+uv run python tools/gcp/stage_bundle.py --config config/experiments/pilot.yaml --lines <lines> --prefix $P
+uv run python tools/gcp/batch_launch.py --config config/experiments/pilot.yaml --lines <lines> \
+    --per-chunk --machine-type n2-highmem-8 --memory-mib 56000 --max-vms 24 --max-run-min 60 \
+    --no-external-ip --job soundersim-sim-<tag> --prefix $P            # waits; tears NAT down
+uv run python tools/gcp/batch_launch.py --config config/experiments/pilot.yaml --lines <lines> \
+    --mode process --results-from soundersim-sim-<tag> --max-vms 6 --max-run-min 90 \
+    --no-external-ip --job soundersim-proc-<tag> --prefix $P
+tools/gcp/batch_sync.sh soundersim-proc-<tag> outputs_cloud $P
+uv run python tools/gcp/compare_runs.py outputs_cloud outputs --lines <line> --exp pilot --metric-keys
+uv run python tools/gcp/nat.py status          # must show router/NAT absent
+gcloud batch jobs delete soundersim-<job> --location us-central1
+```
+
+## Problems hit (chronological)
+
+1. gcloud user login expired (org reauth) -- user re-logged.
+2. `uv sync --no-dev` on the VM: the runner imports `simc` (dev group,
+   git dep) at import time -> full sync + `apt-get install git`.
+3. DEM/BedMachine `.json` sidecars are read with Path.read_text, which the
+   staging recorder did not wrap -> wrap read_text/open too.
+4. Chunk-guard estimate 18x low (see above) -> fixed, adopted upstream.
+5. Quotas, in the order hit: IN_USE_ADDRESSES 8 -> NAT + no-external-IP
+   (user created the NAT, launcher now owns its lifecycle);
+   CPUS_ALL_REGIONS 32 -> user raised to 256; SSD_TOTAL_GB 500 ->
+   pd-standard boot disks; INSTANCES 24 -> still in place.
+6. gcsfuse writes leave zero-byte "directory" objects that break
+   `gcloud storage rsync <prefix>/` (trailing slash) -> sync without it.
+7. Batch counts under `status.taskGroups.group0.counts` lag task creation
+   (26 PENDING shown for a 178-task job for the first minute).
+
+## What remains for production (full campaign)
+
+- Raise INSTANCES (24/region) and, if C3D is wanted, request C3D_CPUS;
+  with 256 vCPU and INSTANCES 24 the cap is 24 x 8-vCPU VMs. The full
+  pdiv-8 campaign at the 4e8 chunk rule is ~10x the pilot's chunk count
+  (~2500 chunks x ~4 min / 24 VMs ≈ 7 h wall, ~70 VM-h ≈ $20 on N2 Spot).
+- Per-chunk speed: n2-highmem-8 is 1.8-2.8x slower than the local box per
+  chunk. Try n2-highmem-16 (8 cores, same 4 GB/vCPU) or C3/C3D highmem for
+  bandwidth; one chunk per VM stays the rule (up to ~55 GB at 4e8 pairs).
+- The processing step (focusing at posting_div 8) is 8-56 min per line on
+  one VM and single-process; it dominates the tail of the pipeline. Either
+  run it locally after `batch_sync.sh` (chunks hit `[skip-exists]`) or
+  give it a bigger VM.
+- `--per-chunk` needs `stage_bundle.py` run first (it saves the chunk
+  manifest); a preemption retry re-copies its job's results and skips
+  finished chunks, so retries are cheap.
+- Verification of david, geikie, westcoast and PIN-6-chunk against local
+  is pending on the local campaign; rerun
+  `compare_runs.py outputs_cloud <main outputs> --lines <line> --metric-keys`
+  when their DONE lines appear (the cloud chunks are in
+  outputs_cloud/<line>/pilot/runs/).
+- Clean `results/` under the bucket prefix when the local copies suffice.
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
