@@ -146,6 +146,17 @@ $15 stop line.
   `soundersim-sim-4lines-c-20260903` (24 VMs) and
   `soundersim-sim-pinwc-c-20260903` (8 VMs), RESULTS_FROM all earlier
   jobs so finished chunks are skipped. 32 VMs = 256 vCPU.
+- 20:44Z: 24 VMs running; next cap `INSTANCES 24/region`, so pinwc-c
+  waited (re-queued by Batch) until the four-line job drained.
+- **`soundersim-sim-4lines-c-20260903` SUCCEEDED 21:06Z: 178/178 in 1449 s
+  (24 min) wall from submit**, 22-24 concurrent VMs; the launcher's
+  teardown correctly left the NAT up (pinwc-c still active). Cloud
+  chunk sets complete: getz 21/21, david 32/32, PIS 62/62, geikie 63/63.
+- getz full verification (local DONE 20:1xZ): **21/21 chunks meta== and
+  max|diff| = 0** on field/nadir/twtt (claude_notes/logs/gcp_compare_getz.log).
+- 21:08Z: `soundersim-proc-4lines-20260903` (process mode, one task per
+  line, 4 VMs) launched for getz/david/PIS/geikie; `soundersim-sim-pinwc-c`
+  running on 8 VMs.
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
