@@ -1,0 +1,29 @@
+schema_version: 1
+meta:
+  name: pilot_haps6el_pdiv8_aliascheck
+  description: >
+    Pine Island North pilot, the two shipped six-element 60 MHz HAPS passes
+    only, simulated at posting_div 8 with product_resolution focusing. Isolates
+    slow-time density from the instrument change when comparing pilot/ against
+    pilot_haps_constrained_6el_60mhz_global_facets/ (2026-09-03).
+run:
+  line: antarctica_pineisland_north
+  segment: pilot
+  passes: [haps_14km_halflambda, haps_14km_lambda]
+  extra_passes:
+    haps_14km_halflambda: {carrier: reference, altitude_m: 14000.0, instrument: haps_60mhz_6el_halflambda}
+    haps_14km_lambda: {carrier: reference, altitude_m: 14000.0, instrument: haps_60mhz_6el_lambda}
+  bed: {nadir: picked, floating: picked, demogorgn_seed: 0}
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse: {specular_fraction: 0.5, tilt_s0_deg: 3.0}
+  physics:
+    att_db_per_km: solve
+    surface_roughness: {source: atm_exponential}
+    bed_roughness: {sigma_m: 0.10, corr_length_m: 0.886}
+  processing:
+    chain: standard
+    proc_cache: true
+    posting_div: 8
+    focus_aperture: product_resolution
+    companion: false
