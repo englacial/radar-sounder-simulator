@@ -26,8 +26,9 @@ Exactly two, identical apart from the segment, valid on every line:
 | `full` | the line's full overlap window | the study result |
 | `pilot` | 10 km, 48 traces | the same protocol, minutes per line |
 
-Both simulate the real passes as flown plus the cross-line design point
-(`haps_60mhz` at 14 and 20 km riding each line's reference pass). Anything
+Both simulate the real passes as flown plus the cross-line design points
+(`haps_60mhz_6el_halflambda` and `haps_60mhz_6el_lambda` at 14 km riding
+each line's reference pass). Anything
 line-specific (DEM, calibration, geometry) is read from the line, so the
 two files carry no per-line numbers. A one-off study is a copy of one of
 these with one thing changed; it does not get committed.
