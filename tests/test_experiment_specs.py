@@ -179,11 +179,12 @@ def test_shipped_specs_cover_every_line_with_the_same_haps_points():
         for line in sp.run.lines:
             assert sp.run.segment in rbc.LINES[line]["SEGMENTS"], (name, line)
         ep = sp.run.extra_passes
-        assert set(ep) == {"haps_14km", "haps_20km"}
-        for key, alt in (("haps_14km", 14000.0), ("haps_20km", 20000.0)):
+        assert set(ep) == {"haps_14km_halflambda", "haps_14km_lambda"}
+        for key, inst in (("haps_14km_halflambda", "haps_60mhz_6el_halflambda"),
+                          ("haps_14km_lambda", "haps_60mhz_6el_lambda")):
             assert ep[key].carrier == "reference"
-            assert ep[key].altitude_m == alt
-            assert ep[key].instrument == "haps_60mhz"
+            assert ep[key].altitude_m == 14000.0
+            assert ep[key].instrument == inst
         assert sp.run.passes is None          # real passes + extras
         assert sp.run.physics.att_db_per_km == "solve"
         assert sp.run.reflectivity.gamma_from_rssnr is True
