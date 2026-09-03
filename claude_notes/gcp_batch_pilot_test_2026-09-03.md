@@ -106,7 +106,15 @@ simulated elsewhere hits `[skip-exists]`.
 - `soundersim-sim-4lines-20260903` 19:25Z: getz+david+PIS+geikie at
   fc47ed6 + estimate fix, 178 chunk tasks (21+32+62+63), n2-highmem-8
   Spot, memory 56000 MiB (one chunk per VM), parallelism 22, maxRunDuration
-  60 min. Projection ~9 VM-h x ~$0.28 = ~$2.6.
+  60 min. Projection ~9 VM-h x ~$0.28 = ~$2.6. Progress: 21/178 at
+  19:49Z (~0.9 tasks/min at the 4-VM level Batch actually reached).
+- `soundersim-sim-pinwc-20260903` 19:50Z: PIN at the 6-chunk rule (27
+  chunk tasks) + westcoast (49), same VM policy. Projection ~3.7 VM-h
+  ~$1.0. Shares the 8-IP cap with the job above.
+
+Tally at 19:50Z: spent ~$0.6 (two failed PIN launches $0.15, PIN job c
+$0.4, storage); committed/projected ~$3.6 more => ~$4.2 total, under the
+$15 stop line.
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
