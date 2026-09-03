@@ -14,7 +14,10 @@ changes; `run_level`'s hit rule is a pure meta equality with no host paths.
 - Local caches for the lines you stage (`outputs/cache/*.nc|*.tif`,
   `outputs/<line>/rssnr_anchor.npz`) -- the run reads them cache-first.
 - Quotas (2026-09-03): `PREEMPTIBLE_CPUS` 0 => Spot VMs draw on the family
-  quota (`N2_CPUS` 200, `C2D_CPUS` 100, `C3_CPUS` 24); no C3D quota.
+  quota (`N2_CPUS` 200, `C2D_CPUS` 100, `C3_CPUS` 24); no C3D quota. The
+  binding limits were **`CPUS_ALL_REGIONS` 32 (global; 4 x 8-vCPU VMs)**
+  and `IN_USE_ADDRESSES` 8 per region (external IPs; see the NAT section).
+  Raise CPUS_ALL_REGIONS before expecting more than four VMs.
 
 ## Workflow
 
