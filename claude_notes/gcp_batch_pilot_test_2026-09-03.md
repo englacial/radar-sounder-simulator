@@ -115,6 +115,19 @@ simulated elsewhere hits `[skip-exists]`.
 Tally at 19:50Z: spent ~$0.6 (two failed PIN launches $0.15, PIN job c
 $0.4, storage); committed/projected ~$3.6 more => ~$4.2 total, under the
 $15 stop line.
+- 20:19Z: user created the Cloud NAT (soundersim-nat on
+  soundersim-nat-router, us-central1) + Private Google Access. Deleted the
+  two IP-capped jobs (4lines at 56/178 done after 54 min = ~3.6 VM-h ~$1.0;
+  pinwc had not started) and relaunched with `--no-external-ip`:
+  `soundersim-sim-4lines-b-20260903` (178 tasks, 16 VMs, RESULTS_FROM the
+  old job so its 56 chunks are copied in and skipped) and
+  `soundersim-sim-pinwc-b-20260903` (67 tasks, 8 VMs). Both launchers
+  wait and run `nat.py down` in a finally (the last one to finish deletes).
+  NAT cost ~$0.044/h while up.
+- getz verification (local DONE 20:1xZ, exit 0, 2506 s): the 7 cloud chunks
+  available before the relaunch (dc8_2016_0km c00-c02 of 9, dc8_2016_11km
+  c00-c02, haps_14km_lambda c02) are meta== and max|diff| = 0 on
+  field/nadir/twtt; cloud/local wall 186-262 / 80-140 s (2.0-2.5x).
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
