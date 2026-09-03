@@ -184,6 +184,22 @@ def main():
     if a.dry:
         print(json.dumps(spec, indent=1))
         return
+    if a.no_external_ip:
+        # the NAT costs while it exists: bring it up here and ALWAYS tear it
+        # down (finally) once this job is done -- so the launcher waits
+        import nat
+        nat.up()
+        a.wait = True
+    try:
+        submit(a, tasks, spec, job)
+        if a.wait:
+            print("final state:", wait(job))
+    finally:
+        if a.no_external_ip:
+            nat.down()   # skipped with a warning while other jobs run
+
+
+def submit(a, tasks, spec, job):
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         (td / "tasks.txt").write_text(
@@ -203,8 +219,6 @@ def main():
         gs("batch", "jobs", "submit", job, f"--location={REGION}",
            f"--config={td / 'job.json'}")
     print(f"submitted {job}; results -> {a.prefix}/results/{job}/outputs/")
-    if a.wait:
-        print("final state:", wait(job))
 
 
 if __name__ == "__main__":
