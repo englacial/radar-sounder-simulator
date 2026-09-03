@@ -113,7 +113,8 @@ def job_spec(a, n_tasks, bucket, path, job):
             "instances": [{"policy": {
                 "machineType": a.machine_type,
                 "provisioningModel": a.provisioning,
-                "bootDisk": {"sizeGb": 40, "type": "pd-balanced"}}}],
+                "bootDisk": {"sizeGb": a.boot_disk_gb,
+                             "type": a.boot_disk_type}}}],
             # external IPs are capped by IN_USE_ADDRESSES (8/region here):
             # --no-external-ip needs Private Google Access + a Cloud NAT on
             # the subnet (uv/PyPI/GitHub) to lift the VM count to the quota
@@ -159,6 +160,9 @@ def main():
                     help="per task; set near the VM's memory so Batch never "
                     "packs two chunk simulations onto one VM")
     ap.add_argument("--max-vms", type=int, default=24)
+    # pd-standard: SSD_TOTAL_GB (500/region) capped pd-balanced at 12 VMs
+    ap.add_argument("--boot-disk-type", default="pd-standard")
+    ap.add_argument("--boot-disk-gb", type=int, default=30)
     ap.add_argument("--no-external-ip", action="store_true",
                     help="VMs without external IPs (needs Private Google "
                     "Access + Cloud NAT on the default subnet)")

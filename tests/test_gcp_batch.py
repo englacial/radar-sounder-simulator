@@ -92,7 +92,7 @@ def test_job_spec_one_task_per_vm_and_spot():
         config="c.yaml", results_from=["j0"], max_vms=4, cpu_milli=8000,
         memory_mib=56000, max_run_min=90, retries=2,
         machine_type="n2-highmem-8", provisioning="SPOT",
-        no_external_ip=True)
+        no_external_ip=True, boot_disk_type="pd-standard", boot_disk_gb=30)
     s = batch_launch.job_spec(a, 6, "bucket", "prefix", "job")
     tg = s["taskGroups"][0]
     assert tg["taskCount"] == 6 and tg["parallelism"] == 4
