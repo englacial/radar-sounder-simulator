@@ -1,0 +1,43 @@
+schema_version: 1
+meta:
+  name: full
+  description: >
+    Pine Island North full window with the 2014 and 2016 low-altitude DC-8
+    passes temporarily removed (2026-09-03): the reference pass dc8_2018_0km,
+    the 2012 9 km pass and the two six-element HAPS design points. Same
+    settings as config/experiments/full.yaml; named `full` so its chunk and
+    processing caches are reused by a later complete full run.
+    Run: tools/run_basal_clutter.py --config claude_notes/pin_full_no_2014_2016.yaml
+    --line antarctica_pineisland_north
+
+run:
+  line: antarctica_pineisland_north
+  segment: full
+  passes: [dc8_2018_0km, dc8_2012_9km, haps_14km_halflambda, haps_14km_lambda]
+
+  extra_passes:
+    haps_14km_halflambda: {carrier: reference, altitude_m: 14000.0,
+                           instrument: haps_60mhz_6el_halflambda}
+    haps_14km_lambda: {carrier: reference, altitude_m: 14000.0,
+                       instrument: haps_60mhz_6el_lambda}
+
+  bed:
+    nadir: picked
+    floating: picked
+    demogorgn_seed: 0
+
+  reflectivity:
+    gamma_from_rssnr: true
+    specular_diffuse: {specular_fraction: 0.5, tilt_s0_deg: 3.0}
+
+  physics:
+    att_db_per_km: solve
+    surface_roughness: {source: atm_exponential}
+    bed_roughness: {sigma_m: 0.10, corr_length_m: 0.886}
+
+  processing:
+    chain: standard
+    proc_cache: true
+    posting_div: 8
+    focus_aperture: product_resolution
+    companion: false
