@@ -177,6 +177,12 @@ $15 stop line.
   dB); radargrams.png byte-identical (md5 60dbaecbbfbccf60c562c12b4ae74fe5).
 - 21:44Z: `soundersim-proc-pinwc-20260903` (process PIN + westcoast, 2
   tasks) launched.
+- geikie cloud processing done 21:54Z (env 23, data 9, **run 2604 s**,
+  upload 7 s -- focusing 63 chunks / 4 passes dominates); cloud kernel
+  wall summed 15666 s (p3_2014_low 8327 s over 33 chunks, p3_2017_high
+  5947 s over 24). Cloud metrics (UNVERIFIED, geikie not DONE locally):
+  midcol_rel_surf_db p3_2014_low -74.52, p3_2017_high -64.00, haps
+  halflambda -54.34, lambda -54.52 dB; bed_visibility 18.74 / 20.44 dB.
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
