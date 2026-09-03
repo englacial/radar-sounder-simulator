@@ -56,6 +56,30 @@ Or skip step 3: `batch_sync.sh JOB outputs` into the real `outputs/` and run
 `results/<job>/timing/task_N.json` (env, data, run, upload seconds) and the
 chunk jsons carry `wall_s`.
 
+## VM count, external IPs and the Cloud NAT
+
+External IPs are capped by `IN_USE_ADDRESSES` (8 per region in this project),
+so a job with external IPs runs at most ~8 VMs regardless of CPU quota. Pass
+`--no-external-ip` to lift that: VMs then reach GCS/Batch/logging through
+Private Google Access on the default subnet (free, enabled once and left on)
+and the few internet fetches (uv installer, PyPI wheels, the simc git
+dependency) through a Cloud NAT `soundersim-nat` on router
+`soundersim-nat-router` in us-central1.
+
+The NAT costs ~$0.044/h while it exists (+ $0.045/GB processed, PyPI traffic
+only), so its lifetime is tied to the launcher: `--no-external-ip` runs
+`nat.py up` (idempotent) before submitting, forces `--wait`, and runs
+`nat.py down` in a `finally` when the wait ends or the launcher is
+interrupted. `down` deletes the NAT and router unless another soundersim job
+is still QUEUED/SCHEDULED/RUNNING in the region (then it prints a warning and
+leaves the gateway for that job). Manual control:
+
+```bash
+uv run python tools/gcp/nat.py status   # shows a leftover router/NAT
+uv run python tools/gcp/nat.py down     # --force to delete while jobs run
+gcloud compute routers list --regions us-central1   # must show no soundersim-*
+```
+
 ## Runner flags added for this
 
 - `--simulate-only PASS[:c0,c1] ...` simulate those chunks into runs/, exit.

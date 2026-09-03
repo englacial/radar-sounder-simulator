@@ -13,6 +13,52 @@ sys.path.insert(0, str(ROOT / "tools" / "gcp"))
 import run_altitude_comparison as rac  # noqa: E402
 import batch_launch  # noqa: E402
 import compare_runs  # noqa: E402
+import nat  # noqa: E402
+
+
+class _Run:
+    """Fake gcloud: records calls, answers describe/list from a table."""
+    def __init__(self, exists, jobs):
+        self.exists, self.jobs, self.calls = exists, jobs, []
+
+    def __call__(self, *args, check=True):
+        self.calls.append(args)
+        r = type("R", (), {"returncode": 0, "stdout": ""})()
+        if "describe" in args:
+            name = args[args.index("describe") + 1]
+            r.returncode = 0 if name in self.exists else 1
+            r.stdout = "True\n" if name == "default" else ""
+        if args[:3] == ("batch", "jobs", "list"):
+            r.stdout = json.dumps([{"name": f"projects/p/jobs/{n}",
+                                    "status": {"state": s}}
+                                   for n, s in self.jobs])
+        return r
+
+
+def test_nat_down_refuses_while_jobs_run(monkeypatch):
+    fake = _Run(exists={"default", "soundersim-nat-router", "soundersim-nat"},
+                jobs=[("soundersim-sim-x", "RUNNING"), ("psc-1", "RUNNING"),
+                      ("soundersim-old", "SUCCEEDED")])
+    monkeypatch.setattr(nat, "_run", fake)
+    assert nat.active_jobs() == ["soundersim-sim-x"]
+    assert nat.down() is False
+    assert not any("delete" in c for c in fake.calls)
+    assert nat.down(force=True) is True
+    deleted = [c[c.index("delete") + 1] for c in fake.calls if "delete" in c]
+    assert deleted == ["soundersim-nat", "soundersim-nat-router"]
+
+
+def test_nat_up_is_idempotent(monkeypatch):
+    fake = _Run(exists={"default", "soundersim-nat-router", "soundersim-nat"},
+                jobs=[])
+    monkeypatch.setattr(nat, "_run", fake)
+    nat.up()
+    assert not any(("create" in c) or ("update" in c) for c in fake.calls)
+    fake2 = _Run(exists={"default"}, jobs=[])
+    monkeypatch.setattr(nat, "_run", fake2)
+    nat.up()
+    assert [c[c.index("create") + 1] for c in fake2.calls if "create" in c] \
+        == ["soundersim-nat-router", "soundersim-nat"]
 
 
 def _write_chunk(runs, rid, meta, field):
@@ -45,7 +91,8 @@ def test_job_spec_one_task_per_vm_and_spot():
     a = batch_launch.argparse.Namespace(
         config="c.yaml", results_from=["j0"], max_vms=4, cpu_milli=8000,
         memory_mib=56000, max_run_min=90, retries=2,
-        machine_type="n2-highmem-8", provisioning="SPOT")
+        machine_type="n2-highmem-8", provisioning="SPOT",
+        no_external_ip=True)
     s = batch_launch.job_spec(a, 6, "bucket", "prefix", "job")
     tg = s["taskGroups"][0]
     assert tg["taskCount"] == 6 and tg["parallelism"] == 4
@@ -59,6 +106,11 @@ def test_job_spec_one_task_per_vm_and_spot():
     pol = s["allocationPolicy"]["instances"][0]["policy"]
     assert pol["provisioningModel"] == "SPOT"
     assert pol["machineType"] == "n2-highmem-8"
+    nic = s["allocationPolicy"]["network"]["networkInterfaces"][0]
+    assert nic["noExternalIpAddress"] is True
+    a.no_external_ip = False
+    assert "network" not in batch_launch.job_spec(a, 6, "b", "p", "j")[
+        "allocationPolicy"]
 
 
 def test_compare_chunks_reports_meta_and_array_diffs(tmp_path):
