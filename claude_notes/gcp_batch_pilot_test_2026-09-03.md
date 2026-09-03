@@ -183,6 +183,12 @@ $15 stop line.
   5947 s over 24). Cloud metrics (UNVERIFIED, geikie not DONE locally):
   midcol_rel_surf_db p3_2014_low -74.52, p3_2017_high -64.00, haps
   halflambda -54.34, lambda -54.52 dB; bed_visibility 18.74 / 20.44 dB.
+- `soundersim-proc-4lines-20260903` SUCCEEDED 22:04Z (PIS processing was
+  the long pole). **pineisland_south verified end-to-end** (local DONE
+  22:04Z, exit 0, 6424 s): 62/62 chunks meta== and max|diff| = 0;
+  metrics.json 449 shared scalars, 0 differ; radargrams.png byte-identical
+  (md5 372f86a11e48611e0f7e6407a476bb1c). Kernel wall summed over the 62
+  chunks: cloud 14353 s vs local 5195 s (2.76x per chunk on n2-highmem-8).
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
