@@ -39,7 +39,7 @@ def test_chunk_rows_splits_further_on_trace_facet_budget():
     s_sim = np.linspace(0.0, 10_000.0, 5409)
     n_track = len(rbc.chunk_rows({"s_sim": s_sim, "proc": True}))
     small = {"s_sim": s_sim, "proc": True, "base": base,
-             "reach": {"ct_m": 1882.0}}       # the pineisland_north 0 km case
+             "reach": {"ct_m": 300.0}}        # ~1e8 pairs: under budget
     big = {"s_sim": s_sim, "proc": True, "base": base,
            "reach": {"ct_m": 3714.0}}         # the david basler_2017 case
     assert len(rbc.chunk_rows(small)) == n_track

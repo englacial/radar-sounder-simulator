@@ -268,13 +268,16 @@ RADARGRAM_PCT: tuple = ()              # per_panel robust scaling limits
 CHUNK_M: float = 0.0                   # along-track chunk target
 FACET_SPACING_SCALE: float = 0.0       # default lattice refinement (<= 1)
 CHUNK_M_PROC: float = 0.0              # ... at fine posting
-# Per-chunk memory guard. Measured 2026-09-03 at posting_div 8 (~1800
-# traces/chunk): pineisland_north 0.56 M facets/interface/chunk ran,
-# westcoast 1.35 M was OOM-killed at 110 GB, david 1.63 M at 100 GB -- the
-# kernels' footprint grows as traces x facets (~50 B per pair). Chunks are
-# split further until traces * facets_per_interface (estimated from the
-# chunk_scene crop) fits this budget; 1.1e9 keeps pineisland_north at 3.
-CHUNK_TRACE_FACETS: float = 1.1e9
+# Per-chunk memory guard. Measured 2026-09-03 at posting_div 8: the kernels'
+# resident set grows as traces x facets_per_interface per chunk -- getz 0 km
+# at ~1.2e9 pairs and david at ~2.9e9 were OOM-killed at 100 GB, westcoast
+# at ~2.4e9 at 110 GB, i.e. >= 80 B per pair (the pineisland_north 3-chunk
+# run at ~1.0e9 pairs survived, barely). Chunks are split further until
+# traces * facets_per_interface, estimated from the chunk_scene crop (which
+# under-reads the real crop by ~20 % on non-axis-aligned tracks), fits this
+# budget: ~4e8 estimated pairs keeps a chunk under ~60 GB. At posting_div 8
+# that is ~6 chunks per pineisland_north 0 km pass, ~9 getz, ~16 david.
+CHUNK_TRACE_FACETS: float = 4.0e8
 
 ANALYSIS = clutter_analysis.load_analysis()
 ANALYSIS_GLOBALS = tuple(sorted(ANALYSIS.to_globals()))
