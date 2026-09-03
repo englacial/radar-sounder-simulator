@@ -165,6 +165,18 @@ $15 stop line.
   -55.80, baslermkb_2022 -55.71, baslermkb_2023 -55.72, haps_halflambda
   -48.83, haps_lambda -51.78 dB; bed_visibility halflambda 8.92, lambda
   14.35 dB.
+- **`soundersim-sim-pinwc-c-20260903` SUCCEEDED 21:40Z: 67/67 in 3422 s
+  (57 min incl. ~25 min queued behind the INSTANCES cap)**; cloud chunk
+  sets now complete for all six lines: PIN 27/27 (6-chunk rule),
+  westcoast 49/49. NAT again correctly left up (proc job active).
+- **getz end-to-end in the cloud**: the process task's metrics.json vs the
+  local run: 377 shared scalar keys, 0 differ (e.g. clutter_dc8_2016_0km
+  midcol -67.14 / -67.14, dc8_2016_9km -43.06 / -43.06, dc8_2016_11km
+  -41.73 / -41.73, haps halflambda -47.11 / -47.11, lambda -47.89 /
+  -47.89 dB; bed_visibility halflambda 5.79 / 5.79, lambda 34.84 / 34.84
+  dB); radargrams.png byte-identical (md5 60dbaecbbfbccf60c562c12b4ae74fe5).
+- 21:44Z: `soundersim-proc-pinwc-20260903` (process PIN + westcoast, 2
+  tasks) launched.
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
