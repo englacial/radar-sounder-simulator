@@ -18,6 +18,29 @@ Launched jobs (delete when done: `gcloud batch jobs delete JOB --location us-cen
 - `soundersim-sim-pin-20260903` 18:57Z: PIN, 6 pass tasks, n2-highmem-8 Spot
   (~$0.19/h est.), memory 56000 MiB/task (one task per VM), maxRunDuration
   90 min -> worst case 6 x 1.5 h x $0.19 = $1.7; expected ~$0.5.
+  FAILED at 18:59Z after ~2 min/task (ModuleNotFoundError simc: the runner
+  imports the dev-group git dependency at import time; `uv sync --no-dev`
+  was wrong) -- deleted 19:00Z. Spend ~6 VM x 3 min = $0.06.
+- `soundersim-sim-pin-20260903b` 19:00Z: same job with full `uv sync` +
+  git installed on the VM (commit 360145e). VMs up 60 s after submit, tasks
+  started 19:01:31Z, env ready 19:03:40Z (uv install + full sync ~2 min),
+  then FileNotFoundError on `bedmachine_*.json` (the DEM/BedMachine
+  sidecars are read with Path.read_text, which the recorder did not wrap).
+  Deleted 19:04Z. Spend ~6 VM x 4 min = $0.08.
+- (main checkout meanwhile added a CHUNK_TRACE_SAMPLES = 7e6 memory guard
+  to chunk_rows; ported verbatim in 198c8e3 so keys match. PIN/david/getz
+  keep 3 chunks per pass; PIS 0 km passes -> 5, geikie -> 4, westcoast
+  p3_2016 -> 7.)
+- `soundersim-sim-pin-20260903c` 19:05Z: PIN again with sidecars staged,
+  n2-highmem-8 Spot, 6 tasks. Tasks started 19:05:54Z (50 s after submit);
+  per task env 8 s, data 3 s, upload 2 s; HAPS chunk 63.5 s vs 31.9 s local
+  (2.0x slower per VM: 4 Ice Lake cores, shared DDR4).
+- 19:12Z rebased onto 8143bb7 (CHUNK_TRACE_FACETS = 1.1e9: chunks split
+  until traces x facets/interface fits; PIN stays 3/pass so job c stays
+  valid; getz ~4, david ~7, westcoast ~6). Coordinator's memory model:
+  ~50 B per trace-facet pair, peak late in the chunk. Local getz chunk
+  observed at 83 GB under the new rule (19:13Z) => 128 GB VMs
+  (n2-highmem-16) for the other lines, one chunk per VM.
 
 ## Environment facts found
 
