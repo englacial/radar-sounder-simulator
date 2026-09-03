@@ -23,9 +23,13 @@ DEFAULT_PREFIX = "gs://ice-infrastructure-soundersim/batch_2026-09-03"
 
 
 def record_opens(seen):
-    """Wrap the three readers the tool uses on cached inputs (netCDF via
-    xarray, GeoTIFF via rasterio, npz via numpy) so their paths land in
-    ``seen`` as outputs/-relative strings."""
+    """Wrap the readers the tool uses on cached inputs -- netCDF via xarray,
+    GeoTIFF via rasterio, npz via numpy (all C-level opens the audit hook
+    cannot see) plus Path.read_text/open for the json sidecars -- so their
+    paths land in ``seen`` as outputs/-relative strings."""
+    import builtins
+    import pathlib
+
     import numpy as np
     import rasterio
     import xarray as xr
@@ -48,6 +52,8 @@ def record_opens(seen):
     wrap(xr, "open_dataset")
     wrap(rasterio, "open")
     wrap(np, "load")
+    wrap(pathlib.Path, "read_text")
+    wrap(builtins, "open")
 
 
 def line_inputs(config, line):
