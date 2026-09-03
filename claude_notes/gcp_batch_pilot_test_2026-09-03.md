@@ -124,3 +124,27 @@ all 18 chunks `meta==` (cloud meta_key == local meta_key, i.e. the runner's
 cache-hit rule holds) and **max |diff| = 0.0 on field, nadir_twtt and twtt**
 -- bit-identical between the Zen 5 box and Ice Lake N2 VMs (same jaxlib
 0.10.2 CPU wheel, XLA:CPU deterministic here).
+
+Rids compared (all `<pass>_pilot_pbed_dgn_rssnr_proc_c0{0,1,2}_srough_sr0.0655_1.67_exp_att13.03_brough0.1_0.886_pdiv8_fs0.5_s03_n1_gfx0.05_<inst>[_wchirp]`):
+dc8_2014_0km, dc8_2016_0km, dc8_2018_0km (`_ia8034a068`), dc8_2012_9km
+(`_iac8e5ee53`), haps_14km_halflambda (`_ia62093eda_wchirp`),
+haps_14km_lambda (`_iac6d87c48_wchirp`); 3 chunks each = 18.
+
+Runner cache-hit on the copied cloud chunks: the normal runner (worktree,
+3-chunk budget forced via claude_notes/logs/process_pin_3chunk.py, cloud
+npz+json dropped into outputs/antarctica_pineisland_north/pilot/runs/)
+printed `[skip-exists]` for every chunk and `[ok]` (re-simulation) for none;
+it went straight to focusing/analysis/figures (log
+claude_notes/logs/gcp_process_pin_local.log).
+
+## Job soundersim-sim-4lines-20260903 (getz/david/PIS/geikie, 178 chunk tasks)
+
+Launched 19:25Z at the ddfa899-equivalent chunking (getz 9 3 3 3 3, david
+16 5 5 3 3, PIS 17 18 18 3 3 3, geikie 33 24 3 3). Batch reported
+`CODE_GCE_QUOTA_EXCEEDED: Quota 'IN_USE_ADDRESSES' exceeded. Limit: 8.0 in
+region us-central1` -- the fan-out is capped at ~8 VMs by external IPs, not
+CPUs. Lifting it needs VMs without external IPs = Private Google Access +
+Cloud NAT on the default subnet (launcher now has `--no-external-ip`);
+creating those was blocked by the permission classifier in this session and
+is left to the user (or an IN_USE_ADDRESSES quota increase). Running at
+the cap (option c): ~4 min per heavy chunk, 3-4 concurrent at 19:33Z.
