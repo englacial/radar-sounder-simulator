@@ -114,6 +114,13 @@ def job_spec(a, n_tasks, bucket, path, job):
                 "machineType": a.machine_type,
                 "provisioningModel": a.provisioning,
                 "bootDisk": {"sizeGb": 40, "type": "pd-balanced"}}}],
+            # external IPs are capped by IN_USE_ADDRESSES (8/region here):
+            # --no-external-ip needs Private Google Access + a Cloud NAT on
+            # the subnet (uv/PyPI/GitHub) to lift the VM count to the quota
+            **({"network": {"networkInterfaces": [{
+                "network": "global/networks/default",
+                "subnetwork": f"regions/{REGION}/subnetworks/default",
+                "noExternalIpAddress": True}]}} if a.no_external_ip else {}),
             "location": {"allowedLocations": [f"regions/{REGION}"]}},
         "logsPolicy": {"destination": "CLOUD_LOGGING"}}
 
@@ -152,6 +159,9 @@ def main():
                     help="per task; set near the VM's memory so Batch never "
                     "packs two chunk simulations onto one VM")
     ap.add_argument("--max-vms", type=int, default=24)
+    ap.add_argument("--no-external-ip", action="store_true",
+                    help="VMs without external IPs (needs Private Google "
+                    "Access + Cloud NAT on the default subnet)")
     ap.add_argument("--max-run-min", type=int, default=120)
     ap.add_argument("--retries", type=int, default=2)
     ap.add_argument("--wait", action="store_true")
