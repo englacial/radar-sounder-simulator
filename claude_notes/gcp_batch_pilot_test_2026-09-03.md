@@ -128,6 +128,15 @@ $15 stop line.
   available before the relaunch (dc8_2016_0km c00-c02 of 9, dc8_2016_11km
   c00-c02, haps_14km_lambda c02) are meta== and max|diff| = 0 on
   field/nadir/twtt; cloud/local wall 186-262 / 80-140 s (2.0-2.5x).
+- 20:25Z: the no-external-IP jobs run through the NAT (env 72-82 s incl.
+  uv install + full sync via NAT; earlier chunks copied in and skipped,
+  run 9-11 s) but are STILL 4 VMs: Batch now reports `Quota
+  'CPUS_ALL_REGIONS' exceeded. Limit: 32.0 globally` -- a project-wide cap
+  (4 x 8 vCPU) that the regional N2_CPUS=200 sits under. The IP cap was
+  never the binding one for 8-vCPU VMs. Raising CPUS_ALL_REGIONS (console
+  quota request) is the only way to more parallelism; the running jobs
+  pick a raised quota up automatically. Continuing at 4 VMs (cost is the
+  same; ETA ~23:10Z for everything).
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
