@@ -41,6 +41,16 @@ Launched jobs (delete when done: `gcloud batch jobs delete JOB --location us-cen
   ~50 B per trace-facet pair, peak late in the chunk. Local getz chunk
   observed at 83 GB under the new rule (19:13Z) => 128 GB VMs
   (n2-highmem-16) for the other lines, one chunk per VM.
+- **BUG in 8143bb7 (needs the coordinator's attention):** its
+  `_chunk_facets_estimate` counts 32 m DEM cells, but the kernel lays facets
+  at the pass spacing (rac._n_facets: (32/7.47)^2 = 18 facets per cell), so
+  the guard never split the low-altitude passes: my --dry-run under 8143bb7
+  gave david/getz 3 chunks/pass, and the local getz run was OOM-killed again
+  at 19:14Z (exit 137, 568 s, 83 GB seen). Fixed in 1effcbb (crop extent /
+  spacing^2): PIN stays 18 chunks (18/18 cached, rids unchanged); getz 17,
+  david 19, pineisland_south 31, geikie 29, westcoast 25 chunks. The cloud
+  runs of those lines use 1effcbb; local runs must adopt the same rule (or
+  an identical n_chunks) for the keys to match.
 
 ## Environment facts found
 
