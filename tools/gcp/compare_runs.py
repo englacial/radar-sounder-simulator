@@ -81,6 +81,10 @@ def main():
                 print(f"  {rid}: {st}")
                 continue
             f = worst.get("field")
+            if f[0] == "shape":
+                print(f"  {rid[:40]}..: {st}  field shape {f[1]} vs {f[2]} "
+                      f"(same rid, different chunking)")
+                continue
             print(f"  {rid[:40]}..: {st}  field max|d| {f[0]:.3e} "
                   f"rel {f[1]:.2e}  nadir {worst['nadir_twtt'][0]:.2e} s  "
                   f"twtt {worst['twtt'][0]:.2e} s  wall cloud/local "
