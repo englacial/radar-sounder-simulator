@@ -18,12 +18,15 @@ echo "task $BATCH_TASK_INDEX: $mode $line $pass -> $outdir ($(hostname), $(nproc
 
 export HOME=/root PATH="/root/.local/bin:$PATH" UV_CACHE_DIR=/root/uv-cache
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
+# the dev group is needed (the runner imports simc at import time) and
+# simc is a git dependency, so the VM needs git
+command -v git >/dev/null || { apt-get update -q >/dev/null; apt-get install -y -q git >/dev/null; }
 W=/root/soundersim; mkdir -p "$W"; cd "$W"
 # the job's own repo snapshot (a VM may serve several tasks; extract once/job)
 if [ "$(cat .job 2>/dev/null || true)" != "$JOB" ]; then
   rm -rf src tools config tests docs; tar xzf "$J/repo.tar.gz"; echo "$JOB" > .job
 fi
-uv sync -q --no-dev -p 3.13
+uv sync -q -p 3.13
 t1=$(date +%s)
 
 # the line's inputs (manifest from tools/gcp/stage_bundle.py), cache-first

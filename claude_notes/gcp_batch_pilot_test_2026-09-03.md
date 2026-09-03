@@ -50,7 +50,7 @@ Launched jobs (delete when done: `gcloud batch jobs delete JOB --location us-cen
   (xarray/rasterio/numpy readers wrapped) and uploads them + a per-line
   manifest, no-clobber.
 - `tools/gcp/batch_task.sh`: the VM-side task (uv install, repo tarball,
-  `uv sync --no-dev -p 3.13`, line inputs from the GCS mount, copy-in of
+  `uv sync -p 3.13` (dev group too: the runner imports simc), line inputs from the GCS mount, copy-in of
   earlier results, run, mirror new outputs/ files back, timing json).
 - `tools/gcp/batch_launch.py`: builds tasks.txt (one pass per task or one
   line per task in `--mode process`), uploads `git archive HEAD`, submits
