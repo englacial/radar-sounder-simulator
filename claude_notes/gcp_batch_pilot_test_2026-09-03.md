@@ -156,7 +156,15 @@ $15 stop line.
   max|diff| = 0** on field/nadir/twtt (claude_notes/logs/gcp_compare_getz.log).
 - 21:08Z: `soundersim-proc-4lines-20260903` (process mode, one task per
   line, 4 VMs) launched for getz/david/PIS/geikie; `soundersim-sim-pinwc-c`
-  running on 8 VMs.
+  running on 8 VMs. Process tasks hit the cache on every chunk
+  (`[skip-exists]` x all, `[ok]` x 0, no errors).
+- david cloud processing done 21:19Z (env 38 s, data 7 s, run 449 s,
+  upload 7 s); cloud kernel wall summed over its 32 chunks 6512 s
+  (basler_2017 4210 s over 16 chunks). Cloud metrics (UNVERIFIED: david
+  not yet DONE locally): clutter_*/sim/midcol_rel_surf_db basler_2017
+  -55.80, baslermkb_2022 -55.71, baslermkb_2023 -55.72, haps_halflambda
+  -48.83, haps_lambda -51.78 dB; bed_visibility halflambda 8.92, lambda
+  14.35 dB.
 
 ## PIN job c (3-chunk rids) -- SUCCEEDED 19:25:38Z, 20.5 min wall
 
