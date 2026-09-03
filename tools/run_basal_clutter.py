@@ -2163,6 +2163,12 @@ def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
     """Chunked cached coherent surface+bed runs; assembled per-layer fields.
     Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...)."""
     chunks = chunk_rows(p)
+    est = [_chunk_facets_estimate(p, r) for r in chunks]
+    print(f"  chunks: {len(chunks)} x {min(len(r) for r in chunks)}-"
+          f"{max(len(r) for r in chunks)} traces, est facets/interface "
+          f"{min(est) / 1e3:.0f}-{max(est) / 1e3:.0f} k, max traces*facets "
+          f"{max(len(r) * e for r, e in zip(chunks, est)) / 1e9:.2f} G "
+          f"(budget {CHUNK_TRACE_FACETS / 1e9:.2f} G)", flush=True)
     surf_rough = resolve_surf_rough(surf_rough, p)
     if surf_rough_tag(surf_rough):
         print(f"  surface roughness: sigma {surf_rough[0] * 100:.2f} cm, "
