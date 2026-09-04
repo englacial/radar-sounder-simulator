@@ -1216,6 +1216,22 @@ def first_fresnel_aperture(lam, r_ref_m):
     return float(length), float(np.degrees(theta))
 
 
+def fixed_angle_aperture(r_ref_m, half_angle_deg):
+    """Aperture length for a fixed Doppler half-angle at reference range."""
+    theta = np.radians(half_angle_deg)
+    return 2.0 * r_ref_m * np.tan(theta), float(half_angle_deg)
+
+
+def product_resolution_looks(lam, spacing, posting_div, r_ref_m, n_min):
+    """Incoherent looks (sim traces) that degrade a wide-band focused image
+    to the azimuth resolution of the alias-limited aperture at the ORIGINAL
+    product posting (the product_resolution rule's resolution), never fewer
+    than ``n_min``. Returns (n_looks, product_res_m)."""
+    L_prod, _ = alias_limited_aperture(lam, spacing * posting_div, r_ref_m)
+    res_prod = 1.44 * lam * r_ref_m / (2.0 * L_prod)
+    return max(int(n_min), int(round(res_prod / spacing))), float(res_prod)
+
+
 def _proc_ds(F2, twtt, s, lam):
     """Minimal coherent Dataset wrapper for soundersim.processing: field
     (slow_time, twtt) + straight-track positions x = along-track arc length
@@ -1255,9 +1271,18 @@ def straightness_stats(x, y, z_smooth_resid, win_n):
                 z_smooth_resid ** 2))), 3)}
 
 
-def process_standard(p, sim, focus_aperture="alias_limited"):
+def process_standard(p, sim, focus_aperture="alias_limited",
+                     focus_half_angle_deg=5.0):
     """Apply the CSARP_standard-matching chain (section comment) to the
-    assembled per-layer fields. Returns dict(P, Ps, Pb, twtt, chain)."""
+    assembled per-layer fields. Returns dict(P, Ps, Pb, twtt, chain).
+
+    ``fixed_angle`` focuses with a Doppler band of +-``focus_half_angle_deg``
+    (wide enough that the along-track tilt of 32 m facets, whose coherent
+    lobe is ~lambda/L wide, does not gate their return -- the
+    product_resolution band did, striping the 195 MHz passes at
+    posting_div 8) and then multilooks the power down to the azimuth
+    resolution the product_resolution rule would have given, so measured
+    and simulated columns compare at matched resolution."""
     from soundersim import processing as proc
 
     F = sim["field"]                       # (T, nb, 2) complex64
@@ -1273,9 +1298,15 @@ def process_standard(p, sim, focus_aperture="alias_limited"):
         L, theta_deg = alias_limited_aperture(lam, base_spacing, r_bed)
     elif focus_aperture == "first_fresnel":
         L, theta_deg = first_fresnel_aperture(lam, r_bed)
+    elif focus_aperture == "fixed_angle":
+        L, theta_deg = fixed_angle_aperture(r_bed, focus_half_angle_deg)
     else:
         raise ValueError(f"unknown focus aperture {focus_aperture!r}")
     r_surf = float(C * np.nanmedian(p["surf_sim"]) / 2.0)
+    n_look, res_prod = N_LOOKS_SIM, None
+    if focus_aperture == "fixed_angle":
+        n_look, res_prod = product_resolution_looks(
+            lam, spacing, p.get("posting_div", 1), r_bed, N_LOOKS_SIM)
 
     # first-order nadir mocomp: dz to a ~2-aperture smoothed reference track
     z = np.asarray(p["base"].nav_llh[:, 2], np.float64)
@@ -1300,8 +1331,7 @@ def process_standard(p, sim, focus_aperture="alias_limited"):
     Fs, Fb = layers
 
     def look(P):
-        return ndimage.uniform_filter1d(P, N_LOOKS_SIM, axis=0,
-                                        mode="nearest")
+        return ndimage.uniform_filter1d(P, n_look, axis=0, mode="nearest")
 
     P = look(np.abs(Fs + Fb) ** 2)
     Ps, Pb = look(np.abs(Fs) ** 2), look(np.abs(Fb) ** 2)
@@ -1310,14 +1340,17 @@ def process_standard(p, sim, focus_aperture="alias_limited"):
     chain = {
         "real_chain": REAL_CHAIN,
         "focus_aperture": focus_aperture,
+        **({"focus_half_angle_deg": float(focus_half_angle_deg),
+            "product_res_m": round(res_prod, 1)}
+           if focus_aperture == "fixed_angle" else {}),
         "sim_posting_m": round(spacing, 3),
         "aperture_m": round(L, 1), "half_angle_deg": round(theta_deg, 3),
         "aperture_traces": int(round(L / spacing)) + 1,
         "azimuth_res_hann_m": round(1.44 * lam * r_bed / (2.0 * L), 1),
         "surface_alias_ratio": round(
             np.degrees(np.arctan((L / 2.0) / r_surf)) / theta_deg, 2),
-        "n_looks_sim": N_LOOKS_SIM,
-        "look_span_m": round(N_LOOKS_SIM * spacing, 1),
+        "n_looks_sim": n_look,
+        "look_span_m": round(n_look * spacing, 1),
         "mocomp": {"kind": "first-order nadir (dz to smoothed track), "
                            "field *= exp(+2jk dz)",
                    "dz_rms_m": round(float(np.sqrt(np.mean(dz ** 2))), 3),
@@ -1432,7 +1465,8 @@ def _proc_from_stacks(Fs, Fb, twtt, chain):
 def process_standard_cached(p, sim, out_dir, att, surf_rough,
                             force=False, antenna=None, bed_rough=None,
                             spec=None, gfix=None,
-                            focus_aperture="alias_limited"):
+                            focus_aperture="alias_limited",
+                            focus_half_angle_deg=5.0):
     """Cache-first process_standard (module-section comment). Also stores
     the light per-trace arrays + scalars that let load_proc_pass rebuild a
     figure-ready (p_lite, sim_lite, proc) with NO scene prep or chunk
@@ -1446,6 +1480,8 @@ def process_standard_cached(p, sim, out_dir, att, surf_rough,
             "segment": p["segment"], "n_traces": int(len(p["idx"])),
             "n_looks": N_LOOKS_SIM, "posting_div": p.get("posting_div", 1),
             "focus_aperture": focus_aperture,
+            **({"focus_half_angle_deg": float(focus_half_angle_deg)}
+               if focus_aperture == "fixed_angle" else {}),
             "spacing_m": round(p["spacing"], 4),
             "att_db_per_km": att, "surf_rough": bool(surf_rough),
             "chunk_digests": chunk_digests(p, Path(out_dir) / "runs",
@@ -1463,7 +1499,8 @@ def process_standard_cached(p, sim, out_dir, att, surf_rough,
                                      doc["chain"])
         print(f"  [proc-cache STALE] {rid}: meta changed, rebuilding",
               flush=True)
-    proc = process_standard(p, sim, focus_aperture=focus_aperture)
+    proc = process_standard(p, sim, focus_aperture=focus_aperture,
+                            focus_half_angle_deg=focus_half_angle_deg)
     np.savez(npz_p, Fs=proc["Fs"], Fb=proc["Fb"], twtt=proc["twtt"],
              nadir=sim["nadir"], s_sim=p["s_sim"], surf_sim=p["surf_sim"],
              bot_sim=np.asarray(p["bot_sim"], np.float64),
@@ -3403,6 +3440,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
         focus_aperture="alias_limited",
+        focus_half_angle_deg=5.0,   # fixed_angle rule: Doppler half-angle
         bed_rough_extra_db=0.0, passes=None, spec=None,
         grazing_fix=None,   # None -> ON at GRAZING_FIX['s_eff']; False -> off
 
@@ -3644,9 +3682,11 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                                   bed_rough=bed_rough,
                                                   spec=spec,
                                                   gfix=grazing_fix,
-                                                  focus_aperture=focus_aperture)
+                                                  focus_aperture=focus_aperture,
+                                                  focus_half_angle_deg=focus_half_angle_deg)
                           if proc_cache else process_standard(
-                              p, sims[key], focus_aperture=focus_aperture))
+                              p, sims[key], focus_aperture=focus_aperture,
+                              focus_half_angle_deg=focus_half_angle_deg))
             ch = procs[key]["chain"]
             print(f"  processed: aperture {ch['aperture_m']:.0f} m "
                   f"({ch['aperture_traces']} traces, half-angle "
@@ -4098,6 +4138,7 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "antenna": antenna,
         "posting_div": posting_div,
         "focus_aperture": focus_aperture,
+        "focus_half_angle_deg": focus_half_angle_deg,
         "grazing_fix": (None if grazing_fix is None else {
             "s_eff": grazing_fix,
             "model": "Grazing-angle facet-lattice fix (GrazingFixConfig): "
@@ -4896,13 +4937,17 @@ def main():
                     "Requires --processing standard")
     ap.add_argument("--focus-aperture",
                     choices=("alias_limited", "product_resolution",
-                             "first_fresnel"),
+                             "first_fresnel", "fixed_angle"),
                     default="alias_limited",
                     help="focused-SAR aperture rule (default uses the full "
                     "unaliased Doppler band; product_resolution preserves "
                     "the original-posting aperture after refinement; "
                     "first_fresnel uses one monostatic Fresnel-zone diameter "
-                    "at bed optical range)")
+                    "at bed optical range; fixed_angle focuses with "
+                    "--focus-half-angle-deg and multilooks to the "
+                    "product_resolution azimuth resolution)")
+    ap.add_argument("--focus-half-angle-deg", type=float, default=5.0,
+                    help="fixed_angle Doppler half-angle (degrees)")
     ap.add_argument("--fig-width-scale", type=float, default=1.0,
                     help="radargram figure width multiplier "
                     "(plot-iteration knob; cache-replay safe)")
@@ -4936,6 +4981,7 @@ def main():
         grazing_fix=(False if args.no_grazing_fix else args.grazing_fix),
         posting_div=args.posting_div, passes=args.passes,
         focus_aperture=args.focus_aperture,
+        focus_half_angle_deg=args.focus_half_angle_deg,
         bed_rough_extra_db=args.bed_rough_extra_db,
         trace_decomp_s_km=args.trace_decomp_s,
         per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,

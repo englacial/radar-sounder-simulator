@@ -70,6 +70,18 @@ def test_posting_div_requires_the_matched_chain():
         RunSpec.model_validate(_doc(processing={"posting_div": 2}))
 
 
+def test_fixed_angle_focus_carries_its_half_angle():
+    kw = RunSpec.model_validate(_doc(processing={
+        "chain": "standard", "focus_aperture": "fixed_angle",
+        "focus_half_angle_deg": 4.0})).to_run_kwargs()
+    assert kw["focus_aperture"] == "fixed_angle"
+    assert kw["focus_half_angle_deg"] == 4.0
+    with pytest.raises(ValueError):
+        RunSpec.model_validate(_doc(processing={
+            "chain": "standard", "focus_aperture": "fixed_angle",
+            "focus_half_angle_deg": 0.0}))
+
+
 def test_focus_aperture_requires_the_matched_chain():
     with pytest.raises(ValueError, match="focus_aperture"):
         RunSpec.model_validate(
