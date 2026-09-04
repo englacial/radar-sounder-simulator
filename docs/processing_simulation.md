@@ -35,7 +35,14 @@ while choosing the focusing extent independently: `first_fresnel` is a fast
 screening aperture, and `product_resolution` keeps the original physical
 aperture after refinement. This separation matters because spacing controls
 the unaliased look angle, whereas aperture length controls azimuth resolution
-and backprojection cost.
+and backprojection cost. A facet model adds a third constraint: a 32 m
+facet's coherent lobe is only ~λ/L wide (2.8 deg at 195 MHz), so a Doppler
+band narrower than the terrain's along-track tilts gates whole cross-track
+rows of facets and stripes the image while discarding real clutter.
+`fixed_angle` focuses with a wide band (`focus_half_angle_deg`, 5 deg in the
+shipped experiments) and then multilooks the power to the
+`product_resolution` azimuth resolution, keeping the measured-vs-simulated
+comparison at matched resolution.
 
 ## Real-frame comparisons at processing level
 

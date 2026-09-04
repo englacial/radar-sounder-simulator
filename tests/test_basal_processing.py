@@ -51,6 +51,20 @@ def test_chunk_rows_splits_further_on_trace_facet_budget():
             <= rbc.CHUNK_TRACE_FACETS
 
 
+def test_fixed_angle_aperture_and_product_resolution_looks():
+    """fixed_angle: aperture from the half-angle; the multilook degrades the
+    focused image to the product_resolution azimuth resolution."""
+    lam, r = 1.5, 9600.0
+    L, th = rbc.fixed_angle_aperture(r, 5.0)
+    assert th == 5.0 and L == pytest.approx(2 * r * np.tan(np.radians(5.0)))
+    spacing, pdiv = 29.6 / 8, 8
+    n, res = rbc.product_resolution_looks(lam, spacing, pdiv, r, 3)
+    L_prod, _ = rbc.alias_limited_aperture(lam, spacing * pdiv, r)
+    assert res == pytest.approx(1.44 * lam * r / (2 * L_prod))
+    assert n == max(3, round(res / spacing)) and n > 3
+    assert rbc.product_resolution_looks(lam, 100.0, 1, r, 3)[0] == 3
+
+
 # --------------------------------------------------- alias-limited aperture
 
 def test_alias_limited_aperture_math():

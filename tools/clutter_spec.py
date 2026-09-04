@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 SCHEMA_VERSION = 1
 
@@ -147,8 +147,11 @@ class Processing(_Base):
     proc_cache: bool = False
     posting_div: int = 1
     focus_aperture: Literal[
-        "alias_limited", "product_resolution", "first_fresnel"
+        "alias_limited", "product_resolution", "first_fresnel", "fixed_angle"
     ] = "alias_limited"
+    # fixed_angle: Doppler half-angle of the focusing band; the result is
+    # multilooked down to the product_resolution azimuth resolution
+    focus_half_angle_deg: float = Field(default=5.0, gt=0.0, le=45.0)
     # Whether to run the constant-gamma comparison arm the RSSNR acceptance
     # analysis scores against. It runs INSIDE this experiment, in this
     # experiment's own cache directory, so there is no companion run to name
@@ -306,6 +309,7 @@ class RunSpec(_Base):
             "proc_cache": proc.proc_cache,
             "posting_div": proc.posting_div,
             "focus_aperture": proc.focus_aperture,
+            "focus_half_angle_deg": proc.focus_half_angle_deg,
             "companion": bool(proc.companion),
             "trace_decomp_s_km": fig.trace_decomp_s_km,
             "per_pass_figs": fig.per_pass,

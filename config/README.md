@@ -126,7 +126,12 @@ For matched processing, `processing.posting_div` refines the simulated
 slow-time grid before focusing. `processing.focus_aperture` is
 `alias_limited` (use the refined grid's full unaliased band),
 `product_resolution` (retain the aperture and resolution of the original
-product posting), or `first_fresnel` (one monostatic first-zone diameter).
+product posting), `first_fresnel` (one monostatic first-zone diameter), or
+`fixed_angle` (focus with a Doppler band of `focus_half_angle_deg`, then
+multilook the power down to the `product_resolution` azimuth resolution;
+the shipped experiments use this with 5 deg, because the narrow
+product-posting band gated tilted 32 m facets and striped the 195 MHz
+passes at posting_div 8).
 
 ## Analysis conventions
 
