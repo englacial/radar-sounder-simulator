@@ -28,10 +28,11 @@ P=gs://ice-infrastructure-soundersim/batch_2026-09-03     # dated prefix
 uv run python tools/gcp/stage_bundle.py --config config/experiments/pilot.yaml \
     --lines antarctica_pineisland_north antarctica_david --prefix $P
 
-# 2. simulate: one task per pass, one VM per task (memory request ~ VM size)
+# 2. simulate: chunk tasks (6 chunks per task: one pass preparation per
+#    task), one VM per task, spend guarded at the catalog Spot price
 uv run python tools/gcp/batch_launch.py --config config/experiments/pilot.yaml \
-    --lines antarctica_pineisland_north antarctica_david \
-    --machine-type n2-highmem-8 --memory-mib 56000 --max-run-min 90 \
+    --lines antarctica_pineisland_north antarctica_david --per-chunk \
+    --chunks-per-task 6 --no-external-ip --max-vms 25 --budget-usd 50 \
     --job soundersim-sim-20260903 --prefix $P --wait
 
 # 3. process in the cloud: one task per line, pulls the chunks of step 2,
@@ -97,7 +98,22 @@ gcloud compute routers list --regions us-central1   # must show no soundersim-*
   (greenland_westcoast p3_2016 exceeded 110 GB locally); size the VM by
   memory and set `--memory-mib` near the VM's size so Batch never packs two
   tasks on one VM.
-- Per-chunk tasks (`--per-chunk`) are not wired yet: build tasks.txt from a
-  `--dry-run` manifest (`simulate LINE PASS:ci OUTDIR` lines) by hand.
+- `--per-chunk` builds tasks from the staged `--dry-run` manifest;
+  `--chunks-per-task N` (default 6) groups uncached chunks so each task pays
+  the pass preparation (frames, DEMs, picks, bed synthesis) once. On the
+  2026-09-04 full campaign one-chunk tasks spent 10 min preparing getz for
+  every 6 min chunk; grouping by 6 cuts that overhead ~6x.
+- Spend: `tools/gcp/pricing.py MACHINE` reads the Cloud Billing catalog
+  (cached a week in outputs/gcp/pricing.json, dated fallback when offline).
+  The launcher prints a projection (past task records when present, else
+  defaults) and, with `--budget-usd CAP`, refuses to submit when the ledger
+  total plus the projection exceeds the cap, tallies the running job every
+  10 min from its task records and deletes it if the cap is crossed, and
+  appends each finished job to outputs/gcp/spend_ledger.json. Estimation
+  lessons: claude_notes/gcp_cost_estimation_notes_2026-09-04.md.
+- gcloud tokens expire (~12 h under the org's reauth policy): a launcher
+  that loses auth mid-wait prints `describe failed (auth?)` and keeps
+  retrying, but the guard and sync are blind until `gcloud auth login` is
+  run again in a terminal. Run long campaigns right after re-authenticating.
 - The older GPU trial files (`vm_bootstrap.sh`, `launch_benchmark_vm.sh`,
   `batch_benchmark_job.json`) are unrelated to this workflow.

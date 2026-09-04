@@ -46,7 +46,17 @@ def split_prefix(prefix):
     return b, p.rstrip("/")
 
 
-def pass_tasks(config, lines, per_chunk):
+def group_chunks(indices, per_task):
+    """Split uncached chunk indices into runs of ``per_task`` -> 'c0,c1,..'
+    strings. One task then pays the pass preparation once for the group;
+    the 2026-09-04 campaign paid it per chunk (10 min on getz, more than
+    the chunk itself)."""
+    per_task = max(1, int(per_task))
+    return [",".join(str(c) for c in indices[i:i + per_task])
+            for i in range(0, len(indices), per_task)]
+
+
+def pass_tasks(config, lines, per_chunk, chunks_per_task=1):
     """[(mode, line, pass[:chunks], outdir)] for the simulate job."""
     from clutter_spec import load_spec
     import run_basal_clutter as rbc
@@ -67,10 +77,10 @@ def pass_tasks(config, lines, per_chunk):
                                  "tools/gcp/stage_bundle.py first)")
             man = json.loads(mp.read_text())
             for key in order:
-                for ci in range(man[key]["n_chunks"]):
-                    if not man[key]["cached"][ci]:
-                        tasks.append(("simulate", line, f"{key}:{ci}",
-                                      outdir))
+                todo = [ci for ci in range(man[key]["n_chunks"])
+                        if not man[key]["cached"][ci]]
+                for grp in group_chunks(todo, chunks_per_task):
+                    tasks.append(("simulate", line, f"{key}:{grp}", outdir))
             continue
         for key in order:
             tasks.append(("simulate", line, key, outdir))
@@ -126,18 +136,88 @@ def job_spec(a, n_tasks, bucket, path, job):
         "logsPolicy": {"destination": "CLOUD_LOGGING"}}
 
 
-def wait(job, poll_s=30):
+LEDGER = ROOT / "outputs" / "gcp" / "spend_ledger.json"
+
+
+def ledger_total(path=LEDGER):
+    """USD recorded for finished jobs (the campaign-wide tally)."""
+    if not Path(path).exists():
+        return 0.0
+    return sum(e.get("usd", 0.0) for e in json.loads(Path(path).read_text()))
+
+
+def ledger_add(entry, path=LEDGER):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    doc = json.loads(Path(path).read_text()) if Path(path).exists() else []
+    doc.append(entry)
+    Path(path).write_text(json.dumps(doc, indent=1))
+
+
+def job_task_seconds(job, prefix):
+    """Sum of per-task seconds recorded so far by ``job`` (rsyncs the
+    results/<job>/timing records into outputs/gcp/<job>/timing)."""
+    dest = ROOT / "outputs" / "gcp" / job / "timing"
+    dest.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["gcloud", "storage", "rsync", f"{prefix}/results/{job}/timing",
+                    str(dest)], capture_output=True, check=False)
+    secs = 0.0
+    for f in dest.glob("task_*.json"):
+        d = json.loads(f.read_text())
+        secs += sum(d.get(k, 0) for k in ("env_s", "data_s", "run_s",
+                                         "upload_s"))
+    return secs
+
+
+def running_vms(job):
+    out = gs("compute", "instances", "list", "--format=value(name)",
+             capture=True, check=False) or ""
+    return sum(1 for n in out.split() if n.startswith(job[:20]))
+
+
+def over_budget(spent_before, job_usd, budget):
+    return budget is not None and spent_before + job_usd > budget
+
+
+def wait(job, poll_s=30, rate=None, prefix=None, budget=None,
+         spent_before=0.0, guard_every_s=600):
+    """Poll to a terminal state; with ``rate`` also tally this job's spend
+    from its task records (+ running VMs in flight) and DELETE the job when
+    ``spent_before`` + this job would exceed ``budget``. Returns
+    (state, job_vm_hours)."""
     t0 = time.time()
+    last_guard, vmh = -1e9, 0.0
     while True:
         out = gs("batch", "jobs", "describe", job, f"--location={REGION}",
-                 "--format=json", capture=True)
-        d = json.loads(out)
-        state = d["status"]["state"]
+                 "--format=json", capture=True, check=False)
+        try:
+            d = json.loads(out)
+            state = d["status"]["state"]
+        except (TypeError, ValueError, KeyError):
+            print("  describe failed (auth?), retrying", flush=True)
+            time.sleep(poll_s)
+            continue
         counts = d["status"].get("taskGroups", {}).get("group0", {}).get(
             "counts", {})
-        print(f"  {time.time() - t0:6.0f} s  {state}  {counts}", flush=True)
-        if state in ("SUCCEEDED", "FAILED", "CANCELLED"):
-            return state
+        line = f"  {time.time() - t0:6.0f} s  {state}  {counts}"
+        if rate is not None and time.time() - last_guard >= guard_every_s:
+            last_guard = time.time()
+            secs = job_task_seconds(job, prefix)
+            vmh = (secs + running_vms(job) * guard_every_s * 0.5) / 3600.0
+            usd = vmh * rate
+            line += f"  spend ~${usd:.2f} (+${spent_before:.2f} before)"
+            if over_budget(spent_before, usd, budget):
+                print(line, flush=True)
+                print(f"BUDGET: ${spent_before + usd:.2f} > ${budget:.2f}: "
+                      f"deleting {job}", flush=True)
+                gs("batch", "jobs", "delete", job, f"--location={REGION}",
+                   "--quiet", check=False)
+                return "BUDGET_KILLED", vmh
+        print(line, flush=True)
+        if state in ("SUCCEEDED", "FAILED", "CANCELLED",
+                     "DELETION_IN_PROGRESS"):
+            if rate is not None:
+                vmh = job_task_seconds(job, prefix) / 3600.0
+            return state, vmh
         time.sleep(poll_s)
 
 
@@ -148,6 +228,17 @@ def main():
     ap.add_argument("--mode", choices=["simulate", "process"],
                     default="simulate")
     ap.add_argument("--per-chunk", action="store_true")
+    ap.add_argument("--chunks-per-task", type=int, default=6,
+                    help="--per-chunk: chunks simulated per task (one pass "
+                    "preparation per task)")
+    ap.add_argument("--budget-usd", type=float, default=None,
+                    help="campaign cap: refuse to submit if the ledger total "
+                    "plus this job's projection exceeds it, and delete the "
+                    "job while waiting if the tally does")
+    ap.add_argument("--rate-usd-per-vm-h", type=float, default=None,
+                    help="override the catalog VM price")
+    ap.add_argument("--force-budget", action="store_true",
+                    help="submit even if the projection exceeds --budget-usd")
     ap.add_argument("--results-from", nargs="*", default=[],
                     help="process mode: simulate job names to pull chunks from")
     ap.add_argument("--prefix", default=DEFAULT_PREFIX)
@@ -173,8 +264,8 @@ def main():
                     help="print tasks + job json, submit nothing")
     a = ap.parse_args()
 
-    tasks = (pass_tasks(a.config, a.lines, a.per_chunk) if a.mode == "simulate"
-             else process_tasks(a.config, a.lines))
+    tasks = (pass_tasks(a.config, a.lines, a.per_chunk, a.chunks_per_task)
+             if a.mode == "simulate" else process_tasks(a.config, a.lines))
     if a.mode == "process" and not a.results_from:
         ap.error("--mode process needs --results-from <simulate job> ...")
     job = a.job or ("soundersim-" + a.mode + "-"
@@ -185,6 +276,19 @@ def main():
         print("  ", *t)
     print(f"{len(tasks)} tasks, {a.machine_type} {a.provisioning}, "
           f"parallelism {spec['taskGroups'][0]['parallelism']}, job {job}")
+    import pricing
+    rate, src = ((a.rate_usd_per_vm_h, "override") if a.rate_usd_per_vm_h
+                 else pricing.vm_hour_price(a.machine_type, a.provisioning))
+    spent = ledger_total()
+    proj_vmh, proj_usd = projection(a, tasks, rate)
+    print(f"rate ${rate:.4f}/VM-h ({src}); projected {proj_vmh:.1f} VM-h "
+          f"~${proj_usd:.2f}; ledger so far ${spent:.2f}"
+          + (f"; budget ${a.budget_usd:.2f}" if a.budget_usd else ""),
+          flush=True)
+    if over_budget(spent, proj_usd, a.budget_usd) and not a.force_budget:
+        raise SystemExit(f"projection ${spent + proj_usd:.2f} exceeds "
+                         f"--budget-usd {a.budget_usd:.2f}; not submitting "
+                         "(--force-budget overrides)")
     if a.dry:
         print(json.dumps(spec, indent=1))
         return
@@ -194,13 +298,49 @@ def main():
         import nat
         nat.up()
         a.wait = True
+    if a.budget_usd is not None:
+        a.wait = True   # the guard lives in wait()
     try:
         submit(a, tasks, spec, job)
         if a.wait:
-            print("final state:", wait(job))
+            state, vmh = wait(job, rate=rate, prefix=a.prefix,
+                              budget=a.budget_usd, spent_before=spent)
+            usd = vmh * rate
+            ledger_add({"job": job, "date": datetime.date.today().isoformat(),
+                        "machine_type": a.machine_type, "rate": rate,
+                        "vm_hours": round(vmh, 2), "usd": round(usd, 2),
+                        "state": state})
+            print(f"final state: {state}; {vmh:.1f} VM-h ~${usd:.2f}; "
+                  f"ledger total ${ledger_total():.2f}", flush=True)
     finally:
         if a.no_external_ip:
             nat.down()   # skipped with a warning while other jobs run
+
+
+def projection(a, tasks, rate):
+    """Projected (VM-hours, USD) for the simulate tasks from past records
+    (pricing.estimate) -- process tasks are not projected (0)."""
+    import pricing
+    from clutter_spec import load_spec
+    kw = load_spec(a.config).to_run_kwargs()
+    exp = kw.get("out_name") or kw["segment"]
+    counts, est = {}, {}
+    for mode, line, pk, _ in tasks:
+        if mode != "simulate":
+            continue
+        key, _, cs = pk.partition(":")
+        n = len(cs.split(",")) if cs else a.chunks_per_task
+        counts[(line, key)] = counts.get((line, key), 0) + 1
+        if (line, key) not in est:
+            est[(line, key)] = pricing.estimate(line, exp, [key], n)[key]
+    vmh = usd = 0.0
+    for (line, key), ntask in counts.items():
+        v, u = pricing.project({key: ntask}, {key: est[(line, key)]},
+                               a.chunks_per_task, rate)
+        vmh += v
+        usd += u
+    return vmh, usd + (a.max_run_min / 60.0 * 0.044 if a.no_external_ip
+                       else 0.0)
 
 
 def submit(a, tasks, spec, job):

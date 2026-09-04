@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -139,3 +140,60 @@ def test_compare_metrics_flattens_and_filters(tmp_path):
     rows, n = compare_runs.cmp_metrics(pa, pb, ["midcol", "bed_visibility"])
     assert n == 3
     assert rows == [("clutter_x/sim/midcol_rel_surf_db", -30.0, -30.5, 0.5)]
+
+
+# ------------------------------------------- chunk grouping + spend guard
+import pricing  # noqa: E402
+
+
+def test_group_chunks_packs_uncached_indices():
+    assert batch_launch.group_chunks([0, 1, 2, 3, 4, 5, 6], 3) == \
+        ["0,1,2", "3,4,5", "6"]
+    assert batch_launch.group_chunks([4, 9], 1) == ["4", "9"]
+    assert batch_launch.group_chunks([], 6) == []
+
+
+def test_over_budget_and_ledger(tmp_path):
+    led = tmp_path / "ledger.json"
+    assert batch_launch.ledger_total(led) == 0.0
+    batch_launch.ledger_add({"job": "a", "usd": 6.4}, led)
+    batch_launch.ledger_add({"job": "b", "usd": 23.3}, led)
+    assert batch_launch.ledger_total(led) == pytest.approx(29.7)
+    assert not batch_launch.over_budget(29.7, 10.0, None)
+    assert not batch_launch.over_budget(29.7, 10.0, 50.0)
+    assert batch_launch.over_budget(29.7, 25.0, 50.0)
+
+
+def test_pricing_machine_type_and_catalog_rate():
+    assert pricing.parse_machine_type("n2-highmem-8") == ("N2", 8, 64.0)
+    assert pricing.parse_machine_type("c2d-standard-16") == ("C2D", 16, 64.0)
+
+    def sku(desc, usd, regions=("us-central1",)):
+        units, nanos = divmod(round(usd * 1e9), 10 ** 9)
+        return {"description": desc, "serviceRegions": list(regions),
+                "pricingInfo": [{"pricingExpression": {"tieredRates": [
+                    {"unitPrice": {"units": str(units), "nanos": nanos}}]}}]}
+    skus = [sku("Spot Preemptible N2 Instance Core running in Americas",
+                0.01896),
+            sku("Spot Preemptible N2 Instance Ram running in Americas",
+                0.002542),
+            sku("Spot Preemptible N2 Instance Core running in Americas",
+                0.5, regions=("europe-west1",))]
+    rate = pricing.rate_from_skus(skus, "N2", 8, 64.0, "SPOT", "us-central1")
+    assert rate == pytest.approx(8 * 0.01896 + 64 * 0.002542, rel=1e-6)
+    assert pricing.rate_from_skus(skus, "N2", 8, 64.0, "STANDARD",
+                                  "us-central1") is None
+
+
+def test_projection_defaults_and_pass_classes():
+    assert pricing.pass_class("dc8_2014_0km") == "heavy"
+    assert pricing.pass_class("dc8_2012_9km") == "light"
+    assert pricing.pass_class("haps_14km_lambda") == "light"
+    est = pricing.estimate("no_such_line", "full",
+                           ["dc8_2014_0km", "haps_14km_lambda"], 6)
+    assert est["dc8_2014_0km"] == (pricing.DEFAULT_PREP_S,
+                                   pricing.DEFAULT_CHUNK_S["heavy"])
+    vmh, usd = pricing.project({"dc8_2014_0km": 10}, est, 6, 0.3144)
+    secs = 10 * (pricing.DEFAULT_PREP_S + 6 * pricing.DEFAULT_CHUNK_S["heavy"])
+    assert vmh == pytest.approx(secs / 3600 * (1 + pricing.OVERHEAD))
+    assert usd == pytest.approx(vmh * 0.3144)
