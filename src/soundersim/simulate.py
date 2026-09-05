@@ -39,7 +39,7 @@ from .layered import build_layered_scene
 from .nav import nav_to_frame
 from .output import build_dataset
 from .physics import fresnel_normal
-from .roughness import n_terms_for, speckle_phasors
+from .roughness import n_terms_for, speckle_phasors, speckle_phasors_for_keys
 from .scene import LocalFrame, build_facets, check_facet_size
 from .synthetic import SyntheticScene
 from .waveform import apply_waveform
@@ -161,7 +161,9 @@ def _roughness_args(iface, facets, k_local, seed):
             "roughness at scales above the facet is really facet tilt -- "
             "put it in the DEM (docs/roughness.md)")
     n_terms = n_terms_for((2.0 * k_local * rc.sigma_m) ** 2)
-    phasors = speckle_phasors(len(facets.centers), seed)
+    phasors = (speckle_phasors_for_keys(facets.phase_keys, seed)
+               if facets.phase_keys is not None
+               else speckle_phasors(len(facets.centers), seed))
     if rc.acf != "gaussian":
         return (rc.sigma_m, rc.corr_length_m, phasors, n_terms, rc.acf)
     return (rc.sigma_m, rc.corr_length_m, phasors, n_terms)
@@ -181,7 +183,8 @@ def simulate(scene: SyntheticScene, sim_config: SimConfig):
         return _simulate_multilayer(scene, sim_config)
     frame = LocalFrame.centered_on(scene)
     facets = build_facets(scene.dem, scene.transform, scene.crs, frame,
-                          spacing=sim_config.facets.spacing)
+                          spacing=sim_config.facets.spacing,
+                          grid_origin=getattr(scene, "grid_origin", (0, 0)))
     track = nav_to_frame(scene.nav_llh, frame)
     rc = sim_config.radar
     window = dict(t0=rc.t0, dt=rc.dt, n_samples=rc.n_samples, c=rc.c,
@@ -275,7 +278,9 @@ def _simulate_multilayer(scene, sim_config):
     wired, dem_refs = _wire_scene_dems(scene, sim_config)
     layered = build_layered_scene(wired, frame, scene.dem, scene.transform,
                                   scene.crs, spacing=sim_config.facets.spacing,
-                                  dem_refs=dem_refs)
+                                  dem_refs=dem_refs,
+                                  grid_origin=getattr(scene, "grid_origin",
+                                                      (0, 0)))
     track = nav_to_frame(scene.nav_llh, frame)
     rc = sim_config.radar
     window = dict(t0=rc.t0, dt=rc.dt, n_samples=rc.n_samples, c=rc.c,
@@ -357,8 +362,13 @@ def _simulate_multilayer(scene, sim_config):
             if layered.names[j] in dmaps:
                 dif = (_gamma_map_values(dmaps[layered.names[j]], target,
                                          frame),
-                       speckle_phasors(len(target.centers),
-                                       (sim_config.roughness_seed, 1000 + j)),
+                       (speckle_phasors_for_keys(
+                           target.phase_keys,
+                           (sim_config.roughness_seed, 1000 + j))
+                        if target.phase_keys is not None else
+                        speckle_phasors(
+                            len(target.centers),
+                            (sim_config.roughness_seed, 1000 + j))),
                        float(sim_config.diffuse_exponent))
             out, drop = refracted_cluttergram(
                 track.positions, track.u_ct, target, layered.interfaces[:j],

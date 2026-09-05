@@ -17,7 +17,7 @@ In the clutter runner the convolution runs inside the cached chunk, so a `chirp`
 
 ## Antenna patterns
 
-`RadarConfig.antenna`: `isotropic` (default), `dipole` (axis configurable), `array` (uniform cross-track line array, `n_elements`, `spacing_lam`, nadir boresight), or `tabulated` (1-D g(θ), interpolated). `g` is one-way **field** gain: coherent kernels weight fields by g², the incoherent kernel weights power by g⁴ (consistent by construction; cross-kernel ensemble test covers a steep pattern). `roll_source="nav"` rolls the pattern about the track using the frame's Roll. Verified against closed forms (dipole nulls/values exact; array factor main lobe and null positions). The `antenna_patterns` report case quantifies clutter suppression: a 5-element cross-track array removes 8–9 dB of off-nadir clutter where an along-track dipole manages 2–4 dB.
+`RadarConfig.antenna`: `isotropic` (default), `dipole` (axis configurable), `array` (uniform cross-track line array, `n_elements`, `spacing_lam`, nadir boresight), or `tabulated` (1-D g(θ), interpolated). `g` is one-way **field** gain: coherent kernels weight fields by g², the incoherent kernel weights power by g⁴ (consistent by construction; cross-kernel ensemble test covers a steep pattern). Arrays are peak-normalized by default. Setting `element_directivity_db` to an element's peak power directivity `D` in dBi adds absolute gain and a forward-hemisphere cosine-power element pattern: `P(θ)/P(0) = cos(θ)^q`, `q = 10^(D/10)/2 - 1` (3 dBi is treated as the rounded uniform-hemisphere limit). The total angular field pattern is the element factor times the array factor, and the peak gain is set by integrating that pattern over the sphere per side (TX weights and RX weights separately), so `g²` at the peak is `sqrt(D_tx · D_rx)`. For 3 dBi elements at multiples of half-wavelength spacing this reduces to `D = 2 N_eff` per side; for directive elements it is below the product of element and array directivities because both narrow the beam in the cross-track plane (about 1 dB one-way for a 20-element λ/2 array of 6 dBi elements). `roll_source="nav"` rolls both the array axis and boresight about the track using the frame's Roll. Verified against closed forms (dipole nulls/values exact; array factor main lobe and null positions). The `antenna_patterns` report case quantifies clutter suppression: a 5-element cross-track array removes 8–9 dB of off-nadir clutter where an along-track dipole manages 2–4 dB.
 
 ## Post-processing (`soundersim.processing`)
 
@@ -29,6 +29,20 @@ Layer-3 functions on output Datasets (never inside kernels), each appending a st
 - `multilook(ds, n)` — incoherent power averaging (speckle contrast ~1/√n, verified).
 
 A guard warns when trace spacing exceeds λ/4 for the requested aperture (Doppler aliasing). Simulated trace spacing must support the processing you request — subsampled real-frame runs generally cannot be coherently summed; simulate a dense sub-segment for that.
+
+The clutter-study runner can refine slow time with `processing.posting_div`
+while choosing the focusing extent independently: `first_fresnel` is a fast
+screening aperture, and `product_resolution` keeps the original physical
+aperture after refinement. This separation matters because spacing controls
+the unaliased look angle, whereas aperture length controls azimuth resolution
+and backprojection cost. A facet model adds a third constraint: a 32 m
+facet's coherent lobe is only ~λ/L wide (2.8 deg at 195 MHz), so a Doppler
+band narrower than the terrain's along-track tilts gates whole cross-track
+rows of facets and stripes the image while discarding real clutter.
+`fixed_angle` focuses with a wide band (`focus_half_angle_deg`, 5 deg in the
+shipped experiments) and then multilooks the power to the
+`product_resolution` azimuth resolution, keeping the measured-vs-simulated
+comparison at matched resolution.
 
 ## Real-frame comparisons at processing level
 

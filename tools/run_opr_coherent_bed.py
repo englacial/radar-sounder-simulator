@@ -251,7 +251,9 @@ def _dense_scene(frame, mscene, n_dense, spacing_m, ct_dist):
     scene = MultilayerScene(
         mscene.name + "_dense", dems, tr_c, mscene.crs, nav, mscene.media,
         {**mscene.params, "dense_spacing_m": spacing_m,
-         "dense_n_traces": n_dense, "dense_ct_dist": ct_dist})
+         "dense_n_traces": n_dense, "dense_ct_dist": ct_dist},
+        grid_origin=tuple(
+            np.asarray(getattr(mscene, "grid_origin", (0, 0))) + (r0, c0)))
     scene.nav_roll = rd
     info = {"track_len_m": float(st[-1] - st[0]),
             "crop_shape": dems[0].shape}

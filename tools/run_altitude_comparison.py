@@ -423,7 +423,10 @@ def crop_scene(base, ct_dist, nav_z, name):
     nav = base.nav_llh.copy()
     nav[:, 2] = nav_z
     sc = MultilayerScene(name, dems, tr_c, base.crs, nav, base.media,
-                         {**base.params, "ct_dist": ct_dist})
+                         {**base.params, "ct_dist": ct_dist},
+                         grid_origin=tuple(
+                             np.asarray(getattr(base, "grid_origin", (0, 0)))
+                             + (r0, c0)))
     sc.nav_roll = getattr(base, "nav_roll", None)
     return sc
 
@@ -542,7 +545,9 @@ def firn_strip_scenes(base, ct_firn, nav_z, n_chunks=None):
         sc = SyntheticScene(
             f"{base.name}_firnstrip{rows_idx[0]}", dem, tr_c, base.crs, nav,
             {**base.params, "ct_dist_firn": ct_firn},
-            nav_roll=None if roll is None else np.asarray(roll)[rows_idx])
+            nav_roll=None if roll is None else np.asarray(roll)[rows_idx],
+            grid_origin=tuple(
+                np.asarray(getattr(base, "grid_origin", (0, 0))) + (r0, c0)))
         out.append((sc, rows_idx))
     return out
 
@@ -815,6 +820,19 @@ def _firn_figure(out, results, order, fctx, firn_doc):
 # ========================================================================
 # cached per-level simulation (resumable)
 # ========================================================================
+def chunk_cached(rid, meta, runs_dir):
+    """The cached diag for chunk ``rid`` if runs/<rid>.{json,npz} exist and
+    the json's meta_key equals ``meta`` (the whole cache-hit rule), else None.
+    Host-independent: a chunk simulated elsewhere and dropped into runs/
+    hits as long as its meta matches."""
+    jp, npz_p = Path(runs_dir) / f"{rid}.json", Path(runs_dir) / f"{rid}.npz"
+    if not (jp.exists() and npz_p.exists()):
+        return None
+    diag = json.loads(jp.read_text())
+    return (diag if diag.get("meta_key") == json.dumps(meta, sort_keys=True)
+            else None)
+
+
 def run_level(rid, scene, cfg, meta, runs_dir, oversample, force=False):
     """Cached coherent surface+bed simulate() for one level: decimated per-layer
     complex field + nadir_twtt into runs/<rid>.npz/.json, keyed on ``meta``.
@@ -822,12 +840,11 @@ def run_level(rid, scene, cfg, meta, runs_dir, oversample, force=False):
     runs_dir.mkdir(parents=True, exist_ok=True)
     jp, npz_p = runs_dir / f"{rid}.json", runs_dir / f"{rid}.npz"
     key = json.dumps(meta, sort_keys=True)
-    if jp.exists() and npz_p.exists() and not force:
-        diag = json.loads(jp.read_text())
-        if diag.get("meta_key") == key:
-            print(f"  [skip-exists] {rid} ({diag['wall_s']:.1f} s recorded)",
-                  flush=True)
-            return diag, dict(np.load(npz_p))
+    diag = None if force else chunk_cached(rid, meta, runs_dir)
+    if diag is not None:
+        print(f"  [skip-exists] {rid} ({diag['wall_s']:.1f} s recorded)",
+              flush=True)
+        return diag, dict(np.load(npz_p))
     t = time.perf_counter()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

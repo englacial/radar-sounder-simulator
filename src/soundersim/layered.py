@@ -49,24 +49,28 @@ def offset_facets(facets: Facets, frame, offset: float) -> Facets:
     centers = facets.centers + offset * up
     return Facets(centers, facets.normals.copy(), facets.areas.copy(),
                   facets.e1.copy(), facets.e2.copy(), facets.cell.copy(),
-                  facets.grid_shape)
+                  facets.grid_shape,
+                  None if facets.phase_keys is None else facets.phase_keys.copy())
 
 
-def _load_dem(iface: DemInterface, ref_dem, ref_transform, ref_crs, dem_refs):
+def _load_dem(iface: DemInterface, ref_dem, ref_transform, ref_crs, dem_refs,
+              grid_origin):
     """Resolve a DEM interface to (dem, transform, crs)."""
     if iface.path is not None:
         with rasterio.open(iface.path) as src:
             return (src.read(1).astype(np.float64), src.transform,
-                    src.crs.to_string())
+                    src.crs.to_string(), (0, 0))
     if iface.ref is not None:
-        dem, transform, crs = dem_refs[iface.ref]
-        return np.asarray(dem, np.float64), transform, crs
+        ref = dem_refs[iface.ref]
+        dem, transform, crs = ref[:3]
+        origin = ref[3] if len(ref) > 3 else grid_origin
+        return np.asarray(dem, np.float64), transform, crs, origin
     # Neither: the scene's primary surface DEM (backward-compatible default).
-    return np.asarray(ref_dem, np.float64), ref_transform, ref_crs
+    return np.asarray(ref_dem, np.float64), ref_transform, ref_crs, grid_origin
 
 
 def build_layered_scene(sim_config: SimConfig, frame, dem, transform, crs,
-                        *, spacing=None, dem_refs=None):
+                        *, spacing=None, dem_refs=None, grid_origin=(0, 0)):
     """Build a LayeredScene from a config and a reference (surface) DEM.
 
     ``dem``/``transform``/``crs`` describe the reference footprint used for the
@@ -86,12 +90,15 @@ def build_layered_scene(sim_config: SimConfig, frame, dem, transform, crs,
     # First pass: DEM and flat interfaces (offsets need their reference built).
     for i, ic in enumerate(sim_config.interfaces):
         if isinstance(ic, DemInterface):
-            d, t, c = _load_dem(ic, ref_dem, transform, crs, dem_refs)
-            facets[i] = build_facets(d, t, c, frame, spacing=spacing)
+            d, t, c, origin = _load_dem(
+                ic, ref_dem, transform, crs, dem_refs, grid_origin)
+            facets[i] = build_facets(d, t, c, frame, spacing=spacing,
+                                     grid_origin=origin)
         elif isinstance(ic, FlatInterface):
             flat = np.full_like(ref_dem, ic.elevation)
             facets[i] = build_facets(flat, transform, crs, frame,
-                                     spacing=spacing)
+                                     spacing=spacing,
+                                     grid_origin=grid_origin)
 
     # Remaining passes: resolve offsets (may chain through other offsets).
     pending = [i for i, ic in enumerate(sim_config.interfaces)

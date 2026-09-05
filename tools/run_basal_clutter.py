@@ -268,6 +268,16 @@ RADARGRAM_PCT: tuple = ()              # per_panel robust scaling limits
 CHUNK_M: float = 0.0                   # along-track chunk target
 FACET_SPACING_SCALE: float = 0.0       # default lattice refinement (<= 1)
 CHUNK_M_PROC: float = 0.0              # ... at fine posting
+# Per-chunk memory guard. Measured 2026-09-03 at posting_div 8: the kernels'
+# resident set grows as traces x facets_per_interface per chunk -- getz 0 km
+# at ~1.2e9 pairs and david at ~2.9e9 were OOM-killed at 100 GB, westcoast
+# at ~2.4e9 at 110 GB, i.e. >= 80 B per pair (the pineisland_north 3-chunk
+# run at ~1.0e9 pairs survived, barely). Chunks are split further until
+# traces * facets_per_interface, estimated from the chunk_scene crop (which
+# under-reads the real crop by ~20 % on non-axis-aligned tracks), fits this
+# budget: ~4e8 estimated pairs keeps a chunk under ~60 GB. At posting_div 8
+# that is ~6 chunks per pineisland_north 0 km pass, ~9 getz, ~16 david.
+CHUNK_TRACE_FACETS: float = 4.0e8
 
 ANALYSIS = clutter_analysis.load_analysis()
 ANALYSIS_GLOBALS = tuple(sorted(ANALYSIS.to_globals()))
@@ -1199,6 +1209,29 @@ def alias_limited_aperture(lam, spacing_m, r_ref_m):
     return 2.0 * r_ref_m * np.tan(theta), float(np.degrees(theta))
 
 
+def first_fresnel_aperture(lam, r_ref_m):
+    """Full diameter and half-angle of the monostatic first Fresnel zone."""
+    length = np.sqrt(2.0 * lam * r_ref_m)
+    theta = np.arctan((length / 2.0) / r_ref_m)
+    return float(length), float(np.degrees(theta))
+
+
+def fixed_angle_aperture(r_ref_m, half_angle_deg):
+    """Aperture length for a fixed Doppler half-angle at reference range."""
+    theta = np.radians(half_angle_deg)
+    return 2.0 * r_ref_m * np.tan(theta), float(half_angle_deg)
+
+
+def product_resolution_looks(lam, spacing, posting_div, r_ref_m, n_min):
+    """Incoherent looks (sim traces) that degrade a wide-band focused image
+    to the azimuth resolution of the alias-limited aperture at the ORIGINAL
+    product posting (the product_resolution rule's resolution), never fewer
+    than ``n_min``. Returns (n_looks, product_res_m)."""
+    L_prod, _ = alias_limited_aperture(lam, spacing * posting_div, r_ref_m)
+    res_prod = 1.44 * lam * r_ref_m / (2.0 * L_prod)
+    return max(int(n_min), int(round(res_prod / spacing))), float(res_prod)
+
+
 def _proc_ds(F2, twtt, s, lam):
     """Minimal coherent Dataset wrapper for soundersim.processing: field
     (slow_time, twtt) + straight-track positions x = along-track arc length
@@ -1238,9 +1271,18 @@ def straightness_stats(x, y, z_smooth_resid, win_n):
                 z_smooth_resid ** 2))), 3)}
 
 
-def process_standard(p, sim):
+def process_standard(p, sim, focus_aperture="alias_limited",
+                     focus_half_angle_deg=5.0):
     """Apply the CSARP_standard-matching chain (section comment) to the
-    assembled per-layer fields. Returns dict(P, Ps, Pb, twtt, chain)."""
+    assembled per-layer fields. Returns dict(P, Ps, Pb, twtt, chain).
+
+    ``fixed_angle`` focuses with a Doppler band of +-``focus_half_angle_deg``
+    (wide enough that the along-track tilt of 32 m facets, whose coherent
+    lobe is ~lambda/L wide, does not gate their return -- the
+    product_resolution band did, striping the 195 MHz passes at
+    posting_div 8) and then multilooks the power down to the azimuth
+    resolution the product_resolution rule would have given, so measured
+    and simulated columns compare at matched resolution."""
     from soundersim import processing as proc
 
     F = sim["field"]                       # (T, nb, 2) complex64
@@ -1249,8 +1291,22 @@ def process_standard(p, sim):
     s_sim = p["s_sim"]
     spacing = float(np.median(np.diff(s_sim)))
     r_bed = float(C * np.nanmedian(p["bot_sim"]) / 2.0)   # optical range
-    L, theta_deg = alias_limited_aperture(lam, spacing, r_bed)
+    if focus_aperture == "alias_limited":
+        L, theta_deg = alias_limited_aperture(lam, spacing, r_bed)
+    elif focus_aperture == "product_resolution":
+        base_spacing = spacing * p.get("posting_div", 1)
+        L, theta_deg = alias_limited_aperture(lam, base_spacing, r_bed)
+    elif focus_aperture == "first_fresnel":
+        L, theta_deg = first_fresnel_aperture(lam, r_bed)
+    elif focus_aperture == "fixed_angle":
+        L, theta_deg = fixed_angle_aperture(r_bed, focus_half_angle_deg)
+    else:
+        raise ValueError(f"unknown focus aperture {focus_aperture!r}")
     r_surf = float(C * np.nanmedian(p["surf_sim"]) / 2.0)
+    n_look, res_prod = N_LOOKS_SIM, None
+    if focus_aperture == "fixed_angle":
+        n_look, res_prod = product_resolution_looks(
+            lam, spacing, p.get("posting_div", 1), r_bed, N_LOOKS_SIM)
 
     # first-order nadir mocomp: dz to a ~2-aperture smoothed reference track
     z = np.asarray(p["base"].nav_llh[:, 2], np.float64)
@@ -1274,24 +1330,24 @@ def process_standard(p, sim):
     caught = sorted({str(w.message)[:200] for w in wlist})
     Fs, Fb = layers
 
-    def look(P):
-        return ndimage.uniform_filter1d(P, N_LOOKS_SIM, axis=0,
-                                        mode="nearest")
-
-    P = look(np.abs(Fs + Fb) ** 2)
-    Ps, Pb = look(np.abs(Fs) ** 2), look(np.abs(Fb) ** 2)
     # Fs/Fb (complex64, the focuser's native output) ride along so the
-    # proc cache can persist the exact source of P/Ps/Pb.
+    # proc cache can persist the exact source of P/Ps/Pb; the powers are
+    # built by _proc_from_stacks from the recorded chain (n_looks_sim), the
+    # same path a cache replay takes.
     chain = {
         "real_chain": REAL_CHAIN,
+        "focus_aperture": focus_aperture,
+        **({"focus_half_angle_deg": float(focus_half_angle_deg),
+            "product_res_m": round(res_prod, 1)}
+           if focus_aperture == "fixed_angle" else {}),
         "sim_posting_m": round(spacing, 3),
         "aperture_m": round(L, 1), "half_angle_deg": round(theta_deg, 3),
         "aperture_traces": int(round(L / spacing)) + 1,
-        "azimuth_res_hann_m": round(1.44 * spacing, 1),
+        "azimuth_res_hann_m": round(1.44 * lam * r_bed / (2.0 * L), 1),
         "surface_alias_ratio": round(
             np.degrees(np.arctan((L / 2.0) / r_surf)) / theta_deg, 2),
-        "n_looks_sim": N_LOOKS_SIM,
-        "look_span_m": round(N_LOOKS_SIM * spacing, 1),
+        "n_looks_sim": n_look,
+        "look_span_m": round(n_look * spacing, 1),
         "mocomp": {"kind": "first-order nadir (dz to smoothed track), "
                            "field *= exp(+2jk dz)",
                    "dz_rms_m": round(float(np.sqrt(np.mean(dz ** 2))), 3),
@@ -1307,8 +1363,7 @@ def process_standard(p, sim):
                 "surface_alias_ratio); g6 channel combine inside the sim "
                 "array pattern",
     }
-    return {"P": P, "Ps": Ps, "Pb": Pb, "twtt": twtt, "chain": chain,
-            "Fs": Fs, "Fb": Fb}
+    return _proc_from_stacks(Fs, Fb, twtt, chain)
 
 
 # ------------------------------------------------------------------------
@@ -1395,9 +1450,14 @@ def _digests_current(stored, runs_dir):
 
 
 def _proc_from_stacks(Fs, Fb, twtt, chain):
+    """Power products from focused stacks + the recorded chain: the ONE
+    place looks are applied, for fresh processing and cache replay alike
+    (``n_looks_sim`` in the chain; the fixed_angle rule sets it above
+    N_LOOKS_SIM)."""
+    n_look = int(chain.get("n_looks_sim", N_LOOKS_SIM))
+
     def look(P):
-        return ndimage.uniform_filter1d(P, N_LOOKS_SIM, axis=0,
-                                        mode="nearest")
+        return ndimage.uniform_filter1d(P, n_look, axis=0, mode="nearest")
     return {"P": look(np.abs(Fs + Fb) ** 2), "Ps": look(np.abs(Fs) ** 2),
             "Pb": look(np.abs(Fb) ** 2), "twtt": twtt, "chain": chain,
             "Fs": Fs, "Fb": Fb}
@@ -1405,7 +1465,9 @@ def _proc_from_stacks(Fs, Fb, twtt, chain):
 
 def process_standard_cached(p, sim, out_dir, att, surf_rough,
                             force=False, antenna=None, bed_rough=None,
-                            spec=None, gfix=None):
+                            spec=None, gfix=None,
+                            focus_aperture="alias_limited",
+                            focus_half_angle_deg=5.0):
     """Cache-first process_standard (module-section comment). Also stores
     the light per-trace arrays + scalars that let load_proc_pass rebuild a
     figure-ready (p_lite, sim_lite, proc) with NO scene prep or chunk
@@ -1418,6 +1480,9 @@ def process_standard_cached(p, sim, out_dir, att, surf_rough,
     meta = {"version": PROC_CACHE_VERSION, "pass": p["key"],
             "segment": p["segment"], "n_traces": int(len(p["idx"])),
             "n_looks": N_LOOKS_SIM, "posting_div": p.get("posting_div", 1),
+            "focus_aperture": focus_aperture,
+            **({"focus_half_angle_deg": float(focus_half_angle_deg)}
+               if focus_aperture == "fixed_angle" else {}),
             "spacing_m": round(p["spacing"], 4),
             "att_db_per_km": att, "surf_rough": bool(surf_rough),
             "chunk_digests": chunk_digests(p, Path(out_dir) / "runs",
@@ -1435,7 +1500,8 @@ def process_standard_cached(p, sim, out_dir, att, surf_rough,
                                      doc["chain"])
         print(f"  [proc-cache STALE] {rid}: meta changed, rebuilding",
               flush=True)
-    proc = process_standard(p, sim)
+    proc = process_standard(p, sim, focus_aperture=focus_aperture,
+                            focus_half_angle_deg=focus_half_angle_deg)
     np.savez(npz_p, Fs=proc["Fs"], Fb=proc["Fb"], twtt=proc["twtt"],
              nadir=sim["nadir"], s_sim=p["s_sim"], surf_sim=p["surf_sim"],
              bot_sim=np.asarray(p["bot_sim"], np.float64),
@@ -1792,15 +1858,54 @@ def prep_pass(key, segment, n_traces, ref=None, gmap=None, axis=None,
 # ========================================================================
 def chunk_rows(p):
     """Split the sim trace indices into along-track chunks (~CHUNK_M, or
-    ~CHUNK_M_PROC at fine posting: ~200 traces/chunk bounds kernel memory,
-    and the shorter DEM windows cut wasted facet work)."""
+    ~CHUNK_M_PROC at fine posting; the shorter DEM windows cut wasted facet
+    work), then split further while traces x facets per interface would
+    exceed CHUNK_TRACE_FACETS (kernel memory bound)."""
     s_sel = p["s_sim"]
     track = float(s_sel[-1] - s_sel[0])
     chunk_m = CHUNK_M_PROC if p.get("proc") else CHUNK_M
     n_chunks = max(1, int(round(track / chunk_m)))
-    edges = s_sel[0] + track * np.arange(1, n_chunks) / n_chunks
-    which = np.searchsorted(edges, s_sel)
-    return [np.where(which == c)[0] for c in range(n_chunks)]
+
+    def split(n):
+        edges = s_sel[0] + track * np.arange(1, n) / n
+        which = np.searchsorted(edges, s_sel)
+        return [np.where(which == c)[0] for c in range(n)]
+
+    while True:   # memory guard (CHUNK_TRACE_FACETS)
+        chunks = split(n_chunks)
+        pairs = max(len(r) * _chunk_facets_estimate(p, r) for r in chunks)
+        if pairs <= CHUNK_TRACE_FACETS or n_chunks >= len(s_sel):
+            return chunks
+        n_chunks += 1
+
+
+def _chunk_facets_estimate(p, rows):
+    """Facets per interface the chunk_scene crop will hold for ``rows``: the
+    crop chunk_scene makes (trace bbox padded by ct + 100 m) at the pass's
+    facet spacing -- the kernel lays facets at ``p['spacing']`` over the
+    crop's extent, so a 32 m DEM cell holds (32/7.47)^2 = 18 facets at the
+    low-altitude spacing (rac._n_facets). Falls back to one facet per DEM
+    cell without a spacing; 0 without reach/base (unit tests)."""
+    base, reach = p.get("base"), p.get("reach")
+    if base is None or reach is None:
+        return 0
+    cell = 0.5 * (abs(base.transform.a) + abs(base.transform.e))
+    spacing = float(p.get("spacing") or cell)
+    if "_nav_xy" not in p:   # project the pass nav once, not per trial
+        tr = Transformer.from_crs("EPSG:4326", base.crs, always_xy=True)
+        p["_nav_xy"] = tr.transform(base.nav_llh[:, 1], base.nav_llh[:, 0])
+    px, py = p["_nav_xy"][0][rows], p["_nav_xy"][1][rows]
+    pad = reach["ct_m"] + 100.0
+    ny, nx = base.dem.shape
+    cols, rws = (~base.transform) * (
+        np.array([px.min() - pad, px.max() + pad]),
+        np.array([py.min() - pad, py.max() + pad]))
+    c0 = int(np.clip(np.floor(min(cols)), 0, nx - 2))
+    c1 = int(np.clip(np.ceil(max(cols)) + 1, c0 + 2, nx))
+    r0 = int(np.clip(np.floor(min(rws)), 0, ny - 2))
+    r1 = int(np.clip(np.ceil(max(rws)) + 1, r0 + 2, ny))
+    return int(((r1 - r0 - 1) * cell / spacing)
+               * ((c1 - c0 - 1) * cell / spacing))
 
 
 def chunk_scene(base, rows, ct, gamma=False):
@@ -1826,9 +1931,12 @@ def chunk_scene(base, rows, ct, gamma=False):
     r0 = int(np.clip(np.floor(min(rws)), 0, ny - 2))
     r1 = int(np.clip(np.ceil(max(rws)) + 1, r0 + 2, ny))
     dems = [np.ascontiguousarray(d[r0:r1, c0:c1]) for d in base.dems]
+    origin = tuple(np.asarray(getattr(base, "grid_origin", (0, 0)))
+                   + (r0, c0))
     sc = MultilayerScene(f"{base.name}_r{rows[0]}", dems,
                          base.transform * Affine.translation(c0, r0),
-                         base.crs, nav, base.media, dict(base.params))
+                         base.crs, nav, base.media, dict(base.params),
+                         grid_origin=origin)
     roll = getattr(base, "nav_roll", None)
     sc.nav_roll = None if roll is None else np.asarray(roll)[rows]
     if gamma:
@@ -1978,6 +2086,10 @@ def inst_ant_meta(p, antenna):
         fp.update(spacing_lam=a.spacing_lam,
                   tx_weights=list(a.tx_weights),
                   rx_weights=list(a.rx_weights))
+    if a.kind in ("array", "array_tapered") \
+            and a.element_directivity_db is not None:
+        fp["element_directivity_db"] = a.element_directivity_db
+        fp["element_pattern"] = "forward_cosine_power_integrated_directivity"
     if a.kind == "tabulated":
         fp.update(theta_deg=list(a.theta_deg), gain=list(a.gain))
     return {"instrument_antenna": fp}
@@ -2090,18 +2202,55 @@ def chunk_meta(p, ci, rows, n_chunks, n, att, surf_rough,
             **({} if surf_rough_acf(surf_rough_pair(surf_rough)) == "gaussian"
                else {"surf_rough_acf":
                      surf_rough_acf(surf_rough_pair(surf_rough))}),
-            "kernel": KERNEL_VERSION,   # kernel numerics era (2026-08-24)
+            "kernel": KERNEL_VERSION,
             "dt_sim_ns": round(p["rc_sim"].dt * 1e9, 5),
             "t0_us": round(p["rc_sim"].t0 * 1e6, 5),
             "n_samples_sim": p["rc_sim"].n_samples}
 
 
 def simulate_pass(p, runs_dir, att, surf_rough, force, antenna=ANT_DEFAULT,
-                  bed_rough=None, spec=None, gfix=None):
+                  bed_rough=None, spec=None, gfix=None, chunks=None):
     """Chunked cached coherent surface+bed runs; assembled per-layer fields.
-    Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...)."""
-    chunks = chunk_rows(p)
+    Returns dict(field (T,nb,2), twtt, nadir (T,2), wall_s, facets, ...).
+
+    ``chunks`` (a set of chunk indices, or ``()`` for a dry run) restricts
+    the run to those chunks for a cloud/fan-out worker: the selected chunks
+    are simulated into ``runs_dir`` under exactly the rid + meta the full
+    run uses, nothing is assembled, and the return carries ``rids`` (every
+    chunk's rid) plus ``cached`` (which of them already hit the cache)."""
+    all_chunks = chunk_rows(p)
+    est = [_chunk_facets_estimate(p, r) for r in all_chunks]
+    print(f"  chunks: {len(all_chunks)} x {min(len(r) for r in all_chunks)}-"
+          f"{max(len(r) for r in all_chunks)} traces, est facets/interface "
+          f"{min(est) / 1e3:.0f}-{max(est) / 1e3:.0f} k, max traces*facets "
+          f"{max(len(r) * e for r, e in zip(all_chunks, est)) / 1e9:.2f} G "
+          f"(budget {CHUNK_TRACE_FACETS / 1e9:.2f} G)", flush=True)
     surf_rough = resolve_surf_rough(surf_rough, p)
+    if chunks is not None:
+        cfg = None
+        partial = {"rids": [], "cached": [], "wall_s": 0.0,
+                   "n_chunks": len(all_chunks)}
+        for ci, rows in enumerate(all_chunks):
+            rid = chunk_rid(p, ci, att, surf_rough, antenna, bed_rough, spec,
+                            gfix)
+            meta = chunk_meta(p, ci, rows, len(all_chunks), len(p["idx"]),
+                              att, surf_rough, antenna, bed_rough, spec, gfix)
+            partial["rids"].append(rid)
+            if ci in chunks:
+                if cfg is None:
+                    cfg = sim_cfg(p["rc_sim"], p["spacing"], att, surf_rough,
+                                  antenna, bed_rough,
+                                  diffuse_exponent=spec[2] if spec else 1.0,
+                                  gfix=gfix)
+                scene = chunk_scene(p["base"], rows, p["reach"]["ct_m"],
+                                    gamma=p["gamma_rssnr"])
+                diag, _ = rac.run_level(rid, scene, cfg, meta, runs_dir,
+                                        p["oversample"], force)
+                partial["wall_s"] += diag["wall_s"]
+            partial["cached"].append(
+                rac.chunk_cached(rid, meta, runs_dir) is not None)
+        return partial
+    chunks = all_chunks
     if surf_rough_tag(surf_rough):
         print(f"  surface roughness: sigma {surf_rough[0] * 100:.2f} cm, "
               f"l {surf_rough[1]:.3f} m (non-fixture; chunk rid"
@@ -3292,6 +3441,8 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         demogorgn_bed=None,     # None -> the line's bed_dem decides
         demogorgn_seed=0, companion=True, out_name=None,
         antenna=ANT_DEFAULT, bed_rough=None, posting_div=1,
+        focus_aperture="alias_limited",
+        focus_half_angle_deg=5.0,   # fixed_angle rule: Doppler half-angle
         bed_rough_extra_db=0.0, passes=None, spec=None,
         grazing_fix=None,   # None -> ON at GRAZING_FIX['s_eff']; False -> off
 
@@ -3299,7 +3450,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         per_pass_figs=False,
         plot_s_max_km=None, proc_cache=False, line=None,
         spec_doc=None, spec_path=None,
-        instruments=None, extra_passes=None):
+        instruments=None, extra_passes=None,
+        simulate_only=None,  # {pass: set(chunk) | None}: simulate, no analysis
+        dry_run=False,       # prep every pass, report chunk rids, simulate none
+        list_passes=False):  # return the resolved pass order, touch no data
     # Always re-activate: this resets PASSES to the line definition, so
     # extra_passes added below cannot leak into a later run in-process.
     activate_line(line or LINE)
@@ -3401,6 +3555,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
     if not order:
         raise ValueError(f"no pass covers segment {segment!r} on line "
                          f"{LINE!r}")
+    if list_passes:
+        return order
+    if simulate_only:
+        unknown = [k for k in simulate_only if k not in order]
+        if unknown:
+            raise ValueError(f"simulate_only: {unknown} not among this "
+                             f"run's passes {order}")
+        order = [k for k in order if k in simulate_only]
     n_traces = n_traces or N_TRACES_BY_SEGMENT[segment]
     ts_km = (DECOMP_S_KM[segment] if trace_decomp_s_km is None
              else trace_decomp_s_km)
@@ -3499,6 +3661,19 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
               f"n_traces {len(p['idx'])}; "
               f"n_samples_sim {p['rc_sim'].n_samples}", flush=True)
         preps[key] = p
+        if dry_run or simulate_only is not None:
+            # fan-out worker / manifest mode: chunks into runs/, no analysis
+            want = () if dry_run else simulate_only[key]
+            r = simulate_pass(p, runs_dir, att, surf_rough, force,
+                              antenna=antenna, bed_rough=bed_rough,
+                              spec=spec, gfix=grazing_fix,
+                              chunks=(set(range(len(chunk_rows(p))))
+                                      if want is None else set(want)))
+            sims[key] = r
+            for ci, (rid, hit) in enumerate(zip(r["rids"], r["cached"])):
+                print(f"  chunk {ci:02d} {'cached' if hit else 'MISSING'} "
+                      f"{rid}", flush=True)
+            continue
         sims[key] = simulate_pass(p, runs_dir, att, surf_rough, force,
                                   antenna=antenna, bed_rough=bed_rough,
                                   spec=spec, gfix=grazing_fix)
@@ -3508,8 +3683,12 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                                   antenna=antenna,
                                                   bed_rough=bed_rough,
                                                   spec=spec,
-                                                  gfix=grazing_fix)
-                          if proc_cache else process_standard(p, sims[key]))
+                                                  gfix=grazing_fix,
+                                                  focus_aperture=focus_aperture,
+                                                  focus_half_angle_deg=focus_half_angle_deg)
+                          if proc_cache else process_standard(
+                              p, sims[key], focus_aperture=focus_aperture,
+                              focus_half_angle_deg=focus_half_angle_deg))
             ch = procs[key]["chain"]
             print(f"  processed: aperture {ch['aperture_m']:.0f} m "
                   f"({ch['aperture_traces']} traces, half-angle "
@@ -3538,6 +3717,17 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                 main_slug)
             print(f"FIGSET_READY {key}", flush=True)
 
+    if dry_run or simulate_only is not None:
+        # chunk manifest for the fan-out launcher: one entry per pass with
+        # every chunk's rid + cache state; nothing else is written
+        manifest = {k: {"rids": s["rids"], "cached": s["cached"],
+                        "n_chunks": s["n_chunks"], "wall_s": s["wall_s"]}
+                    for k, s in sims.items()}
+        n_hit = sum(sum(m["cached"]) for m in manifest.values())
+        n_all = sum(m["n_chunks"] for m in manifest.values())
+        print(f"CHUNKS {n_hit}/{n_all} cached in {runs_dir}", flush=True)
+        return manifest, None, out
+
     # ---- RSSNR-gamma acceptance: vs the constant-gamma companion run ----
     corr_stats = corr_series = None
     if gamma_rssnr and companion:
@@ -3549,7 +3739,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             p_const["gamma_rssnr"] = False
             sim_c = simulate_pass(p_const, runs_const, att, surf_rough,
                                   False, gfix=grazing_fix)
-            proc_c = process_standard(preps[key], sim_c) if proc else None
+            proc_c = (process_standard(
+                preps[key], sim_c, focus_aperture=focus_aperture,
+                focus_half_angle_deg=focus_half_angle_deg) if proc else None)
             a_const = analyze_pass(preps[key], sim_c, proc=proc_c)
             corr_stats[key], corr_series[key] = bed_profile_correlations(
                 preps[key], analyses[key], a_const, gmap, axis)
@@ -3581,7 +3773,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                  axis=axis, fine_posting=proc, dgn_seed=seed)
                 s_ab = simulate_pass(p_ab, runs_ab, att, surf_rough, force,
                                      gfix=grazing_fix)
-                proc_ab = process_standard(p_ab, s_ab) if proc else None
+                proc_ab = (process_standard(
+                    p_ab, s_ab, focus_aperture=focus_aperture,
+                    focus_half_angle_deg=focus_half_angle_deg)
+                    if proc else None)
                 pr[key], sm[key] = p_ab, s_ab
                 an[key] = analyze_pass(p_ab, s_ab, proc=proc_ab)
             ab_rows.append((pr, an, label, sm))
@@ -3943,11 +4138,14 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
         "att_db_per_km": att, "surf_rough": surf_rough,
         "surface_roughness": surface_roughness_record(surf_rough, preps),
         "margin_us": MARGIN_US, "post_bed_window_us": POST_BED_US,
-        "chunk_m": CHUNK_M, "picked_bed": bool(picked_bed),
+        "chunk_m": CHUNK_M, "chunk_trace_facets": CHUNK_TRACE_FACETS,
+        "picked_bed": bool(picked_bed),
         "gamma_rssnr": bool(gamma_rssnr),
         "demogorgn_bed": bool(demogorgn_bed),
         "antenna": antenna,
         "posting_div": posting_div,
+        "focus_aperture": focus_aperture,
+        "focus_half_angle_deg": focus_half_angle_deg,
         "grazing_fix": (None if grazing_fix is None else {
             "s_eff": grazing_fix,
             "model": "Grazing-angle facet-lattice fix (GrazingFixConfig): "
@@ -4425,9 +4623,30 @@ def main_config():
                     help="override the spec's run.out_root (execution only)")
     ap.add_argument("--force", action="store_true",
                     help="re-simulate cached chunks")
+    # fan-out workers (tools/gcp): the chunk cache in runs/ is the interface,
+    # so a worker simulates chunks under the run's exact rid + meta and a
+    # later normal run of the same spec hits [skip-exists] on them
+    ap.add_argument("--simulate-only", nargs="+", default=None,
+                    metavar="PASS[:CHUNK,..]",
+                    help="simulate only these passes (optionally only the "
+                    "listed 0-based chunks) into runs/ and exit before any "
+                    "processing/analysis")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="prep every pass and print each chunk's rid and "
+                    "cache state; simulate nothing")
+    ap.add_argument("--list-passes", action="store_true",
+                    help="print the passes this spec runs on --line and "
+                    "exit (no data touched)")
     args = ap.parse_args()
     spec = load_spec(args.config)
     kw = spec.to_run_kwargs()
+    if args.simulate_only:
+        kw["simulate_only"] = {}
+        for item in args.simulate_only:
+            key, _, cs = item.partition(":")
+            kw["simulate_only"][key] = ([int(c) for c in cs.split(",")]
+                                        if cs else None)
+    kw["dry_run"] = args.dry_run
     if spec.run.lines:
         if not args.line or args.line not in spec.run.lines:
             raise SystemExit(
@@ -4449,8 +4668,15 @@ def main_config():
     global FIG_WIDTH_SCALE, BED_OVERLAY
     FIG_WIDTH_SCALE = spec.run.figures.width_scale
     BED_OVERLAY = spec.run.figures.bed_overlay
+    if args.list_passes:
+        print("\n".join(run(**kw, list_passes=True)))
+        return None
     print(f"spec {spec.meta.name!r} <- {args.config}", flush=True)
     gamma, att, cal_rec = resolve_calibration(kw["line"])
+    if (args.simulate_only or args.dry_run) and gamma == "solve":
+        raise SystemExit("--simulate-only/--dry-run need a manual "
+                         "gamma_surface_db: the solve loop changes the "
+                         "chunk cache key between its evaluations")
     gtxt = ("solve" if gamma == "solve" else
             f"{gamma:+.2f} dB (anomaly {cal_rec['surface_anomaly_db']:+.2f})")
     print(f"calibration [{cal_rec['line']}]: gamma_surface {gtxt}, "
@@ -4536,6 +4762,8 @@ def main_config():
               f"gamma_required "
               f"{history[-1]['gamma_required_median_db']:+.2f} dB",
               flush=True)
+    if args.simulate_only or args.dry_run:
+        return out   # chunks only: no run_config.json/metrics to annotate
     cfg_path = Path(out[2]) / "run_config.json"
     doc = json.loads(cfg_path.read_text())
     doc["calibration_resolution"] = cal_rec
@@ -4714,6 +4942,19 @@ def main():
                     "(2 -> 7.43 m, doubling the alias-limited aperture and "
                     "the simulation cost); measured data untouched. "
                     "Requires --processing standard")
+    ap.add_argument("--focus-aperture",
+                    choices=("alias_limited", "product_resolution",
+                             "first_fresnel", "fixed_angle"),
+                    default="alias_limited",
+                    help="focused-SAR aperture rule (default uses the full "
+                    "unaliased Doppler band; product_resolution preserves "
+                    "the original-posting aperture after refinement; "
+                    "first_fresnel uses one monostatic Fresnel-zone diameter "
+                    "at bed optical range; fixed_angle focuses with "
+                    "--focus-half-angle-deg and multilooks to the "
+                    "product_resolution azimuth resolution)")
+    ap.add_argument("--focus-half-angle-deg", type=float, default=5.0,
+                    help="fixed_angle Doppler half-angle (degrees)")
     ap.add_argument("--fig-width-scale", type=float, default=1.0,
                     help="radargram figure width multiplier "
                     "(plot-iteration knob; cache-replay safe)")
@@ -4746,6 +4987,8 @@ def main():
         bed_rough=tuple(args.bed_rough) if args.bed_rough else None,
         grazing_fix=(False if args.no_grazing_fix else args.grazing_fix),
         posting_div=args.posting_div, passes=args.passes,
+        focus_aperture=args.focus_aperture,
+        focus_half_angle_deg=args.focus_half_angle_deg,
         bed_rough_extra_db=args.bed_rough_extra_db,
         trace_decomp_s_km=args.trace_decomp_s,
         per_pass_figs=args.per_pass_figs, plot_s_max_km=args.plot_s_max,

@@ -1,10 +1,12 @@
 """Antenna gain patterns (stage 4, M22): per-facet two-way gain in all kernels.
 
 Convention (plan D4-2, stated once here and in physics.py): ``g`` is the
-ONE-WAY FIELD gain of the antenna in a departure direction, dimensionless and
-peak-normalized (isotropic g = 1; dipole broadside g = 1; array main lobe
-g = 1). Monostatic (same antenna transmits and receives), so the two-way
-weighting is
+ONE-WAY FIELD gain of the antenna in a departure direction and dimensionless.
+Patterns are peak-normalized unless an array specifies element directivity.
+Such arrays use a forward-hemisphere cosine-power element pattern whose
+integrated directivity matches the scalar; the peak is the numerically
+integrated directivity of element times array factor, per side. Monostatic (same antenna transmits and receives), so the
+two-way weighting is
 
     received field  *= g_tx * g_rx = g**2      (coherent / multilayer kernels)
     received power  *= |g**2|**2   = g**4      (incoherent kernel)
@@ -28,6 +30,8 @@ reuses the compiled kernel. The gain is evaluated in-kernel from the
 facet->platform direction already computed there; the per-trace frame vectors
 are precomputed here in NumPy (T x 3, cheap).
 """
+
+import functools
 
 import numpy as np
 
@@ -72,11 +76,15 @@ def frame_vectors(antenna, u_at, u_ct, roll=None):
 def pattern_args(antenna, u_at, u_ct, roll=None):
     """Kernel pattern arguments: None (isotropic) or ``(kind, pv, pa, pb)``.
 
-    pv: (T, 3) float64 per-trace pattern vector (kernels cast to their working
-    dtype); pa/pb: traced parameter arrays --
+    pv: float64 per-trace pattern vectors (kernels cast to their working
+    dtype); arrays carry (T, 2, 3) [cross-track axis, boresight], other kinds
+    carry (T, 3). pa/pb are traced parameter arrays --
       dipole:        unused scalar zeros
-      array:         pa = n_elements, pb = spacing_lam (scalars)
-      array_tapered: pa = (2, n) [tx_weights; rx_weights], pb = spacing_lam
+      array:         pa = n_elements,
+                     pb = [spacing_lam, field_scale, element_power_exponent,
+                           element_pattern_enabled]
+      array_tapered: pa = (2, n) [tx_weights; rx_weights],
+                     pb = same array controls
       finite_dipole: pa = length_lam, pb unused
       tabulated:     pa = theta samples (radians, ascending), pb = field gains
     """
@@ -84,11 +92,21 @@ def pattern_args(antenna, u_at, u_ct, roll=None):
         return None
     pv = frame_vectors(antenna, u_at, u_ct, roll)
     if antenna.kind == "array":
+        pv = _array_frame(pv, u_at)
         pa = np.float64(antenna.n_elements)
-        pb = np.float64(antenna.spacing_lam)
+        pb = np.asarray([antenna.spacing_lam,
+                         _array_field_scale(antenna),
+                         element_power_exponent(
+                             antenna.element_directivity_db),
+                         antenna.element_directivity_db is not None], np.float64)
     elif antenna.kind == "array_tapered":
+        pv = _array_frame(pv, u_at)
         pa = np.asarray([antenna.tx_weights, antenna.rx_weights], np.float64)
-        pb = np.float64(antenna.spacing_lam)
+        pb = np.asarray([antenna.spacing_lam,
+                         _array_field_scale(antenna),
+                         element_power_exponent(
+                             antenna.element_directivity_db),
+                         antenna.element_directivity_db is not None], np.float64)
     elif antenna.kind == "finite_dipole":
         pa = np.float64(antenna.length_lam)
         pb = np.float64(0.0)
@@ -98,6 +116,89 @@ def pattern_args(antenna, u_at, u_ct, roll=None):
     else:  # dipole
         pa = pb = np.float64(0.0)
     return antenna.kind, pv, pa, pb
+
+
+def _array_frame(axis, u_at):
+    """Stack cross-track element axis and nadir/rolled boresight."""
+    boresight = np.cross(np.asarray(u_at, np.float64), axis)
+    return np.stack([axis, boresight], axis=1)
+
+
+def element_power_exponent(directivity_db):
+    """q for P(theta)/P(0) = cos(theta)^q on the forward hemisphere.
+
+    Its directivity is 2(q + 1). Three dBi is treated as the rounded value
+    for a uniform hemisphere (exactly 3.0103 dBi).
+    """
+    if directivity_db is None:
+        return 0.0
+    return max(10.0 ** (directivity_db / 10.0) / 2.0 - 1.0, 0.0)
+
+
+def element_field_pattern(cos_theta, power_exponent, enabled=True, xp=np):
+    """Peak-normalized forward-hemisphere element field pattern."""
+    c = xp.clip(cos_theta, 0.0, 1.0)
+    forward = xp.where(cos_theta >= 0.0,
+                       c ** (power_exponent / 2.0), 0.0)
+    return xp.where(enabled, forward, xp.ones_like(c))
+
+
+def _line_array_field(u, cos_bore, weights, spacing_lam, q):
+    """Unscaled one-way field of a tapered line array of cosine-power
+    elements: u = direction . axis (sin theta_ct), cos_bore = direction .
+    boresight. AF is normalized by sum(w); the element factor is
+    peak-normalized."""
+    w = np.asarray(weights, np.float64)
+    m = np.arange(len(w)) - (len(w) - 1) / 2.0
+    ph = (2.0 * np.pi * spacing_lam) * np.asarray(u)[..., None] * m
+    af = np.hypot(np.cos(ph) @ w, np.sin(ph) @ w) / w.sum()
+    return element_field_pattern(cos_bore, q) * af
+
+
+def _side_directivity(weights, spacing_lam, q, n_theta=720, n_phi=720):
+    """Peak power directivity of one side's one-way pattern, integrated
+    numerically over the sphere (midpoint rule; theta from boresight)."""
+    th = (np.arange(n_theta) + 0.5) * (np.pi / n_theta)
+    ph = (np.arange(n_phi) + 0.5) * (2.0 * np.pi / n_phi)
+    st, ct = np.sin(th)[:, None], np.cos(th)[:, None]
+    u = st * np.cos(ph)[None, :]                   # component along the axis
+    P = _line_array_field(u, np.broadcast_to(ct, u.shape),
+                          weights, spacing_lam, q) ** 2
+    d_omega = st * (np.pi / n_theta) * (2.0 * np.pi / n_phi)
+    return 4.0 * np.pi * P.max() / np.sum(P * d_omega)
+
+
+@functools.lru_cache(maxsize=64)
+def _array_directivity_scale(tx_weights, rx_weights, spacing_lam,
+                             directivity_db):
+    q = element_power_exponent(directivity_db)
+    d_tx = _side_directivity(tx_weights, spacing_lam, q)
+    d_rx = (d_tx if rx_weights == tx_weights
+            else _side_directivity(rx_weights, spacing_lam, q))
+    return float((d_tx * d_rx) ** 0.25)
+
+
+def _array_field_scale(antenna):
+    """Absolute peak field gain, or one for legacy normalized arrays.
+
+    g**2 (two-way) equals sqrt(D_tx * D_rx) where each side's directivity is
+    the numerically integrated element-times-array-factor pattern. For
+    uniform-hemisphere (3 dBi) elements at multiples of half-wavelength
+    spacing this reduces to the closed form D = 2 N_eff per side; for
+    directive elements it is lower than the product of element and array
+    directivities, because both narrow the beam in the cross-track plane.
+    Mutual coupling and the platform environment are not modeled: the
+    element dBi describes the embedded element.
+    """
+    if antenna.element_directivity_db is None:
+        return 1.0
+    if antenna.kind == "array":
+        tx = rx = (1.0,) * antenna.n_elements
+    else:
+        tx = tuple(float(w) for w in antenna.tx_weights)
+        rx = tuple(float(w) for w in antenna.rx_weights)
+    return _array_directivity_scale(tx, rx, float(antenna.spacing_lam),
+                                    float(antenna.element_directivity_db))
 
 
 def gain_fn(kind):
@@ -116,14 +217,16 @@ def gain_fn(kind):
             return jnp.cos((np.pi / 2.0) * ca) / s
     elif kind == "array":
         def g(dhat, pv, pa, pb):
-            u = jnp.sum(dhat * pv, axis=-1)           # sin(theta_ct)
-            x = np.pi * pb * u
+            u = jnp.sum(dhat * pv[0], axis=-1)        # sin(theta_ct)
+            ct = jnp.sum(dhat * pv[1], axis=-1)       # cos(theta_boresight)
+            x = np.pi * pb[0] * u
             sx = jnp.sin(x)
             near = jnp.abs(sx) < 1e-5                 # main/grating lobe peaks
             safe = jnp.where(near, 1.0, sx)
             af = jnp.where(near, jnp.cos(pa * x) / jnp.cos(x),
                            jnp.sin(pa * x) / (pa * safe))
-            return jnp.abs(af)
+            ef = element_field_pattern(ct, pb[2], pb[3], xp=jnp)
+            return pb[1] * ef * jnp.abs(af)
     elif kind == "array_tapered":
         def g(dhat, pv, pa, pb):
             # AF_w(u) = |sum_m w_m exp(i 2 pi d_lam m u)| / sum(w), element
@@ -131,12 +234,14 @@ def gain_fn(kind):
             # two-way g**2 is the physical AF_tx * AF_rx.
             n = pa.shape[1]
             m = jnp.arange(n, dtype=pa.dtype) - (n - 1) / 2.0
-            u = jnp.sum(dhat * pv, axis=-1)           # sin(theta_ct)
-            ph = (2.0 * np.pi * pb) * u[..., None] * m
+            u = jnp.sum(dhat * pv[0], axis=-1)        # sin(theta_ct)
+            ct = jnp.sum(dhat * pv[1], axis=-1)       # cos(theta_boresight)
+            ph = (2.0 * np.pi * pb[0]) * u[..., None] * m
             c, s = jnp.cos(ph), jnp.sin(ph)
             def af(w):
                 return jnp.sqrt((c @ w) ** 2 + (s @ w) ** 2) / jnp.sum(w)
-            return jnp.sqrt(af(pa[0]) * af(pa[1]))
+            ef = element_field_pattern(ct, pb[2], pb[3], xp=jnp)
+            return pb[1] * ef * jnp.sqrt(af(pa[0]) * af(pa[1]))
     elif kind == "finite_dipole":
         def g(dhat, pv, pa, pb):
             kh = np.pi * pa                            # k * L / 2
@@ -173,21 +278,25 @@ def field_gain(antenna, dhat, u_at, u_ct, roll=None):
         s = np.sqrt(np.maximum(1.0 - ca * ca, 1e-12))
         return np.cos((np.pi / 2.0) * ca) / s
     if kind == "array":
-        x = np.pi * float(pb) * (d @ v)
+        axis, boresight = v
+        x = np.pi * pb[0] * (d @ axis)
         sx = np.sin(x)
         near = np.abs(sx) < 1e-5
         af = np.where(near, np.cos(pa * x) / np.cos(x),
                       np.sin(pa * x) / (pa * np.where(near, 1.0, sx)))
-        return np.abs(af)
+        ef = element_field_pattern(d @ boresight, pb[2], pb[3])
+        return pb[1] * ef * np.abs(af)
     if kind == "array_tapered":
+        axis, boresight = v
         n = pa.shape[1]
         m = np.arange(n) - (n - 1) / 2.0
-        ph = (2.0 * np.pi * float(pb)) * (d @ v)[..., None] * m
+        ph = (2.0 * np.pi * pb[0]) * (d @ axis)[..., None] * m
 
         def af(w):
             return np.hypot(np.cos(ph) @ w, np.sin(ph) @ w) / w.sum()
 
-        return np.sqrt(af(pa[0]) * af(pa[1]))
+        ef = element_field_pattern(d @ boresight, pb[2], pb[3])
+        return pb[1] * ef * np.sqrt(af(pa[0]) * af(pa[1]))
     if kind == "finite_dipole":
         kh = np.pi * float(pa)
         ca = d @ v

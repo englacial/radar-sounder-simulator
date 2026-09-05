@@ -53,6 +53,7 @@ def test_offset_facets_geometry():
     assert np.allclose(np.linalg.norm(disp, axis=1), 2.0)
     assert np.array_equal(shifted.normals, ref.normals)
     assert np.array_equal(shifted.areas, ref.areas)
+    assert np.array_equal(shifted.phase_keys, ref.phase_keys)
 
 
 def _cfg(interfaces, media):

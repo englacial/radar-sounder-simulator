@@ -15,8 +15,54 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import run_basal_clutter as rbc  # noqa: E402
+from soundersim import synthetic as syn  # noqa: E402
 
 C = 299792458.0
+
+
+def test_chunk_scene_records_parent_grid_origin():
+    base = syn.slab_scene(extent=4000.0, posting=50.0, n_traces=30,
+                          spacing=100.0)
+    chunk = rbc.chunk_scene(base, np.arange(4, 10), ct=300.0)
+    r0, c0 = chunk.grid_origin
+    assert r0 > 0 and c0 > 0
+    np.testing.assert_allclose(chunk.transform * (0, 0),
+                               base.transform * (c0, r0))
+
+
+def test_chunk_rows_splits_further_on_trace_facet_budget():
+    """Chunk count follows the along-track target until traces x facets
+    (from the chunk_scene crop) would exceed the kernel memory budget."""
+    rbc.activate_line("antarctica_pineisland_north")
+    base = syn.slab_scene(extent=30_000.0, posting=7.467, n_traces=5409,
+                          spacing=1.85)
+    s_sim = np.linspace(0.0, 10_000.0, 5409)
+    n_track = len(rbc.chunk_rows({"s_sim": s_sim, "proc": True}))
+    small = {"s_sim": s_sim, "proc": True, "base": base,
+             "reach": {"ct_m": 300.0}}        # ~1e8 pairs: under budget
+    big = {"s_sim": s_sim, "proc": True, "base": base,
+           "reach": {"ct_m": 3714.0}}         # the david basler_2017 case
+    assert len(rbc.chunk_rows(small)) == n_track
+    chunks = rbc.chunk_rows(big)
+    assert len(chunks) > n_track
+    assert sum(len(c) for c in chunks) == 5409
+    for c in chunks:
+        assert len(c) * rbc._chunk_facets_estimate(big, c) \
+            <= rbc.CHUNK_TRACE_FACETS
+
+
+def test_fixed_angle_aperture_and_product_resolution_looks():
+    """fixed_angle: aperture from the half-angle; the multilook degrades the
+    focused image to the product_resolution azimuth resolution."""
+    lam, r = 1.5, 9600.0
+    L, th = rbc.fixed_angle_aperture(r, 5.0)
+    assert th == 5.0 and L == pytest.approx(2 * r * np.tan(np.radians(5.0)))
+    spacing, pdiv = 29.6 / 8, 8
+    n, res = rbc.product_resolution_looks(lam, spacing, pdiv, r, 3)
+    L_prod, _ = rbc.alias_limited_aperture(lam, spacing * pdiv, r)
+    assert res == pytest.approx(1.44 * lam * r / (2 * L_prod))
+    assert n == max(3, round(res / spacing)) and n > 3
+    assert rbc.product_resolution_looks(lam, 100.0, 1, r, 3)[0] == 3
 
 
 # --------------------------------------------------- alias-limited aperture
@@ -143,7 +189,8 @@ def test_chunk_digests_forwards_the_hypothesis_knobs(tmp_path):
     existed. The digests must be computed with the same knobs the chunks
     were simulated with."""
     p = {"key": "k", "segment": "pilot", "picked_bed": False,
-         "gamma_rssnr": True, "proc": True, "dgn": True}
+         "gamma_rssnr": True, "proc": True, "dgn": True,
+         "rc_sim": rbc.RadarConfig(dt=1e-9, n_samples=64, t0=0.0)}
     spec, brough = (0.5, 3.0, 1.0), (0.22, 0.886)
     rid = rbc.chunk_rid(p, 0, 18.61, True, bed_rough=brough, spec=spec)
     assert "_fs0.5" in rid and "_brough0.22" in rid
@@ -153,3 +200,27 @@ def test_chunk_digests_forwards_the_hypothesis_knobs(tmp_path):
     assert set(d) == {rid}
     with pytest.raises(FileNotFoundError):    # knobs dropped = old bug
         rbc.chunk_digests(p, tmp_path, 1, 18.61, True)
+
+
+def test_fixed_angle_cache_replay_reproduces_the_powers():
+    """PR #2 review finding 1: the powers rebuilt from cached focused stacks
+    must equal the fresh ones -- the looks come from the recorded chain."""
+    from types import SimpleNamespace
+    rbc.activate_line("antarctica_getz")
+    n, nb = 64, 16
+    s = np.arange(n) * (29.6 / 8)
+    rng = np.random.default_rng(12)
+    field = (rng.normal(size=(n, nb, 2))
+             + 1j * rng.normal(size=(n, nb, 2))).astype(np.complex64)
+    nav = np.column_stack([np.full(n, -75.0), -105.0 + s / 111e3,
+                           np.full(n, 9000.0)])
+    p = dict(lam=1.5, s_sim=s, posting_div=8,
+             bot_sim=np.full(n, 2 * 9600 / C), surf_sim=np.full(n, 2 * 9000 / C),
+             base=SimpleNamespace(nav_llh=nav))
+    sim = dict(field=field, twtt=2 * 9000 / C + np.arange(nb) * 2e-8)
+    fresh = rbc.process_standard(p, sim, focus_aperture="fixed_angle")
+    assert fresh["chain"]["n_looks_sim"] > rbc.N_LOOKS_SIM
+    replay = rbc._proc_from_stacks(fresh["Fs"], fresh["Fb"], fresh["twtt"],
+                                   fresh["chain"])
+    for name in ("P", "Ps", "Pb"):
+        np.testing.assert_array_equal(replay[name], fresh[name])

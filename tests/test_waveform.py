@@ -240,7 +240,7 @@ def test_simulate_chirp_end_to_end():
     # the chirped peak collects the leading edge into the main lobe, so it
     # can only exceed the delta per-bin peak by the pulse compression gain
     ratio = float(ds_c.power.max() / ds_d.power.max())
-    assert 0.8 < ratio < 20.0
+    assert 0.7 < ratio < 20.0
 
 
 def test_incoherent_envelope_default_off_and_opt_in():

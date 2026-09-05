@@ -3,8 +3,9 @@ meta:
   name: full
   description: >
     Every study line over its full overlap window: the real passes as flown
-    plus the cross-line HAPS design point (haps_60mhz at 14 and 20 km riding
-    the reference pass). Run: tools/run_basal_clutter.py --config
+    plus the cross-line HAPS design points (the six-element 60 MHz
+    half-wavelength and one-wavelength arrays at 14 km riding the reference
+    pass). Run: tools/run_basal_clutter.py --config
     config/experiments/full.yaml --line <line>.
 
 run:
@@ -14,8 +15,10 @@ run:
   segment: full
 
   extra_passes:
-    haps_14km: {carrier: reference, altitude_m: 14000.0, instrument: haps_60mhz}
-    haps_20km: {carrier: reference, altitude_m: 20000.0, instrument: haps_60mhz}
+    haps_14km_halflambda: {carrier: reference, altitude_m: 14000.0,
+                           instrument: haps_60mhz_6el_halflambda}
+    haps_14km_lambda: {carrier: reference, altitude_m: 14000.0,
+                       instrument: haps_60mhz_6el_lambda}
 
   bed:                         # DEM comes from the line (identity.bed_dem)
     nadir: picked
@@ -38,4 +41,14 @@ run:
   processing:
     chain: standard
     proc_cache: true
+    # posting_div 8 refines slow time to ~1.9 m at 60 MHz so wide-angle
+    # along-track surface returns are not Doppler-aliased into the HAPS
+    # images (2026-09-03: at posting_div 1 they buried the bed by ~18 dB).
+    # fixed_angle focuses with a +-5 deg Doppler band (the narrow
+    # product_resolution band gated tilted 32 m facets, striping the 195 MHz
+    # passes and discarding ~8 dB of surface clutter) and multilooks the
+    # power down to the product_resolution azimuth resolution.
+    posting_div: 8
+    focus_aperture: fixed_angle
+    focus_half_angle_deg: 5.0
     companion: false
