@@ -7,6 +7,7 @@ rid, and metrics.json scalars per pass key. Cloud-vs-local check.
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -50,17 +51,27 @@ def flat(d, pre=""):
 
 
 def cmp_metrics(a, b, keys):
+    """(differing rows, n shared keys, problems): a non-finite value on
+    either side or a filtered key present on one side only is a problem,
+    never silently skipped."""
     ma = flat(json.loads(a.read_text()).get("metrics", {}))
     mb = flat(json.loads(b.read_text()).get("metrics", {}))
-    rows = []
+    sel = lambda k: not keys or any(s in k for s in keys)  # noqa: E731
+    skip = lambda k: "wall" in k or k.endswith("_s")       # noqa: E731
+    rows, problems = [], []
+    for k in sorted((set(ma) ^ set(mb))):
+        if sel(k) and not skip(k):
+            problems.append((k, "only in cloud" if k in ma else "only in local"))
     for k in sorted(set(ma) & set(mb)):
-        if keys and not any(s in k for s in keys):
+        if not sel(k) or skip(k):
             continue
-        if "wall" in k or "_s" == k[-2:]:
+        if not (np.isfinite(ma[k]) and np.isfinite(mb[k])):
+            if not (np.isnan(ma[k]) and np.isnan(mb[k])):
+                problems.append((k, f"non-finite: cloud {ma[k]} local {mb[k]}"))
             continue
-        if np.isfinite(ma[k]) and np.isfinite(mb[k]) and ma[k] != mb[k]:
+        if ma[k] != mb[k]:
             rows.append((k, ma[k], mb[k], ma[k] - mb[k]))
-    return rows, len(set(ma) & set(mb))
+    return rows, len(set(ma) & set(mb)), problems
 
 
 def main():
@@ -73,13 +84,18 @@ def main():
                     default=["midcol_rel_surf_db", "bed_visibility",
                              "clutter_", "rssnr_level"])
     a = ap.parse_args()
+    bad = 0
     for line in a.lines:
         ca, cb = (Path(a.cloud) / line / a.exp, Path(a.local) / line / a.exp)
         print(f"\n=== {line}/{a.exp}")
         for rid, st, worst, wa, wb in cmp_chunks(ca / "runs", cb / "runs"):
             if worst is None:
                 print(f"  {rid}: {st}")
+                bad += 1
                 continue
+            if st != "meta==" or any(v[0] == "shape" or v[0] > 0
+                                     for v in worst.values()):
+                bad += 1
             f = worst.get("field")
             if f[0] == "shape":
                 print(f"  {rid[:40]}..: {st}  field shape {f[1]} vs {f[2]} "
@@ -90,12 +106,20 @@ def main():
                   f"twtt {worst['twtt'][0]:.2e} s  wall cloud/local "
                   f"{wa:.0f}/{wb:.0f} s")
         if (ca / "metrics.json").exists() and (cb / "metrics.json").exists():
-            rows, n = cmp_metrics(ca / "metrics.json", cb / "metrics.json",
-                                  a.metric_keys)
-            print(f"  metrics: {n} shared scalar keys, {len(rows)} differ "
-                  f"(filtered to {a.metric_keys}):")
+            rows, n, problems = cmp_metrics(
+                ca / "metrics.json", cb / "metrics.json", a.metric_keys)
+            print(f"  metrics: {n} shared scalar keys, {len(rows)} differ, "
+                  f"{len(problems)} missing/non-finite (filtered to "
+                  f"{a.metric_keys}):")
             for k, x, y, d in rows:
                 print(f"    {k}: cloud {x:.4f} local {y:.4f} diff {d:+.4f}")
+            for k, why in problems:
+                print(f"    {k}: {why}")
+            bad += len(rows) + len(problems)
+        else:
+            print("  metrics: missing on one side")
+            bad += 1
+    sys.exit(1 if bad else 0)
 
 
 if __name__ == "__main__":

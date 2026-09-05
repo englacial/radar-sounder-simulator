@@ -30,6 +30,7 @@ RAM_PER_CORE_GIB = {"highmem": 8.0, "standard": 4.0, "highcpu": 2.0,
 # picks, bed synthesis -- paid once per task) + one chunk of simulation
 DEFAULT_PREP_S = 300.0
 DEFAULT_CHUNK_S = {"heavy": 300.0, "light": 120.0}
+DEFAULT_PROCESS_S = 3600.0   # one process task per line without records
 OVERHEAD = 0.10        # VM boot / idle / tail not covered by task records
 
 
@@ -115,13 +116,13 @@ def pass_class(key):
     return "heavy"
 
 
-def timing_records(line):
-    """Per-task timing json records of past jobs for ``line``."""
+def timing_records(line, mode="simulate"):
+    """Per-task timing json records of past jobs for ``line`` and mode."""
     out = []
     for f in glob.glob(str(ROOT / "outputs" / "gcp" / "*" / "timing"
                            / "*.json")):
         d = json.load(open(f))
-        if d.get("line") == line and d.get("mode") == "simulate":
+        if d.get("line") == line and d.get("mode") == mode:
             out.append(d)
     return out
 

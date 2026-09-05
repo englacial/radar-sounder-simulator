@@ -93,7 +93,21 @@ gcloud compute routers list --regions us-central1   # must show no soundersim-*
 ## Notes
 
 - Tasks are idempotent: a retried (preempted) task copies its job's earlier
-  results in first and re-simulates only the missing chunks.
+  results in first and re-simulates only the missing chunks. A grouped task
+  publishes each finished chunk (npz, then json) every 60 s and at exit, so
+  a preemption or a late failure keeps the chunks already done.
+- Budget accounting bills VM lifetime (running VMs x elapsed, accumulated
+  every guard tick) or the task records, whichever is larger, so failed and
+  preempted attempts count; a job is reserved in the ledger at submit with
+  its projection and replaced by the measured cost at the end, so
+  concurrent launchers see each other. A budget kill is only reported when
+  the deletion is confirmed (`BUDGET_KILL_FAILED` otherwise).
+- Chunks the staged manifest marks cached are skipped only when their
+  files exist locally, and those files are uploaded to the job's results
+  so the process job does not re-simulate them; an all-cached plan submits
+  nothing. Manifests are written per experiment (`<line>__<exp>.json`).
+- `nat.py down` keeps the gateway whenever the Batch job listing fails
+  (unknown is not empty).
 - Per-chunk memory at posting_div 8 scales with traces x samples per chunk
   (greenland_westcoast p3_2016 exceeded 110 GB locally); size the VM by
   memory and set `--memory-mib` near the VM's size so Batch never packs two

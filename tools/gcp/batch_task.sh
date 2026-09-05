@@ -42,18 +42,32 @@ done
 t2=$(date +%s)
 
 touch .marker
+# publish: mirror new outputs/ files to results/, .npz before .json so a
+# chunk's json (the cache-hit signal) never lands before its data. Runs
+# every 60 s while the runner works and once more at exit, so a grouped
+# task that is preempted or fails late keeps the chunks it finished.
+publish() {
+  for ext in npz json '*'; do
+    find outputs -type f -name "*.$ext" -newer .marker ! -path 'outputs/cache/*' 2>/dev/null | while read -r f; do
+      [ -f "$R/$f" ] && [ ! "$f" -nt "$R/$f" ] && continue
+      mkdir -p "$R/$(dirname "$f")"; cp "$f" "$R/$f"
+    done
+  done
+}
+trap publish EXIT
 case "$mode" in
   simulate) uv run --no-sync python tools/run_basal_clutter.py --config "$CONFIG" \
-              --line "$line" --simulate-only "$pass" ;;
+              --line "$line" --simulate-only "$pass" & ;;
   process)  uv run --no-sync python tools/run_basal_clutter.py --config "$CONFIG" \
-              --line "$line" ;;
+              --line "$line" & ;;
   *) echo "unknown mode $mode" >&2; exit 2 ;;
 esac
+runner=$!
+while kill -0 "$runner" 2>/dev/null; do sleep 60; publish; done
+wait "$runner"; rc=$?
 t3=$(date +%s)
-
-find outputs -type f -newer .marker ! -path 'outputs/cache/*' | while read -r f; do
-  mkdir -p "$R/$(dirname "$f")"; cp "$f" "$R/$f"
-done
+publish
+[ "$rc" -eq 0 ] || { echo "runner exited $rc (published what finished)" >&2; exit "$rc"; }
 t4=$(date +%s)
 mkdir -p "$R/timing"
 printf '{"task": %d, "mode": "%s", "line": "%s", "pass": "%s", "host": "%s", "env_s": %d, "data_s": %d, "run_s": %d, "upload_s": %d}\n' \

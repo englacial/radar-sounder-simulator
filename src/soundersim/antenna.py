@@ -173,7 +173,8 @@ def _array_directivity_scale(tx_weights, rx_weights, spacing_lam,
                              directivity_db):
     q = element_power_exponent(directivity_db)
     d_tx = _side_directivity(tx_weights, spacing_lam, q)
-    d_rx = _side_directivity(rx_weights, spacing_lam, q)
+    d_rx = (d_tx if rx_weights == tx_weights
+            else _side_directivity(rx_weights, spacing_lam, q))
     return float((d_tx * d_rx) ** 0.25)
 
 

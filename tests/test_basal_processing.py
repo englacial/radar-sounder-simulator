@@ -200,3 +200,27 @@ def test_chunk_digests_forwards_the_hypothesis_knobs(tmp_path):
     assert set(d) == {rid}
     with pytest.raises(FileNotFoundError):    # knobs dropped = old bug
         rbc.chunk_digests(p, tmp_path, 1, 18.61, True)
+
+
+def test_fixed_angle_cache_replay_reproduces_the_powers():
+    """PR #2 review finding 1: the powers rebuilt from cached focused stacks
+    must equal the fresh ones -- the looks come from the recorded chain."""
+    from types import SimpleNamespace
+    rbc.activate_line("antarctica_getz")
+    n, nb = 64, 16
+    s = np.arange(n) * (29.6 / 8)
+    rng = np.random.default_rng(12)
+    field = (rng.normal(size=(n, nb, 2))
+             + 1j * rng.normal(size=(n, nb, 2))).astype(np.complex64)
+    nav = np.column_stack([np.full(n, -75.0), -105.0 + s / 111e3,
+                           np.full(n, 9000.0)])
+    p = dict(lam=1.5, s_sim=s, posting_div=8,
+             bot_sim=np.full(n, 2 * 9600 / C), surf_sim=np.full(n, 2 * 9000 / C),
+             base=SimpleNamespace(nav_llh=nav))
+    sim = dict(field=field, twtt=2 * 9000 / C + np.arange(nb) * 2e-8)
+    fresh = rbc.process_standard(p, sim, focus_aperture="fixed_angle")
+    assert fresh["chain"]["n_looks_sim"] > rbc.N_LOOKS_SIM
+    replay = rbc._proc_from_stacks(fresh["Fs"], fresh["Fb"], fresh["twtt"],
+                                   fresh["chain"])
+    for name in ("P", "Ps", "Pb"):
+        np.testing.assert_array_equal(replay[name], fresh[name])
