@@ -70,10 +70,17 @@ def up(region=REGION):
 
 
 def active_jobs(region=REGION, prefix=JOB_PREFIX):
-    """Names of soundersim Batch jobs still queued/scheduled/running."""
-    out = _run("batch", "jobs", "list", f"--location={region}",
-               "--format=json", check=False).stdout or "[]"
-    return [j["name"].rsplit("/", 1)[-1] for j in json.loads(out)
+    """Names of soundersim Batch jobs still queued/scheduled/running, or
+    None when the listing itself failed (unknown != empty)."""
+    r = _run("batch", "jobs", "list", f"--location={region}",
+             "--format=json", check=False)
+    if r.returncode != 0:
+        return None
+    try:
+        jobs = json.loads(r.stdout or "[]")
+    except ValueError:
+        return None
+    return [j["name"].rsplit("/", 1)[-1] for j in jobs
             if prefix in j["name"].rsplit("/", 1)[-1]
             and j.get("status", {}).get("state") in
             ("QUEUED", "SCHEDULED", "RUNNING")]
@@ -85,6 +92,11 @@ def down(region=REGION, force=False):
     if not (st["router"] or st["nat"]):
         return True
     busy = active_jobs(region)
+    if busy is None and not force:
+        print("WARNING: NAT left up: could not list Batch jobs (auth/API), "
+              "so another job may still need it -- rerun `nat.py down` "
+              "when the listing works, or --force", flush=True)
+        return False
     if busy and not force:
         print(f"WARNING: NAT left up: jobs still active {busy} -- run "
               "`tools/gcp/nat.py down` when they finish", flush=True)

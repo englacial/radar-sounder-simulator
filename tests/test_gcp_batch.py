@@ -1,5 +1,6 @@
 """Pure-Python pieces of the Cloud Batch fan-out (tools/gcp) and the chunk
 cache-hit rule they rely on."""
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -137,8 +138,9 @@ def test_compare_metrics_flattens_and_filters(tmp_path):
                       "haps_bed_visibility": 3.0, "wall_s": 9.0}}
     pa, pb = tmp_path / "a.json", tmp_path / "b.json"
     pa.write_text(json.dumps(ma)), pb.write_text(json.dumps(mb))
-    rows, n = compare_runs.cmp_metrics(pa, pb, ["midcol", "bed_visibility"])
-    assert n == 3
+    rows, n, problems = compare_runs.cmp_metrics(
+        pa, pb, ["midcol", "bed_visibility"])
+    assert n == 3 and problems == []
     assert rows == [("clutter_x/sim/midcol_rel_surf_db", -30.0, -30.5, 0.5)]
 
 
@@ -197,3 +199,135 @@ def test_projection_defaults_and_pass_classes():
     secs = 10 * (pricing.DEFAULT_PREP_S + 6 * pricing.DEFAULT_CHUNK_S["heavy"])
     assert vmh == pytest.approx(secs / 3600 * (1 + pricing.OVERHEAD))
     assert usd == pytest.approx(vmh * 0.3144)
+
+
+# -------------------------------------------------- PR #2 review findings
+from types import SimpleNamespace  # noqa: E402
+
+
+def test_budget_counts_elapsed_running_vm_time(monkeypatch):
+    """Finding 2: a VM that runs for an hour is billed for an hour even
+    when no task record has been written yet."""
+    clock = SimpleNamespace(now=0.0)
+    deleted = []
+
+    def gs(*args, **kwargs):
+        if args[:3] == ("batch", "jobs", "delete"):
+            deleted.append(args)
+            return ""
+        state = "RUNNING" if clock.now < 3600 else "FAILED"
+        return json.dumps({"status": {"state": state}})
+    monkeypatch.setattr(batch_launch, "gs", gs)
+    monkeypatch.setattr(batch_launch.time, "time", lambda: clock.now)
+    monkeypatch.setattr(batch_launch.time, "sleep",
+                        lambda s: setattr(clock, "now", clock.now + s))
+    monkeypatch.setattr(batch_launch, "job_task_seconds", lambda *a: 0.0)
+    monkeypatch.setattr(batch_launch, "running_vms", lambda *a: 1)
+    state, vmh = batch_launch.wait("job", poll_s=600, rate=1.0,
+                                   prefix="unused", budget=0.5,
+                                   guard_every_s=600)
+    assert state == "BUDGET_KILLED" and deleted
+    assert vmh > 0.5
+
+
+def test_failed_deletion_is_not_reported_as_a_kill(monkeypatch):
+    """Finding 3: an unconfirmed delete returns an explicit failure state."""
+    def gs(*args, **kwargs):
+        if args[:3] == ("batch", "jobs", "describe"):
+            return json.dumps({"status": {"state": "RUNNING"}})
+        return None    # delete failed
+    monkeypatch.setattr(batch_launch, "gs", gs)
+    monkeypatch.setattr(batch_launch.time, "sleep", lambda s: None)
+    monkeypatch.setattr(batch_launch, "job_task_seconds", lambda *a: 3600.0)
+    monkeypatch.setattr(batch_launch, "running_vms", lambda *a: 1)
+    state, _ = batch_launch.wait("job", rate=1.0, prefix="unused", budget=0.5)
+    assert state == "BUDGET_KILL_FAILED"
+
+
+def test_nat_preserved_when_job_listing_fails(monkeypatch):
+    """Finding 4: an unknown job state never justifies deleting the NAT."""
+    deleted = []
+
+    def run(*args, **kwargs):
+        if args[:3] == ("batch", "jobs", "list"):
+            return SimpleNamespace(returncode=1, stdout="", stderr="API down")
+        if "delete" in args:
+            deleted.append(args)
+        return SimpleNamespace(returncode=0, stdout="True\n", stderr="")
+    monkeypatch.setattr(nat, "_run", run)
+    assert nat.active_jobs() is None
+    assert nat.down() is False
+    assert not deleted
+
+
+def test_ledger_reservation_is_replaced_by_the_measured_cost(tmp_path):
+    led = tmp_path / "ledger.json"
+    batch_launch.ledger_set("j1", {"usd": 20.0, "state": "RESERVED"}, led)
+    batch_launch.ledger_set("j2", {"usd": 5.0, "state": "SUCCEEDED"}, led)
+    assert batch_launch.ledger_total(led) == pytest.approx(25.0)
+    batch_launch.ledger_set("j1", {"usd": 12.5, "state": "SUCCEEDED"}, led)
+    assert batch_launch.ledger_total(led) == pytest.approx(17.5)
+    assert [e["job"] for e in json.loads(led.read_text())] == ["j2", "j1"]
+
+
+def test_projection_counts_each_tasks_chunks_and_process_tasks(monkeypatch):
+    """Finding 7: a 2-chunk task is two chunks, a process task is not free."""
+    a = argparse.Namespace(config=str(ROOT / "config/experiments/pilot.yaml"),
+                           chunks_per_task=6, no_external_ip=False,
+                           force_budget=False, max_run_min=120)
+    two = [("simulate", "no_such_line", "dc8_2014_0km:3,4", "o")]
+    six = [("simulate", "no_such_line", "dc8_2014_0km:0,1,2,3,4,5", "o")]
+    v2, _ = batch_launch.projection(a, two, 1.0)
+    v6, _ = batch_launch.projection(a, six, 1.0)
+    prep, per = pricing.DEFAULT_PREP_S, pricing.DEFAULT_CHUNK_S["heavy"]
+    assert v2 == pytest.approx((prep + 2 * per) / 3600 * (1 + pricing.OVERHEAD))
+    assert v6 == pytest.approx((prep + 6 * per) / 3600 * (1 + pricing.OVERHEAD))
+    vp, up = batch_launch.projection(
+        a, [("process", "no_such_line", "-", "o")], 1.0)
+    assert vp > 0 and up > 0
+    with pytest.raises(SystemExit):   # pass-level task, no manifest
+        batch_launch.projection(
+            a, [("simulate", "no_such_line", "dc8_2014_0km", "o")], 1.0)
+
+
+def test_locally_cached_chunk_is_skipped_only_if_its_files_exist(
+        monkeypatch, tmp_path):
+    """Finding 6: a manifest 'cached' flag without local files is a task;
+    with files it is skipped and handed back for upload."""
+    import run_altitude_comparison as rac
+    import run_basal_clutter as rbc
+    line, outdir = "antarctica_getz", "outputs/antarctica_getz/pilot"
+    man = tmp_path / "outputs/gcp/chunks"
+    man.mkdir(parents=True)
+    (man / f"{line}.json").write_text(json.dumps({
+        "pass": {"n_chunks": 2, "cached": [True, True],
+                 "rids": ["absent", "present"]}}))
+    (tmp_path / outdir / "runs").mkdir(parents=True)
+    for ext in ("npz", "json"):
+        (tmp_path / outdir / "runs" / f"present.{ext}").write_bytes(b"x")
+    monkeypatch.setattr(batch_launch, "ROOT", tmp_path)
+    monkeypatch.setattr(rbc, "run", lambda **kw: ["pass"])
+    monkeypatch.setattr(rbc, "OUT_DEFAULT", rbc.ROOT / "outputs" / line)
+    cached = []
+    tasks = batch_launch.pass_tasks(
+        str(ROOT / "config/experiments/pilot.yaml"), [line], per_chunk=True,
+        cached_out=cached)
+    assert [t[2] for t in tasks] == ["pass:0"]
+    assert len(cached) == 1 and cached[0][0] == outdir
+    assert sorted(f.name for f in cached[0][1]) == ["present.json",
+                                                    "present.npz"]
+
+
+def test_compare_metrics_reports_missing_and_nonfinite(tmp_path):
+    ma = {"metrics": {"clutter_x": {"sim": {"midcol_rel_surf_db": -30.0}},
+                      "clutter_y": {"sim": {"midcol_rel_surf_db": float("nan")}},
+                      "only_cloud_bed_visibility": 1.0}}
+    mb = {"metrics": {"clutter_x": {"sim": {"midcol_rel_surf_db": -30.0}},
+                      "clutter_y": {"sim": {"midcol_rel_surf_db": -31.0}}}}
+    pa, pb = tmp_path / "a.json", tmp_path / "b.json"
+    pa.write_text(json.dumps(ma)), pb.write_text(json.dumps(mb))
+    rows, n, problems = compare_runs.cmp_metrics(
+        pa, pb, ["midcol", "bed_visibility"])
+    assert rows == [] and n == 2
+    assert sorted(p[0] for p in problems) == [
+        "clutter_y/sim/midcol_rel_surf_db", "only_cloud_bed_visibility"]

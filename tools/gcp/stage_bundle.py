@@ -84,8 +84,12 @@ def main():
         files, manifest = line_inputs(a.config, line)
         size = sum((ROOT / f).stat().st_size for f in files)
         (mdir / f"{line}.txt").write_text("".join(f + "\n" for f in files))
-        # chunk manifest {pass: {rids, cached, n_chunks}} for --per-chunk
-        (cdir / f"{line}.json").write_text(json.dumps(manifest, indent=1))
+        # chunk manifest {pass: {rids, cached, n_chunks}} for --per-chunk,
+        # bound to the experiment (pilot vs full plans differ) and also under
+        # the plain line name for older callers
+        exp = Path(a.config).stem
+        for name in (f"{line}__{exp}.json", f"{line}.json"):
+            (cdir / name).write_text(json.dumps(manifest, indent=1))
         print(f"{line}: {len(files)} files, {size / 1e9:.2f} GB, "
               f"{sum(m['n_chunks'] for m in manifest.values())} chunks",
               flush=True)

@@ -1330,13 +1330,10 @@ def process_standard(p, sim, focus_aperture="alias_limited",
     caught = sorted({str(w.message)[:200] for w in wlist})
     Fs, Fb = layers
 
-    def look(P):
-        return ndimage.uniform_filter1d(P, n_look, axis=0, mode="nearest")
-
-    P = look(np.abs(Fs + Fb) ** 2)
-    Ps, Pb = look(np.abs(Fs) ** 2), look(np.abs(Fb) ** 2)
     # Fs/Fb (complex64, the focuser's native output) ride along so the
-    # proc cache can persist the exact source of P/Ps/Pb.
+    # proc cache can persist the exact source of P/Ps/Pb; the powers are
+    # built by _proc_from_stacks from the recorded chain (n_looks_sim), the
+    # same path a cache replay takes.
     chain = {
         "real_chain": REAL_CHAIN,
         "focus_aperture": focus_aperture,
@@ -1366,8 +1363,7 @@ def process_standard(p, sim, focus_aperture="alias_limited",
                 "surface_alias_ratio); g6 channel combine inside the sim "
                 "array pattern",
     }
-    return {"P": P, "Ps": Ps, "Pb": Pb, "twtt": twtt, "chain": chain,
-            "Fs": Fs, "Fb": Fb}
+    return _proc_from_stacks(Fs, Fb, twtt, chain)
 
 
 # ------------------------------------------------------------------------
@@ -1454,9 +1450,14 @@ def _digests_current(stored, runs_dir):
 
 
 def _proc_from_stacks(Fs, Fb, twtt, chain):
+    """Power products from focused stacks + the recorded chain: the ONE
+    place looks are applied, for fresh processing and cache replay alike
+    (``n_looks_sim`` in the chain; the fixed_angle rule sets it above
+    N_LOOKS_SIM)."""
+    n_look = int(chain.get("n_looks_sim", N_LOOKS_SIM))
+
     def look(P):
-        return ndimage.uniform_filter1d(P, N_LOOKS_SIM, axis=0,
-                                        mode="nearest")
+        return ndimage.uniform_filter1d(P, n_look, axis=0, mode="nearest")
     return {"P": look(np.abs(Fs + Fb) ** 2), "Ps": look(np.abs(Fs) ** 2),
             "Pb": look(np.abs(Fb) ** 2), "twtt": twtt, "chain": chain,
             "Fs": Fs, "Fb": Fb}
@@ -1890,9 +1891,10 @@ def _chunk_facets_estimate(p, rows):
         return 0
     cell = 0.5 * (abs(base.transform.a) + abs(base.transform.e))
     spacing = float(p.get("spacing") or cell)
-    tr = Transformer.from_crs("EPSG:4326", base.crs, always_xy=True)
-    nav = base.nav_llh[rows]
-    px, py = tr.transform(nav[:, 1], nav[:, 0])
+    if "_nav_xy" not in p:   # project the pass nav once, not per trial
+        tr = Transformer.from_crs("EPSG:4326", base.crs, always_xy=True)
+        p["_nav_xy"] = tr.transform(base.nav_llh[:, 1], base.nav_llh[:, 0])
+    px, py = p["_nav_xy"][0][rows], p["_nav_xy"][1][rows]
     pad = reach["ct_m"] + 100.0
     ny, nx = base.dem.shape
     cols, rws = (~base.transform) * (
@@ -3737,7 +3739,9 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
             p_const["gamma_rssnr"] = False
             sim_c = simulate_pass(p_const, runs_const, att, surf_rough,
                                   False, gfix=grazing_fix)
-            proc_c = process_standard(preps[key], sim_c) if proc else None
+            proc_c = (process_standard(
+                preps[key], sim_c, focus_aperture=focus_aperture,
+                focus_half_angle_deg=focus_half_angle_deg) if proc else None)
             a_const = analyze_pass(preps[key], sim_c, proc=proc_c)
             corr_stats[key], corr_series[key] = bed_profile_correlations(
                 preps[key], analyses[key], a_const, gmap, axis)
@@ -3769,7 +3773,10 @@ def run(segment="pilot", n_traces=None, att=rac.ATT_DB_PER_KM,
                                  axis=axis, fine_posting=proc, dgn_seed=seed)
                 s_ab = simulate_pass(p_ab, runs_ab, att, surf_rough, force,
                                      gfix=grazing_fix)
-                proc_ab = process_standard(p_ab, s_ab) if proc else None
+                proc_ab = (process_standard(
+                    p_ab, s_ab, focus_aperture=focus_aperture,
+                    focus_half_angle_deg=focus_half_angle_deg)
+                    if proc else None)
                 pr[key], sm[key] = p_ab, s_ab
                 an[key] = analyze_pass(p_ab, s_ab, proc=proc_ab)
             ab_rows.append((pr, an, label, sm))

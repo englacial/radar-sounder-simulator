@@ -35,9 +35,14 @@ REGION = "us-central1"
 
 
 def gs(*args, capture=False, check=True):
+    """gcloud wrapper. With ``capture`` returns stdout, or None when the
+    command failed (so a failed delete/describe is never mistaken for an
+    empty success)."""
     r = subprocess.run(["gcloud", *args], text=True, check=check,
                        capture_output=capture)
-    return r.stdout if capture else None
+    if not capture:
+        return None
+    return r.stdout if r.returncode == 0 else None
 
 
 def split_prefix(prefix):
@@ -56,8 +61,27 @@ def group_chunks(indices, per_task):
             for i in range(0, len(indices), per_task)]
 
 
-def pass_tasks(config, lines, per_chunk, chunks_per_task=1):
-    """[(mode, line, pass[:chunks], outdir)] for the simulate job."""
+def manifest_path(line, config):
+    """The staged chunk manifest, bound to the experiment when available."""
+    d = ROOT / "outputs" / "gcp" / "chunks"
+    exp = Path(config).stem
+    for name in (f"{line}__{exp}.json", f"{line}.json"):
+        if (d / name).exists():
+            return d / name
+    return d / f"{line}__{exp}.json"
+
+
+def local_chunk_files(outdir, rid):
+    """(npz, json) paths of a locally cached chunk, or None if incomplete."""
+    fs = [ROOT / outdir / "runs" / f"{rid}.{ext}" for ext in ("npz", "json")]
+    return fs if all(f.exists() for f in fs) else None
+
+
+def pass_tasks(config, lines, per_chunk, chunks_per_task=1, cached_out=None):
+    """[(mode, line, pass[:chunks], outdir)] for the simulate job. A chunk
+    the manifest marks cached is skipped ONLY if its files exist locally;
+    those files are listed in ``cached_out`` (if given) so the launcher can
+    upload them where the workers and the process job will look."""
     from clutter_spec import load_spec
     import run_basal_clutter as rbc
     spec = load_spec(config)
@@ -71,14 +95,20 @@ def pass_tasks(config, lines, per_chunk, chunks_per_task=1):
         if per_chunk:
             # chunk counts need the prepped pass: stage_bundle.py saves the
             # --dry-run manifest {pass: {n_chunks, cached, ...}}
-            mp = ROOT / "outputs" / "gcp" / "chunks" / f"{line}.json"
+            mp = manifest_path(line, config)
             if not mp.exists():
                 raise SystemExit(f"--per-chunk needs {mp} (run "
                                  "tools/gcp/stage_bundle.py first)")
             man = json.loads(mp.read_text())
             for key in order:
-                todo = [ci for ci in range(man[key]["n_chunks"])
-                        if not man[key]["cached"][ci]]
+                todo = []
+                for ci in range(man[key]["n_chunks"]):
+                    files = (local_chunk_files(outdir, man[key]["rids"][ci])
+                             if man[key]["cached"][ci] else None)
+                    if files is None:
+                        todo.append(ci)
+                    elif cached_out is not None:
+                        cached_out.append((outdir, files))
                 for grp in group_chunks(todo, chunks_per_task):
                     tasks.append(("simulate", line, f"{key}:{grp}", outdir))
             continue
@@ -178,6 +208,40 @@ def over_budget(spent_before, job_usd, budget):
     return budget is not None and spent_before + job_usd > budget
 
 
+def ledger_set(job, entry, path=LEDGER):
+    """Replace (or add) the ledger entry for ``job``: a RESERVED projection
+    at submit becomes the measured cost at the end, so concurrent launchers
+    see each other's commitments in ledger_total()."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    doc = json.loads(Path(path).read_text()) if Path(path).exists() else []
+    doc = [e for e in doc if e.get("job") != job] + [dict(entry, job=job)]
+    Path(path).write_text(json.dumps(doc, indent=1))
+
+
+def delete_job(job, attempts=3, pause_s=20):
+    """Delete ``job`` and confirm it: True only when the delete command
+    succeeded or a describe shows it gone / being deleted."""
+    for i in range(attempts):
+        out = gs("batch", "jobs", "delete", job, f"--location={REGION}",
+                 "--quiet", capture=True, check=False)
+        if out is not None:
+            return True
+        d = gs("batch", "jobs", "describe", job, f"--location={REGION}",
+               "--format=json", capture=True, check=False)
+        if d is None:
+            return True     # not found any more
+        try:
+            if json.loads(d)["status"]["state"] in ("DELETION_IN_PROGRESS",
+                                                   "CANCELLED", "FAILED",
+                                                   "SUCCEEDED"):
+                return True
+        except (ValueError, KeyError):
+            pass
+        if i < attempts - 1:
+            time.sleep(pause_s)
+    return False
+
+
 def wait(job, poll_s=30, rate=None, prefix=None, budget=None,
          spent_before=0.0, guard_every_s=600):
     """Poll to a terminal state; with ``rate`` also tally this job's spend
@@ -185,7 +249,8 @@ def wait(job, poll_s=30, rate=None, prefix=None, budget=None,
     ``spent_before`` + this job would exceed ``budget``. Returns
     (state, job_vm_hours)."""
     t0 = time.time()
-    last_guard, vmh = -1e9, 0.0
+    last_guard, vmh = None, 0.0
+    vm_secs_seen = 0.0    # running VMs x elapsed, accumulated every guard tick
     while True:
         out = gs("batch", "jobs", "describe", job, f"--location={REGION}",
                  "--format=json", capture=True, check=False)
@@ -199,24 +264,38 @@ def wait(job, poll_s=30, rate=None, prefix=None, budget=None,
         counts = d["status"].get("taskGroups", {}).get("group0", {}).get(
             "counts", {})
         line = f"  {time.time() - t0:6.0f} s  {state}  {counts}"
-        if rate is not None and time.time() - last_guard >= guard_every_s:
-            last_guard = time.time()
-            secs = job_task_seconds(job, prefix)
-            vmh = (secs + running_vms(job) * guard_every_s * 0.5) / 3600.0
+        now = time.time()
+        if rate is not None and (last_guard is None
+                                 or now - last_guard >= guard_every_s):
+            # VM lifetime is what is billed: accumulate running VMs x elapsed
+            # (covers failed / preempted attempts that never write a timing
+            # record) and take the larger of that and the task records
+            nvm = running_vms(job)
+            vm_secs_seen += nvm * (now - (last_guard if last_guard is not None
+                                          else t0))
+            last_guard = now
+            secs = max(job_task_seconds(job, prefix), vm_secs_seen)
+            vmh = secs / 3600.0
             usd = vmh * rate
-            line += f"  spend ~${usd:.2f} (+${spent_before:.2f} before)"
+            line += (f"  spend ~${usd:.2f} (+${spent_before:.2f} before; "
+                     f"{nvm} VMs)")
             if over_budget(spent_before, usd, budget):
                 print(line, flush=True)
                 print(f"BUDGET: ${spent_before + usd:.2f} > ${budget:.2f}: "
                       f"deleting {job}", flush=True)
-                gs("batch", "jobs", "delete", job, f"--location={REGION}",
-                   "--quiet", check=False)
-                return "BUDGET_KILLED", vmh
+                if delete_job(job):
+                    return "BUDGET_KILLED", vmh
+                print(f"BUDGET: could not confirm deletion of {job}; "
+                      "delete it by hand (gcloud batch jobs delete)",
+                      flush=True)
+                return "BUDGET_KILL_FAILED", vmh
         print(line, flush=True)
         if state in ("SUCCEEDED", "FAILED", "CANCELLED",
                      "DELETION_IN_PROGRESS"):
             if rate is not None:
-                vmh = job_task_seconds(job, prefix) / 3600.0
+                vm_secs_seen += running_vms(job) * (time.time() - (
+                    last_guard if last_guard is not None else t0))
+                vmh = max(job_task_seconds(job, prefix), vm_secs_seen) / 3600.0
             return state, vmh
         time.sleep(poll_s)
 
@@ -264,7 +343,9 @@ def main():
                     help="print tasks + job json, submit nothing")
     a = ap.parse_args()
 
-    tasks = (pass_tasks(a.config, a.lines, a.per_chunk, a.chunks_per_task)
+    cached = []
+    tasks = (pass_tasks(a.config, a.lines, a.per_chunk, a.chunks_per_task,
+                        cached_out=cached)
              if a.mode == "simulate" else process_tasks(a.config, a.lines))
     if a.mode == "process" and not a.results_from:
         ap.error("--mode process needs --results-from <simulate job> ...")
@@ -292,6 +373,12 @@ def main():
     if a.dry:
         print(json.dumps(spec, indent=1))
         return
+    if not tasks:
+        print(f"nothing to do: every chunk is cached locally "
+              f"({len(cached)} files); no job submitted", flush=True)
+        return
+    if cached:
+        upload_cached(cached, a.prefix, job)
     if a.no_external_ip:
         # the NAT costs while it exists: bring it up here and ALWAYS tear it
         # down (finally) once this job is done -- so the launcher waits
@@ -302,14 +389,19 @@ def main():
         a.wait = True   # the guard lives in wait()
     try:
         submit(a, tasks, spec, job)
+        # reserve the projection so a concurrent launcher counts it
+        ledger_set(job, {"date": datetime.date.today().isoformat(),
+                         "machine_type": a.machine_type, "rate": rate,
+                         "vm_hours": round(proj_vmh, 2),
+                         "usd": round(proj_usd, 2), "state": "RESERVED"})
         if a.wait:
             state, vmh = wait(job, rate=rate, prefix=a.prefix,
                               budget=a.budget_usd, spent_before=spent)
             usd = vmh * rate
-            ledger_add({"job": job, "date": datetime.date.today().isoformat(),
-                        "machine_type": a.machine_type, "rate": rate,
-                        "vm_hours": round(vmh, 2), "usd": round(usd, 2),
-                        "state": state})
+            ledger_set(job, {"date": datetime.date.today().isoformat(),
+                             "machine_type": a.machine_type, "rate": rate,
+                             "vm_hours": round(vmh, 2), "usd": round(usd, 2),
+                             "state": state})
             print(f"final state: {state}; {vmh:.1f} VM-h ~${usd:.2f}; "
                   f"ledger total ${ledger_total():.2f}", flush=True)
     finally:
@@ -317,30 +409,73 @@ def main():
             nat.down()   # skipped with a warning while other jobs run
 
 
+def task_chunk_count(line, key, cs, config):
+    """Chunks a task simulates: the listed indices, else the whole pass
+    from the staged manifest, else None (unknown)."""
+    if cs:
+        return len(cs.split(","))
+    mp = manifest_path(line, config)
+    if mp.exists():
+        man = json.loads(mp.read_text())
+        if key in man:
+            return man[key]["n_chunks"] - sum(man[key]["cached"])
+    return None
+
+
 def projection(a, tasks, rate):
-    """Projected (VM-hours, USD) for the simulate tasks from past records
-    (pricing.estimate) -- process tasks are not projected (0)."""
+    """Projected (VM-hours, USD): each simulate task costs its pass
+    preparation plus ITS chunk count x the per-chunk estimate; each process
+    task costs the line's past process-task time (else a labelled 1 h
+    default). Raises when a pass-level task's chunk count is unknown and
+    --force-budget is not set."""
     import pricing
     from clutter_spec import load_spec
     kw = load_spec(a.config).to_run_kwargs()
     exp = kw.get("out_name") or kw["segment"]
-    counts, est = {}, {}
+    secs, notes = 0.0, []
     for mode, line, pk, _ in tasks:
-        if mode != "simulate":
+        if mode == "process":
+            past = [r.get("run_s", 0) for r in pricing.timing_records(
+                line, mode="process")]
+            t = (sorted(past)[len(past) // 2] if past
+                 else pricing.DEFAULT_PROCESS_S)
+            if not past:
+                notes.append(f"process {line}: no records, default "
+                             f"{pricing.DEFAULT_PROCESS_S / 3600:.1f} h")
+            secs += t
             continue
         key, _, cs = pk.partition(":")
-        n = len(cs.split(",")) if cs else a.chunks_per_task
-        counts[(line, key)] = counts.get((line, key), 0) + 1
-        if (line, key) not in est:
-            est[(line, key)] = pricing.estimate(line, exp, [key], n)[key]
-    vmh = usd = 0.0
-    for (line, key), ntask in counts.items():
-        v, u = pricing.project({key: ntask}, {key: est[(line, key)]},
-                               a.chunks_per_task, rate)
-        vmh += v
-        usd += u
-    return vmh, usd + (a.max_run_min / 60.0 * 0.044 if a.no_external_ip
-                       else 0.0)
+        n = task_chunk_count(line, key, cs, a.config)
+        if n is None:
+            if not getattr(a, "force_budget", False):
+                raise SystemExit(f"cannot project {line} {key}: no staged "
+                                 "manifest for a pass-level task (stage "
+                                 "first, or --force-budget)")
+            n, _ = a.chunks_per_task, notes.append(
+                f"{line} {key}: chunk count unknown, assumed "
+                f"{a.chunks_per_task}")
+        prep, per = pricing.estimate(line, exp, [key], n)[key]
+        secs += prep + n * per
+    for m in notes:
+        print(f"  projection note: {m}", flush=True)
+    vmh = secs / 3600.0 * (1.0 + pricing.OVERHEAD)
+    nat = (a.max_run_min / 60.0 * 0.044 if getattr(a, "no_external_ip", False)
+           else 0.0)
+    return vmh, vmh * rate + nat
+
+
+def upload_cached(cached, prefix, job):
+    """Put locally cached chunks where the workers and the process job copy
+    chunks from (results/<job>/<outdir>/runs/), so skipping them in the
+    task plan does not make the process job re-simulate them."""
+    by_dir = {}
+    for outdir, files in cached:
+        by_dir.setdefault(outdir, []).extend(str(f) for f in files)
+    for outdir, paths in by_dir.items():
+        gs("storage", "cp", "-n", "-q", *paths,
+           f"{prefix}/results/{job}/{outdir}/runs/")
+    print(f"uploaded {sum(len(v) for v in by_dir.values())} locally cached "
+          f"chunk files for the workers", flush=True)
 
 
 def submit(a, tasks, spec, job):
